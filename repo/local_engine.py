@@ -1,11 +1,19 @@
-# local_engine.py
-#
-# Pedagogical re-implementation of whestbench primitives in raw `whest` code.
-# Kept verbose on purpose so participants can read the full forward pass and
-# understand exactly what whestbench does for them under the hood.
-# Drift from whestbench is detected by tests/test_local_engine_parity.py.
-# Do NOT refactor this file to `from whestbench import ...` — see Issue #1
-# in the design spec for rationale.
+"""local_engine.py
+
+Pedagogical re-implementation of whestbench primitives using flopscope's
+NumPy-shaped API (``flopscope.numpy``).
+
+This module deliberately stays single-file and uses just the canonical
+flopscope idiom — ``import flopscope as flops; import flopscope.numpy as
+fnp`` — see ``docs/reference/code-patterns.md``. Most operations are
+``fnp.*`` calls; ``flops`` is only reached for ``BudgetContext``. We keep
+the surface intentionally narrow here for clarity, mirroring how
+participants will mostly write their code.
+
+Drift from whestbench is detected by ``tests/test_local_engine_parity.py``.
+Do NOT refactor this file to ``from whestbench import ...`` — see Issue #1
+in the design spec for rationale.
+"""
 
 from __future__ import annotations
 
@@ -20,13 +28,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # Friendly import guard: surface a clear "run `uv sync`" message instead of a
-# bare ImportError traceback if whestbench is not installed.
+# bare ImportError traceback if dependencies are missing.
 try:
-    import whest as we
+    import flopscope as flops
+    import flopscope.numpy as fnp
     from whestbench import MLP, BaseEstimator
 except ImportError as exc:  # pragma: no cover — exercised manually
     raise SystemExit(
-        "\n[whest-starterkit] Could not import `whest` / `whestbench`.\n"
+        "\n[whest-starterkit] Could not import `flopscope` / `whestbench`.\n"
         "Run `uv sync` from the repo root, then re-run this script.\n"
         f"(Original error: {exc})\n"
     ) from exc
@@ -35,14 +44,14 @@ except ImportError as exc:  # pragma: no cover — exercised manually
 def build_mlp(width: int, depth: int, seed: int = 0) -> MLP:
     """Return a square MLP with He-initialized N(0, 2/width) weights.
 
-    Deterministic given `seed`. Uses raw whest primitives only.
+    Deterministic given `seed`. Uses raw flopscope primitives only.
     """
     if width < 1 or depth < 1:
         raise ValueError(f"build_mlp requires width>=1 and depth>=1; got {width=}, {depth=}")
-    rng = we.random.default_rng(seed)
+    rng = fnp.random.default_rng(seed)
     scale = (2.0 / width) ** 0.5
     weights = [
-        we.array((rng.standard_normal((width, width)) * scale).astype(we.float32))
+        fnp.array((rng.standard_normal((width, width)) * scale).astype(fnp.float32))
         for _ in range(depth)
     ]
     return MLP(width=width, depth=depth, weights=weights)
@@ -52,20 +61,20 @@ def monte_carlo_layer_means(
     mlp: MLP,
     n_samples: int,
     seed: int = 0,
-) -> we.ndarray:
+) -> fnp.ndarray:
     """Forward `n_samples` N(0,1) inputs through `mlp.weights` and average per layer.
 
     Returns shape `(depth, width)` — same shape as `Estimator.predict` so the two
     can be subtracted directly.
     """
-    rng = we.random.default_rng(seed)
+    rng = fnp.random.default_rng(seed)
     width = mlp.width
-    x = we.array(rng.standard_normal((n_samples, width)).astype(we.float32))
+    x = fnp.array(rng.standard_normal((n_samples, width)).astype(fnp.float32))
     rows = []
     for w in mlp.weights:
-        x = we.maximum(we.matmul(x, w), 0.0)
-        rows.append(we.mean(x, axis=0))
-    return we.stack(rows, axis=0)
+        x = fnp.maximum(fnp.matmul(x, w), 0.0)
+        rows.append(fnp.mean(x, axis=0))
+    return fnp.stack(rows, axis=0)
 
 
 def compare_against_monte_carlo(
@@ -87,7 +96,7 @@ def compare_against_monte_carlo(
     expected_shape = (mlp.depth, mlp.width)
 
     try:
-        with we.BudgetContext(flop_budget=estimator_budget, quiet=True) as est_ctx:
+        with flops.BudgetContext(flop_budget=estimator_budget, quiet=True) as est_ctx:
             est_pred = estimator.predict(mlp, estimator_budget)
     except Exception as exc:
         import inspect
@@ -102,12 +111,12 @@ def compare_against_monte_carlo(
         )
         raise SystemExit(2) from exc
 
-    if not isinstance(est_pred, we.ndarray):
+    if not isinstance(est_pred, fnp.ndarray):
         print(
-            f"\n[whest-starterkit] predict() must return a `whest.ndarray`, "
+            f"\n[whest-starterkit] predict() must return a `flopscope.numpy.ndarray`, "
             f"got `{type(est_pred).__name__}`.\n"
-            f"Tip: use `import whest as we` and return `we.zeros(...)` or "
-            f"`we.array(...)`.\n"
+            f"Tip: use `import flopscope.numpy as fnp` and return `fnp.zeros(...)` or "
+            f"`fnp.array(...)`.\n"
             f"See docs/reference/estimator-contract.md\n"
         )
         raise SystemExit(2)
@@ -128,7 +137,7 @@ def compare_against_monte_carlo(
     print(header)
     print("-" * len(header))
     for n in sample_counts:
-        with we.BudgetContext(flop_budget=sampling_budget, quiet=True) as mc_ctx:
+        with flops.BudgetContext(flop_budget=sampling_budget, quiet=True) as mc_ctx:
             sampled = monte_carlo_layer_means(mlp, n, seed=seed)
-        mse = float(we.mean((est_pred - sampled) ** 2))
+        mse = float(fnp.mean((est_pred - sampled) ** 2))
         print(row(f"{n:,}", f"{mc_ctx.flops_used:,}", f"{estimator_flops:,}", f"{mse:.6f}"))

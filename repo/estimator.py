@@ -1,6 +1,6 @@
 """Your estimator. Edit `predict()`. Run `python estimator.py` to iterate.
 
-Stage 1 of the WhestBench ladder: just whest and the local engine. No CLI
+Stage 1 of the WhestBench ladder: just `flopscope` and the local engine. No CLI
 knowledge required. Once `predict()` returns something interesting, climb to
 Stage 2: `whest validate --estimator estimator.py`.
 """
@@ -10,15 +10,15 @@ import argparse
 import importlib.util
 from pathlib import Path
 
-import whest as we
+import flopscope.numpy as fnp
 from whestbench import MLP, BaseEstimator
 
 
 class Estimator(BaseEstimator):
-    def predict(self, mlp: MLP, budget: int) -> we.ndarray:
+    def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
         # TODO: replace this all-zeros baseline with your idea.
         _ = budget
-        return we.zeros((mlp.depth, mlp.width))
+        return fnp.zeros((mlp.depth, mlp.width))
 
 
 def _load_baseline(name: str) -> type[BaseEstimator]:

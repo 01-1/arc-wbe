@@ -26,7 +26,7 @@ Stage 1 uses one fixed MLP (`build_mlp(width=32, depth=6, seed=0)`). Stage 3 use
 Because `--runner local` runs in-process, `pdb` works:
 
 ```python
-def predict(self, mlp: MLP, budget: int) -> we.ndarray:
+def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
     import pdb; pdb.set_trace()
     ...
 ```

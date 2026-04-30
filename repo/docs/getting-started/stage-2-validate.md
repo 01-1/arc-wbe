@@ -13,7 +13,7 @@ If your estimator is contract-compliant, you'll see a green check. If not, the v
 ## What `whest validate` actually checks
 
 - `Estimator` class is importable from `estimator.py`
-- `predict(mlp, budget)` exists and returns `whest.ndarray`
+- `predict(mlp, budget)` exists and returns `flopscope.numpy.ndarray`
 - Returned shape is `(mlp.depth, mlp.width)`
 - No exceptions on edge MLPs (width=1, depth=1)
 

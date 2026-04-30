@@ -28,6 +28,15 @@ wheels = [
 ]
 
 [[package]]
+name = "flopscope"
+version = "0.2.0"
+source = { git = "https://github.com/AIcrowd/flopscope.git#8ed22a205aba62fcef9c0f6e31f11285935f8b44" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -381,15 +390,6 @@ wheels = [
 ]
 
 [[package]]
-name = "whest"
-version = "0.2.0"
-source = { git = "https://github.com/AIcrowd/whest.git#cf1f56a84226134770520b3c2cd7c693afa3a6c3" }
-dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-
-[[package]]
 name = "whest-starterkit"
 version = "0.1.0"
 source = { editable = "." }
@@ -404,7 +404,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "whestbench", git = "https://github.com/AIcrowd/whestbench.git?rev=6f7f09786fd07add4738667d12f6da43d486ce0e" }]
+requires-dist = [{ name = "whestbench", git = "https://github.com/AIcrowd/whestbench.git?rev=bd4d1e3cb328388b47cb287302730e73e1269181" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -415,11 +415,11 @@ dev = [
 [[package]]
 name = "whestbench"
 version = "0.2.0"
-source = { git = "https://github.com/AIcrowd/whestbench.git?rev=6f7f09786fd07add4738667d12f6da43d486ce0e#6f7f09786fd07add4738667d12f6da43d486ce0e" }
+source = { git = "https://github.com/AIcrowd/whestbench.git?rev=bd4d1e3cb328388b47cb287302730e73e1269181#bd4d1e3cb328388b47cb287302730e73e1269181" }
 dependencies = [
+    { name = "flopscope" },
     { name = "plotext" },
     { name = "rich" },
     { name = "threadpoolctl" },
     { name = "tqdm" },
-    { name = "whest" },
 ]

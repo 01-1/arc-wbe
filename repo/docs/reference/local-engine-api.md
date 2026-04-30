@@ -1,8 +1,8 @@
 # `local_engine` API
 
-`local_engine.py` is a pedagogical re-implementation of whestbench's MLP factory and Monte-Carlo simulator in raw `whest` code. You can read the whole file in 5 minutes — that's the point.
+`local_engine.py` is a pedagogical re-implementation of whestbench's MLP factory and Monte-Carlo simulator in raw `flopscope` code. You can read the whole file in 5 minutes — that's the point.
 
-> **Why pedagogical?** Stage 1 is about understanding the math. Re-implementing in raw whest means there's no library magic between you and the forward pass.
+> **Why pedagogical?** Stage 1 is about understanding the math. Re-implementing in raw flopscope means there's no library magic between you and the forward pass.
 
 ## `build_mlp(width, depth, seed=0) -> MLP`
 
@@ -15,7 +15,7 @@ mlp = build_mlp(width=32, depth=6, seed=0)
 
 Constraints: `width >= 1`, `depth >= 1`. Otherwise raises `ValueError`.
 
-## `monte_carlo_layer_means(mlp, n_samples, seed=0) -> we.ndarray`
+## `monte_carlo_layer_means(mlp, n_samples, seed=0) -> fnp.ndarray`
 
 Forwards `n_samples` independent N(0, 1) inputs through `mlp.weights` and returns the per-layer mean post-activation. Shape: `(mlp.depth, mlp.width)`.
 
