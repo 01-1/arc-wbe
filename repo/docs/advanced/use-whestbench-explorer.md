@@ -6,7 +6,7 @@
 
 ## 🎯 When to use this page
 
-When you want visual intuition about network behavior and where your estimator's error concentrates. The Explorer is **optional** — it is not the submission interface, and your leaderboard score never depends on it.
+When you want visual intuition about network behavior and where your estimator's error concentrates. The Explorer is optional: it is not the submission interface, and your leaderboard score never depends on it.
 
 ## 🚀 Open it
 
