@@ -69,16 +69,82 @@ Or check [docs/troubleshooting/](docs/troubleshooting/).
 
 ## 📚 Documentation
 
-The ladder above is the tutorial trail. Past Stage 1, the docs split into five jobs — pick whichever matches your need. Full map and guided reading paths at **[docs/](docs/README.md)**.
+The ladder above is the tutorial trail. Past Stage 1, the docs split into six jobs — pick whichever matches your need. Full map and guided reading paths at **[docs/](docs/README.md)**.
 
-|     | Section | When to read |
-|---|---|---|
-| 🪜 | **[Tutorial](docs/getting-started/)** | Climbing the 6-stage ladder above. |
-| 📖 | **[Concepts](docs/concepts/)** | Why this challenge exists, what's being scored, how ground truth works. |
-| 🔧 | **[How-to](docs/how-to/)** | Recipes: write an estimator, debug, optimize, submit. |
-| 📚 | **[Reference](docs/reference/)** | Exact contracts: [estimator API](docs/reference/estimator-contract.md), [score report fields](docs/reference/score-report-fields.md), [CLI](docs/reference/cli-reference.md), [flopscope primer](docs/reference/flopscope-primer.md). |
-| 🚑 | **[Troubleshooting](docs/troubleshooting/)** | When something breaks: [common errors](docs/troubleshooting/common-participant-errors.md), [FAQ](docs/troubleshooting/faq.md). |
-| 🔬 | **[Advanced](docs/advanced/)** | [Visualizer](docs/advanced/use-whestbench-explorer.md), [profiler](docs/advanced/profile-simulation.md). |
+<details>
+<summary>🪜 <b><a href="docs/getting-started/">Tutorial</a></b> — Climb the 6-stage ladder above</summary>
+
+- [Stage 1: Iterate locally](docs/getting-started/stage-1-standalone.md) — The math; `flopscope` + `local_engine.py`, no `whest` CLI.
+- [Stage 2: Validate the contract](docs/getting-started/stage-2-validate.md) — Class resolves, `setup()` runs, shape, finite values.
+- [Stage 3: Run locally](docs/getting-started/stage-3-run-local.md) — Real scoring against the grader's MLP suite, in-process.
+- [Stage 4: Subprocess runner](docs/getting-started/stage-4-run-subprocess.md) — Catches state-bleed, RNG re-use, dirty imports.
+- [Stage 5: Docker runner](docs/getting-started/stage-5-run-docker.md) — Production-equivalent grader env. **Coming soon.**
+- [Stage 6: Package your submission](docs/getting-started/stage-6-package.md) — Build the AIcrowd submission tarball.
+
+</details>
+
+<details>
+<summary>📖 <b><a href="docs/concepts/">Concepts</a></b> — Why this challenge exists, what's measured, how ground truth works</summary>
+
+- [Problem Setup](docs/concepts/problem-setup.md) — MLP architecture, He init, the research question, further reading.
+- [Scoring Model](docs/concepts/scoring-model.md) — Pipeline diagram, `primary_score` / `secondary_score` formulas, calibration table.
+- [Ground Truth](docs/concepts/ground-truth.md) — How the evaluator computes reference values via Monte Carlo.
+
+</details>
+
+<details>
+<summary>🔧 <b><a href="docs/how-to/">How-to</a></b> — Recipes: write, debug, optimize, submit</summary>
+
+**Writing and iterating**
+- [Write an Estimator](docs/how-to/write-an-estimator.md) — Minimal structure, contract checklist, common first failure.
+- [Inspect MLP Structure](docs/how-to/inspect-mlp-structure.md) — Traversing the `MLP` object.
+- [Validate, Run, Package](docs/how-to/validate-run-package.md) — The standard local loop, plus a useful-flags table.
+- [Use Evaluation Datasets](docs/how-to/use-evaluation-datasets.md) — Pre-create datasets for fast, reproducible iteration.
+
+**Optimizing**
+- [Algorithm Ideas](docs/how-to/algorithm-ideas.md) — Monte Carlo, mean propagation, covariance, hybrid, plus open directions.
+- [Manage FLOP Budget](docs/how-to/manage-flop-budget.md) — Where your FLOPs go; line-by-line walkthrough of `examples/02`.
+- [Performance Tips](docs/how-to/performance-tips.md) — Matmul placement, free ops, env-var knobs.
+
+**Debugging and shipping**
+- [Debugging Checklist](docs/how-to/debugging-checklist.md) — Tiered procedure when something feels wrong.
+- [Pre-Submission Checklist](docs/how-to/pre-submission-checklist.md) — One-screen gate before you click submit.
+
+</details>
+
+<details>
+<summary>📚 <b><a href="docs/reference/">Reference</a></b> — Exact contracts, schemas, lookup material</summary>
+
+**Estimator API**
+- [Estimator Contract](docs/reference/estimator-contract.md) — `predict`/`setup`/`teardown` signatures, `SetupContext`, failure-semantics table, lifecycle diagram.
+- [Code Patterns](docs/reference/code-patterns.md) — `flopscope` patterns, ReLU expectation derivation, when the Gaussian assumption breaks.
+- [<code>local_engine</code> API](docs/reference/local-engine-api.md) — Stage 1's MLP factory and Monte-Carlo helpers.
+
+**FLOP and scoring details**
+- [Flopscope Primer](docs/reference/flopscope-primer.md) — `BudgetContext` ownership, attribute reference, op cost table.
+- [Score Report Fields](docs/reference/score-report-fields.md) — Every field you'll see in `whest run` output.
+
+**CLI**
+- [CLI Reference](docs/reference/cli-reference.md) — Pointer at the upstream `whest` CLI.
+- [<code>whest doctor</code>](docs/reference/whest-doctor.md) — The 7 install/env checks and how to fix WARN/FAIL rows.
+
+</details>
+
+<details>
+<summary>🚑 <b><a href="docs/troubleshooting/">Troubleshooting</a></b> — When something breaks</summary>
+
+- [Common Participant Errors](docs/troubleshooting/common-participant-errors.md) — Symptom → cause → fix-now → verify.
+- [FAQ](docs/troubleshooting/faq.md) — Quick answers; includes "local score great, submission 10x worse".
+
+</details>
+
+<details>
+<summary>🔬 <b><a href="docs/advanced/">Advanced</a></b> — Deeper tooling</summary>
+
+- [Profile Simulation](docs/advanced/profile-simulation.md) — FLOP and time breakdown of your `predict()` call.
+- [WhestBench Explorer](docs/advanced/use-whestbench-explorer.md) — Interactive browser visualizer for MLPs and ground truth.
+
+</details>
 
 ## 📁 Repo Layout
 
