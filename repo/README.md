@@ -23,7 +23,7 @@ You are given a randomly-initialized ReLU MLP and a FLOP budget. Your job: predi
 
 This kit walks you up a "ladder of formality" — start by iterating math locally with zero CLI knowledge, then graduate to the harness when you're ready.
 
-## 🚀 Your First 5 Minutes (Stage 1: just `whest`)
+## 🚀 Your First 5 Minutes (Stage 1: just `python`)
 
 ```bash
 git clone https://github.com/AIcrowd/whest-starterkit.git
@@ -69,7 +69,7 @@ See [examples/README.md](examples/README.md) for the curriculum table.
 uv run whest doctor
 ```
 
-Reads as a 7-row health check; see [docs/reference/whest-doctor.md](docs/reference/whest-doctor.md) for what each row means and how to fix warnings.
+Reads as a 6-row health check; see [docs/reference/whest-doctor.md](docs/reference/whest-doctor.md) for what each row means and how to fix warnings.
 
 Or check [docs/troubleshooting/](docs/troubleshooting/).
 
@@ -132,7 +132,7 @@ The ladder above is the tutorial trail. Past Stage 1, the docs split into six jo
 
 **CLI**
 - [CLI Reference](docs/reference/cli-reference.md) — Pointer at the upstream `whest` CLI.
-- [<code>whest doctor</code>](docs/reference/whest-doctor.md) — The 7 install/env checks and how to fix WARN/FAIL rows.
+- [<code>whest doctor</code>](docs/reference/whest-doctor.md) — The 6 install/env checks and how to fix WARN/FAIL rows.
 
 </details>
 
