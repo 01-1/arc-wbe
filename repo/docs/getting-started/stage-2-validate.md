@@ -6,7 +6,7 @@
 
 Stage 1 confirms your estimator runs and converges. Stage 2 confirms it satisfies the harness contract — right shapes, right types, finite values, optional lifecycle hooks behave.
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run whest validate --estimator estimator.py
@@ -37,7 +37,7 @@ A passing run renders a Rich panel with four green `OK` rows:
 
 A failing run halts at the first failed check and prints a structured error pointing at the contract clause that broke. See [estimator-contract.md](../reference/estimator-contract.md) for the full contract.
 
-## Expected outcome
+## ✅ Expected outcome
 
 Validate is a 2-second sanity check against a probe MLP — it doesn't
 score your estimator, only that it returns the right *shape* of the right
@@ -47,6 +47,6 @@ If a check fails, the panel prints the broken clause inline. For shape
 mismatches, the error includes `expected_shape` and `got_shape` so you
 can fix the bug without reading source.
 
-## When you're ready
+## ✅ When you're ready
 
 Move on to [Stage 3: run the harness locally](stage-3-run-local.md).

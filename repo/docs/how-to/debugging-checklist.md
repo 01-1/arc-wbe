@@ -96,7 +96,7 @@ The interactive progress display can mask the debugger prompt when you drop a br
 
 > Debugging is best supported with `--runner local`. `--runner local` (or `--runner inprocess`) runs in-process for direct traces and interactive debugging. The isolation runners (`--runner subprocess`, legacy `--runner server`) communicate via worker protocol I/O, so interactive debuggers should be used in local mode.
 
-## Next step
+## ➡️ Next step
 
 - [Common Participant Errors](../troubleshooting/common-participant-errors.md)
 - [Performance Tips](./performance-tips.md)

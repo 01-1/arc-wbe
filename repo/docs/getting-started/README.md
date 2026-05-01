@@ -15,7 +15,7 @@ The tutorial trail. Each stage is a single command on the same `estimator.py`, w
 
 Each stage doc carries an "Expected outcome" callout so you know what success looks like before climbing — and a "Ladder" strip at the top so you always know where you are.
 
-## Where to look next
+## ➡️ Where to look next
 
 - Got a working estimator and want a better score? → [How-to: algorithm ideas](../how-to/algorithm-ideas.md), [Reference: code patterns](../reference/code-patterns.md).
 - Score regressed after a change? → [How-to: debugging checklist](../how-to/debugging-checklist.md), [Troubleshooting](../troubleshooting/).

@@ -2,11 +2,11 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page when you want a better understanding of the technical framing of the problem.
 
-## TL;DR
+## 📌 TL;DR
 
 - Input: one random layered `MLP` and one `flop_budget`.
 - Output: one `(n,)` prediction row per depth, for exactly `d` depths.

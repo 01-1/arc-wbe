@@ -10,7 +10,7 @@ You've climbed the ladder. Now ship it.
 > [Pre-Submission Checklist](../how-to/pre-submission-checklist.md) — it's
 > one screen, all commands, and catches the bugs the grader will hit.
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run whest package --estimator estimator.py -o submission.tar.gz
@@ -52,7 +52,7 @@ your local Stage 4 doing so), open a thread on the
 [challenge discussion forum](https://www.aicrowd.com/) with the
 submission ID — that's the quickest path to a human.
 
-## Expected outcome
+## ✅ Expected outcome
 
 | Stage | What you should see | Action if not |
 |---|---|---|

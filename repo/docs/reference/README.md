@@ -26,7 +26,7 @@ Lookup material. No tutorials here — go to [How-to](../how-to/) for guidance, 
 | [cli-reference.md](cli-reference.md) | Pointer at the upstream `whest` CLI documentation. |
 | [whest-doctor.md](whest-doctor.md) | Each `whest doctor` health check, what it verifies, and how to fix a `WARN` or `FAIL` row. |
 
-## Where to look next
+## ➡️ Where to look next
 
 - Trying to do something and need a procedure? → [How-to](../how-to/).
 - Want to understand *why* the contract is shaped this way? → [Concepts](../concepts/).

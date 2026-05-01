@@ -37,7 +37,7 @@ The number of ground truth samples is set in the contest configuration (`Contest
 
 Higher values produce more accurate ground truth but take longer to compute. The contest organizer balances this tradeoff.
 
-## Next step
+## ➡️ Next step
 
 - [Scoring Model](./scoring-model.md)
 - [Problem Setup](./problem-setup.md)

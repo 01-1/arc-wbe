@@ -95,7 +95,7 @@ Almost always one of three things:
 
 If your Stage 3 and Stage 4 scores agree but the grader still disagrees, suspect Python-version or BLAS-version drift — `uv run whest doctor` will surface the relevant runtime info.
 
-## Next step
+## ➡️ Next step
 
 - [Common Participant Errors](./common-participant-errors.md)
 - [Debugging Checklist](../how-to/debugging-checklist.md)

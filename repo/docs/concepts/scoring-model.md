@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page to understand how the leaderboard score is computed from your estimator's predictions.
 
@@ -52,7 +52,7 @@ Use this page to understand how the leaderboard score is computed from your esti
                        lower is better
 ```
 
-## TL;DR
+## 📌 TL;DR
 
 - Lower score is better.
 - Score is pure MSE under a FLOP budget constraint.
@@ -163,7 +163,7 @@ To reproduce: `uv run whest run --estimator examples/<NN>_<name>.py --n-mlps 10`
 
 Scores vary slightly between runs due to random MLP generation and Monte Carlo ground truth noise.
 
-## Next step
+## ➡️ Next step
 
 - [Score Report Fields](../reference/score-report-fields.md)
 - [Validate, Run, and Package](../how-to/validate-run-package.md)

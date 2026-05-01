@@ -8,7 +8,7 @@
 
 Iterate here until `predict()` converges, then climb to Stage 2 to confirm the contract.
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run python estimator.py
@@ -46,7 +46,7 @@ uv run python estimator.py --baseline mean_propagation
 
 This loads `examples/02_mean_propagation.py` and runs both estimators on the same MLP.
 
-## Expected outcome
+## ✅ Expected outcome
 
 | Estimator | MSE on the default MLP | Status |
 |---|---|---|
@@ -59,6 +59,6 @@ You're ready for Stage 2 once your estimator's MSE is comfortably below
 the zeros floor and `estimator_flops` stays under whatever budget you'd
 target downstream (Stage 3's grader default is `1e8`).
 
-## When you're ready
+## ✅ When you're ready
 
 Move on to [Stage 2: validate the contract](stage-2-validate.md).

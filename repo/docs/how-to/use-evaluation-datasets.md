@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Every `whest run` generates fresh random MLPs and samples many forward passes to establish ground truth. This is correct but slow — especially when you are iterating on an estimator and re-running the same evaluation dozens of times during development.
 
@@ -14,7 +14,7 @@ Pre-created evaluation datasets let you do that expensive work once and reuse it
 
 For explicit seeds, `create-dataset` now uses a hierarchical `SeedSequence` split: each MLP gets one child stream for weight sampling and one child stream for Monte Carlo sampling.
 
-## Do this now
+## 🚀 Do this now
 
 ### 1. Create your dataset (once)
 
@@ -48,7 +48,7 @@ The `--n-mlps` flag is ignored when `--dataset` is provided — the values come 
 
 You can keep reusing the same dataset file across your entire development cycle. Edit your estimator, re-run the command, compare scores — the ground truth stays the same so differences reflect only your estimator changes.
 
-## Expected outcome
+## ✅ Expected outcome
 
 - `create-dataset` produces a `.npz` file at the specified path.
 - `run --dataset` shows "Loading dataset" instead of "Generating MLPs" and skips ground truth sampling.
@@ -88,7 +88,7 @@ whest run --estimator estimator.py --seed 20260417
 {"seed_protocol": {"name": "whestbench_seedsequence_hierarchy", "version": "1.0", "seeded": true}}
 ```
 
-## Next step
+## ➡️ Next step
 
 - [Validate, Run, and Package](./validate-run-package.md)
 - [Score Report Fields](../reference/score-report-fields.md)

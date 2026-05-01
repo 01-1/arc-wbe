@@ -11,7 +11,7 @@ Stage 3 runs in your interpreter. Stage 4 spawns each estimator call in a fresh 
 - Memory leaks
 - Imports that fail in a clean process
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run whest run --estimator estimator.py --runner subprocess
@@ -19,7 +19,7 @@ uv run whest run --estimator estimator.py --runner subprocess
 
 Same score format as Stage 3. If your score drops noticeably, you've found a bug masked by in-process state.
 
-## Expected outcome
+## ✅ Expected outcome
 
 Your Stage 4 `primary_score` should match Stage 3 within Monte-Carlo
 noise (a few percent at default `--n-samples`). Use `--seed N` to make
@@ -36,6 +36,6 @@ If Stage 4 is **worse** than Stage 3, the most likely culprits are:
 Move state into the `Estimator` instance (or stash it on the
 `SetupContext.scratch_dir`) and re-run.
 
-## When you're ready
+## ✅ When you're ready
 
 Move on to [Stage 5: Docker runner](stage-5-run-docker.md) (placeholder for now).

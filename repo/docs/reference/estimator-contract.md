@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page when you need exact estimator I/O requirements.
 
@@ -101,7 +101,7 @@ problem rather than score-against-zeros, use `--fail-fast`.
 For the structured `error.details` schema, see
 [score-report-fields.md](score-report-fields.md#per-mlp-fields).
 
-## Next step
+## ➡️ Next step
 
 - [Write an Estimator](../how-to/write-an-estimator.md)
 - [Common Participant Errors](../troubleshooting/common-participant-errors.md)

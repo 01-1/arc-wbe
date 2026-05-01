@@ -258,7 +258,7 @@ Why it happens: `setup()` runs outside any `BudgetContext`, so flopscope operati
 
 Fix now: keep `setup()` lightweight. Move estimation logic to `predict()`.
 
-## Next step
+## ➡️ Next step
 
 - [Debugging Checklist](../how-to/debugging-checklist.md)
 - [FAQ](./faq.md)

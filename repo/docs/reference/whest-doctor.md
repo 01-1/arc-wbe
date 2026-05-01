@@ -2,13 +2,13 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 You ran `uv run whest doctor` and want to interpret a `[WARN]` or
 `[FAIL]` row, or you're chasing a "works on my laptop, fails in CI" bug
 and want to know what `doctor` actually checks.
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run whest doctor
@@ -54,7 +54,7 @@ Add `--format json` for a machine-readable record.
 - `warn` → exit code is `0` by default; pass `--strict` to flip warnings into failures (useful for CI, not for daily iteration).
 - `ok` → fully green.
 
-## See also
+## ➡️ See also
 
 - [Common Participant Errors](../troubleshooting/common-participant-errors.md)
 - [CLI Reference](./cli-reference.md)

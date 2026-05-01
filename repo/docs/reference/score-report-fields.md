@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page to interpret `whest run` output fields.
 
@@ -111,7 +111,7 @@ When using `whest run --dataset`, the report includes `run_config.dataset`:
 | `seed` | RNG seed used to generate the dataset |
 | `n_mlps` | Number of MLPs in the dataset |
 
-## Next step
+## ➡️ Next step
 
 - [Scoring Model](../concepts/scoring-model.md)
 - [CLI Reference](./cli-reference.md)

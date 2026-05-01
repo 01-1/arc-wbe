@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page to understand how FLOP budgets work and how to optimize your estimator to stay within budget.
 
@@ -125,7 +125,7 @@ The same pattern holds at production widths — only the absolute numbers change
 
 4. **Use the combined estimator pattern.** Route between cheap (mean propagation) and expensive (covariance propagation) algorithms based on the available FLOP budget. See [`examples/04_combined.py`](../../examples/04_combined.py).
 
-## Next step
+## ➡️ Next step
 
 - [Write an Estimator](./write-an-estimator.md)
 - [Scoring Model](../concepts/scoring-model.md)

@@ -174,7 +174,7 @@ import flopscope.numpy as fnp
 var_pre = (w * w).T @ var
 ```
 
-## Next step
+## ➡️ Next step
 
 - [Manage Your FLOP Budget](../how-to/manage-flop-budget.md)
 - [Algorithm Ideas](../how-to/algorithm-ideas.md)

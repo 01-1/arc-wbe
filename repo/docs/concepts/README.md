@@ -12,7 +12,7 @@ Background reading. These three docs explain the problem framing, the scoring me
 
 Read in order if you want the full picture. **At minimum, skim `scoring-model.md`** — it's what drives every number you'll obsess over.
 
-## Where to look next
+## ➡️ Where to look next
 
 - Ready to write code? → [Tutorial: Stage 1](../getting-started/stage-1-standalone.md), [How-to: write-an-estimator](../how-to/write-an-estimator.md).
 - Want the exact API contract? → [Reference: estimator-contract](../reference/estimator-contract.md).

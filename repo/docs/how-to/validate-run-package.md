@@ -2,11 +2,11 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page for the standard local participant loop.
 
-## Do this now
+## 🚀 Do this now
 
 Validate estimator loading and output contract:
 
@@ -88,7 +88,7 @@ These all show up in `whest run --help` but get lost there. Reach for them when:
 - `run` produces a score report,
 - `package` creates a `.tar.gz` artifact.
 
-## 🛠 Common first failure
+## ⚠️ Common first failure
 
 Symptom: `run` fails after `validate` passed.
 

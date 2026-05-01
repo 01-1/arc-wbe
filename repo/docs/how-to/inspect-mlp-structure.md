@@ -2,17 +2,17 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page when implementing estimator logic that depends on MLP topology or layer weights.
 
-## TL;DR
+## 📌 TL;DR
 
 - `MLP.width`: number of neurons per layer.
 - `MLP.depth`: number of layers.
 - `MLP.weights`: ordered list of weight matrices, each shape `(width, width)`.
 
-## Do this now
+## 🚀 Do this now
 
 Use this traversal pattern inside `predict`:
 
@@ -77,7 +77,7 @@ E[ReLU(z)] = mu_pre * Phi(alpha) + sigma_pre * phi(alpha)
 
 where `alpha = mu_pre / sigma_pre`, `Phi` is the normal CDF, and `phi` is the normal PDF.
 
-## Expected outcome
+## ✅ Expected outcome
 
 You can inspect any layer's weight matrix and implement layer-wise update rules without guessing object structure.
 
@@ -86,7 +86,7 @@ You can inspect any layer's weight matrix and implement layer-wise update rules 
 - Weight matrices are dense: each `(width, width)` matrix encodes all neuron connections at that layer.
 - Estimators must return a `(mlp.depth, mlp.width)` array.
 
-## Next step
+## ➡️ Next step
 
 - [Write an Estimator](./write-an-estimator.md)
 - [Estimator Contract](../reference/estimator-contract.md)

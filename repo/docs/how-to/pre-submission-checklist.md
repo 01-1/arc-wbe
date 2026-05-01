@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 The minute before you click "submit" on AIcrowd. Run through these
 checks; each one maps to a single command or a one-line confirmation.
@@ -65,7 +65,7 @@ Inspect the artifact (`tar tf submission.tar.gz`) — it should contain
 `estimator.py`, `requirements.txt`, and `metadata.json`. Upload to
 [AIcrowd](https://www.aicrowd.com/) and move on.
 
-## See also
+## ➡️ See also
 
 - [Stage 6: Package Your Submission](../getting-started/stage-6-package.md)
 - [Common Participant Errors](../troubleshooting/common-participant-errors.md)

@@ -107,7 +107,7 @@ above assumes Gaussian pre-activations; tracking a third moment lets you
 correct for the asymmetry that builds up in deeper networks. Reference:
 mean-field analyses such as Schoenholz et al. (2017).
 
-## Next step
+## ➡️ Next step
 
 - [Manage Your FLOP Budget](./manage-flop-budget.md)
 - [Performance Tips](./performance-tips.md)

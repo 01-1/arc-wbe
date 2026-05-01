@@ -72,7 +72,7 @@ WHEST_SKIP_HARDWARE_FALLBACK_PROBES=1 uv run whest run --estimator estimator.py
 
 This keeps cheap metadata collection and `psutil`-backed fields enabled. Only the fallback probes are skipped, so fields such as `cpu_count_physical` or `ram_total_bytes` may remain `null` when they are not already available.
 
-## Next step
+## ➡️ Next step
 
 - [Manage Your FLOP Budget](./manage-flop-budget.md)
 - [Algorithm Ideas](./algorithm-ideas.md)

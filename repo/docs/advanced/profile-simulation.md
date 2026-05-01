@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 The starter kit uses flopscope as its single simulation backend — analytical FLOP counting replaces wall-clock timing across multiple backends. The `profile-simulation` command lets you verify FLOP accounting correctness and explore how FLOP costs scale with network size.
 
@@ -14,7 +14,7 @@ Use this page when you want to:
 - **Understand FLOP scaling** — see how FLOP costs grow with width, depth, and budget so you can calibrate your estimator's budget usage.
 - **Collect reproducible profiling data** — JSON output includes correctness results and FLOP accounting across network sizes.
 
-## Do this now
+## 🚀 Do this now
 
 ### 1. Run a quick profile
 
@@ -78,12 +78,12 @@ whest profile-simulation --preset exhaustive --output flop_data.json
 
 Use the FLOP counts in the JSON to understand how much budget your estimator consumes per layer, and tune your budget-allocation logic accordingly.
 
-## Expected outcome
+## ✅ Expected outcome
 
 - The terminal displays a formatted table with correctness and FLOP accounting results.
 - If `--output` is provided, a JSON file is written with full profiling data.
 
-## Next step
+## ➡️ Next step
 
 - [CLI Reference: profile-simulation](../reference/cli-reference.md#whest-profile-simulation) — full flag reference
 - [Use Evaluation Datasets](../how-to/use-evaluation-datasets.md) — pre-create datasets for faster iteration

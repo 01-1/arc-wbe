@@ -4,13 +4,13 @@
 
 ![WhestBench Explorer -- a small network with 4 neurons and 5 layers, after running Ground Truth estimation](../../assets/whestbench-explorer-visualization.svg)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page when you want visual intuition about network behavior and estimator error patterns.
 
 WhestBench Explorer is optional and is not the submission interface.
 
-## Do this now
+## 🚀 Do this now
 
 ```bash
 whest visualizer
@@ -39,7 +39,7 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-## Expected outcome
+## ✅ Expected outcome
 
 You can interactively inspect network structure, layer behavior, and estimator comparisons.
 
@@ -57,7 +57,7 @@ Official score semantics still come from:
 whest run --estimator <path> --runner local
 ```
 
-## Common first failure
+## ⚠️ Common first failure
 
 Symptom: app does not start due to missing Node dependencies.
 
@@ -76,7 +76,7 @@ Patterns to look for:
 - **Sudden drops to zero:** ReLU is killing neuron groups — your variance estimates may be too narrow
 - **Uniform predictions:** your estimator may not be using the weight structure
 
-## Next step
+## ➡️ Next step
 
 - [Validate, Run, and Package](../how-to/validate-run-package.md)
 - [Problem Setup](../concepts/problem-setup.md)

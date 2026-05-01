@@ -6,7 +6,7 @@ FLOP budget. **Lower MSE per FLOP wins.** New here? See the [60-second
 overview](../README.md#60-second-overview) in the root README, then
 jump in below.
 
-## Map
+## 🗺️ Map
 
 |     | Section | What lives here | Start with |
 |---|---|---|---|
@@ -17,7 +17,7 @@ jump in below.
 | 🚑 | **[Troubleshooting](troubleshooting/)** | When something breaks. | [Common Participant Errors](troubleshooting/common-participant-errors.md) |
 | 🔬 | **[Advanced](advanced/)** | Visualizer, profiler, deeper tooling. | [Profile Simulation](advanced/profile-simulation.md) |
 
-## Reading paths
+## 🧭 Reading paths
 
 Pick the line that sounds like you.
 
@@ -37,7 +37,7 @@ Pick the line that sounds like you.
 
 [pre-submission-checklist](how-to/pre-submission-checklist.md) → [Stage 6](getting-started/stage-6-package.md) → [score-report-fields](reference/score-report-fields.md) (so you can read the leaderboard report).
 
-## By Stage (the ladder)
+## 🪜 By Stage (the ladder)
 
 1. [Stage 1: Iterate locally](getting-started/stage-1-standalone.md)
 2. [Stage 2: Validate the contract](getting-started/stage-2-validate.md)
@@ -46,7 +46,7 @@ Pick the line that sounds like you.
 5. [Stage 5: Docker runner](getting-started/stage-5-run-docker.md) — coming soon
 6. [Stage 6: Package your submission](getting-started/stage-6-package.md)
 
-## By Need
+## 🎯 By Need
 
 | I want to... | Read |
 |---|---|

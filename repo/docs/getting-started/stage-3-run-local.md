@@ -6,7 +6,7 @@
 
 Stage 2 confirms the contract. Stage 3 actually scores you against the same MLPs the grader uses — but in-process, so you can drop `import pdb; pdb.set_trace()` anywhere in `predict()` and step through it.
 
-## Run it
+## 🚀 Run it
 
 ```bash
 uv run whest run --estimator estimator.py --runner local
@@ -51,7 +51,7 @@ def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
     ...
 ```
 
-## Expected outcome
+## ✅ Expected outcome
 
 | Estimator | Typical `primary_score` (default settings) |
 |---|---|
@@ -65,6 +65,6 @@ shift slightly because Stage 3 uses width=100 / depth=16 instead of
 Stage 1's width=32 / depth=6.) Full benchmark methodology in
 [scoring-model.md](../concepts/scoring-model.md#example-estimator-benchmarks).
 
-## When you're ready
+## ✅ When you're ready
 
 Move on to [Stage 4: subprocess runner](stage-4-run-subprocess.md) for grader parity.

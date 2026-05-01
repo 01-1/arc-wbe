@@ -2,11 +2,11 @@
 
 > [← Documentation](../README.md)
 
-## When to use this page
+## 🎯 When to use this page
 
 Use this page when implementing your custom participant estimator.
 
-## Do this now
+## 🚀 Do this now
 
 Start from [`examples/01_random.py`](../../examples/01_random.py), then replace the prediction logic.
 
@@ -25,7 +25,7 @@ class Estimator(BaseEstimator):
         return fnp.zeros((mlp.depth, mlp.width))
 ```
 
-## Expected outcome
+## ✅ Expected outcome
 
 Your estimator implements `predict(mlp, budget)` and returns a `(depth, width)` array of predicted neuron values.
 
@@ -40,7 +40,7 @@ If you need exact `MLP` field semantics or weight matrices, use:
 - return a `(mlp.depth, mlp.width)` array,
 - all values must be finite.
 
-## Common first failure
+## ⚠️ Common first failure
 
 Symptom: estimator returns wrong shape.
 
@@ -101,7 +101,7 @@ This demonstrates the budget-aware routing pattern — a common design for produ
 6. [Algorithm Ideas](./algorithm-ideas.md) — full survey of strategies
 7. [Performance Tips](./performance-tips.md) — FLOP optimization patterns
 
-## Next step
+## ➡️ Next step
 
 - [Inspect and Traverse MLP Structure](./inspect-mlp-structure.md)
 - [Algorithm Ideas](./algorithm-ideas.md)

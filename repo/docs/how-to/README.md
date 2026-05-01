@@ -28,7 +28,7 @@ Task-oriented guides. Each one answers "I want to do X — give me the steps and
 | [debugging-checklist.md](debugging-checklist.md) | Tiered checklist for "estimator runs but something feels wrong" — Tier 0 pure-Python loop, Tier 1 sanity, Tier 2 correctness, Tier 3 optimization. |
 | [pre-submission-checklist.md](pre-submission-checklist.md) | One-screen gate before you click "submit" on AIcrowd. |
 
-## Where to look next
+## ➡️ Where to look next
 
 - Need the exact contract / report fields? → [Reference](../reference/).
 - Estimator throws an error you don't recognize? → [Troubleshooting](../troubleshooting/).
