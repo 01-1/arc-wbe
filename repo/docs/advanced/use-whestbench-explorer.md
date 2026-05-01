@@ -6,75 +6,51 @@
 
 ## 🎯 When to use this page
 
-Use this page when you want visual intuition about network behavior and estimator error patterns.
+When you want visual intuition about network behavior and where your estimator's error concentrates. The Explorer is **optional** — it is not the submission interface, and your leaderboard score never depends on it.
 
-WhestBench Explorer is optional and is not the submission interface.
+## 🚀 Open it
 
-## 🚀 Do this now
+The Explorer is a separate, hosted React app:
 
-```bash
-whest visualizer
-```
+| Where | URL |
+|---|---|
+| **Hosted (just open in a browser)** | <https://aicrowd.github.io/whestbench-explorer/> |
+| **Source / issues / PRs** | <https://github.com/AIcrowd/whestbench-explorer> |
 
-This checks for Node.js, installs dependencies if needed, and opens the explorer in your browser.
+Open the hosted URL, generate an MLP, propagate inputs, and inspect activations layer-by-layer. There's nothing to install.
 
-### Options
-
-```bash
-whest visualizer --host 0.0.0.0 --port 8080   # bind to all interfaces on port 8080
-whest visualizer --no-open                       # don't auto-open browser
-```
-
-On SSH/headless environments, the browser won't auto-open -- just follow the printed URL.
-
-### Manual setup (fallback)
-
-If `whest visualizer` doesn't work for your environment:
-
-```bash
-cd tools/whestbench-explorer
-npm ci
-npm run dev
-```
-
-Open `http://localhost:5173`.
+> The Explorer used to ship inside `whestbench` as a `whest visualizer` subcommand. As of whestbench commit `28c203f` (May 2026), it lives in its own repo with auto-deploy to GitHub Pages — `whest visualizer` no longer exists.
 
 ## ✅ Expected outcome
 
-You can interactively inspect network structure, layer behavior, and estimator comparisons.
+An interactive view of network structure, layer behavior, and estimator-vs-ground-truth comparisons.
 
 ## Suggested workflow
 
 1. Start with small width/depth.
-2. Vary seed to inspect structural changes.
+2. Vary the seed to inspect how structure changes.
 3. Compare estimator behavior across layers.
 4. Locate where errors concentrate.
-5. Convert observations into Python estimator heuristics.
+5. Convert observations into Python estimator heuristics, then verify with:
+   ```bash
+   uv run whest run --estimator estimator.py --runner local
+   ```
 
-Official score semantics still come from:
-
-```bash
-whest run --estimator <path> --runner local
-```
-
-## ⚠️ Common first failure
-
-Symptom: app does not start due to missing Node dependencies.
-
-Fix: `whest visualizer` handles this automatically. For manual setup, run `npm ci` in `tools/whestbench-explorer` and retry `npm run dev`.
+The Explorer is for intuition — it is not a scoring oracle. Official scoring still comes from `whest run`.
 
 ## Interpreting the visualization
 
-The WhestBench Explorer shows neuron activations across layers:
+The Explorer shows neuron activations across layers:
 
 - **Rows:** layers (top = first layer, bottom = output)
 - **Columns:** neurons within each layer
 - **Color intensity:** mean activation value
 
 Patterns to look for:
-- **Error at deep layers:** your method loses accuracy as correlations accumulate through layers
-- **Sudden drops to zero:** ReLU is killing neuron groups — your variance estimates may be too narrow
-- **Uniform predictions:** your estimator may not be using the weight structure
+
+- **Error grows at deep layers:** your method loses accuracy as correlations accumulate through layers.
+- **Sudden drops to zero:** ReLU is killing neuron groups — your variance estimates may be too narrow.
+- **Uniform predictions:** your estimator may not be exploiting the weight structure.
 
 ## ➡️ Next step
 

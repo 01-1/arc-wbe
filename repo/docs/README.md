@@ -15,7 +15,7 @@ jump in below.
 | 🔧 | **[How-to](how-to/)** | Recipes for specific tasks: write, debug, optimize, submit. | [Write an Estimator](how-to/write-an-estimator.md) |
 | 📚 | **[Reference](reference/)** | Exact contracts, field schemas, CLI options, attribute lists. | [Estimator Contract](reference/estimator-contract.md) |
 | 🚑 | **[Troubleshooting](troubleshooting/)** | When something breaks. | [Common Participant Errors](troubleshooting/common-participant-errors.md) |
-| 🔬 | **[Advanced](advanced/)** | Visualizer, profiler, deeper tooling. | [Profile Simulation](advanced/profile-simulation.md) |
+| 🔬 | **[Advanced](advanced/)** | Profiler and the hosted Explorer visualizer. | [Profile Simulation](advanced/profile-simulation.md) |
 
 ## 🧭 Reading paths
 

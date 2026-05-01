@@ -142,7 +142,7 @@ The ladder above is the tutorial trail. Past Stage 1, the docs split into six jo
 <summary>🔬 <b><a href="docs/advanced/">Advanced</a></b> — Deeper tooling</summary>
 
 - [Profile Simulation](docs/advanced/profile-simulation.md) — FLOP and time breakdown of your `predict()` call.
-- [WhestBench Explorer](docs/advanced/use-whestbench-explorer.md) — Interactive browser visualizer for MLPs and ground truth.
+- [WhestBench Explorer](docs/advanced/use-whestbench-explorer.md) — Hosted interactive visualizer at [aicrowd.github.io/whestbench-explorer](https://aicrowd.github.io/whestbench-explorer/) for inspecting MLPs and ground truth.
 
 </details>
 
