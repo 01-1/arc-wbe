@@ -1,6 +1,6 @@
 # Concepts — Why this challenge exists
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 Background reading. These three docs explain the problem framing, the scoring metric, and how ground truth is generated. Helpful before you start tuning, essential before you start arguing about the leaderboard.
 

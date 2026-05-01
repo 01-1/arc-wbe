@@ -1,6 +1,6 @@
 # Debugging Checklist
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 Use this page when your estimator runs but the score is bad, or something feels wrong. Work through the tiers in order.
 

@@ -1,5 +1,7 @@
 # Stage 4: Subprocess Runner
 
+> [← Tutorial](README.md)
+
 > Ladder: [1](stage-1-standalone.md) · [2](stage-2-validate.md) · [3](stage-3-run-local.md) · **4** · [5](stage-5-run-docker.md) · [6](stage-6-package.md)
 
 Stage 3 runs in your interpreter. Stage 4 spawns each estimator call in a fresh subprocess — the same isolation the grader uses. Catches:

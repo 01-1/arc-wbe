@@ -1,6 +1,6 @@
 # Troubleshooting — When something breaks
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 If your run errored, your score regressed, or your local and remote scores disagree, start here.
 

@@ -1,6 +1,6 @@
 # Advanced — Deeper tooling
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 You don't need either of these to ship a submission. They become useful once you're tuning aggressively and want better visibility into where FLOPs and time go.
 

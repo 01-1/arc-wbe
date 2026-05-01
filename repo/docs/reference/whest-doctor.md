@@ -1,6 +1,6 @@
 # `whest doctor`
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 ## When to use this page
 

@@ -1,6 +1,6 @@
 # Common Participant Errors
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 Use this page when `validate` or `run` fails.
 

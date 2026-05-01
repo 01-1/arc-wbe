@@ -1,6 +1,6 @@
 # Frequently Asked Questions
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 ## Can I use numpy directly?
 

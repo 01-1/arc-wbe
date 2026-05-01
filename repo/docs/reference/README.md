@@ -1,6 +1,6 @@
 # Reference — Exact contracts and APIs
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 Lookup material. No tutorials here — go to [How-to](../how-to/) for guidance, [Concepts](../concepts/) for the why, [Tutorial](../getting-started/) for the climbing trail.
 

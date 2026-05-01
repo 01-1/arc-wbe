@@ -1,6 +1,6 @@
 # Use WhestBench Explorer
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 ![WhestBench Explorer -- a small network with 4 neurons and 5 layers, after running Ground Truth estimation](../../assets/whestbench-explorer-visualization.svg)
 

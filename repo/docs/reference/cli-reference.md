@@ -1,6 +1,6 @@
 # CLI Reference
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 The `whest` CLI is shipped by [whestbench](https://github.com/AIcrowd/whestbench). The authoritative reference lives there:
 

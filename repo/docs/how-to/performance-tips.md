@@ -1,6 +1,6 @@
 # Performance Tips
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 This page lists concrete patterns for reducing FLOP usage in your estimator.
 

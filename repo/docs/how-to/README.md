@@ -1,6 +1,6 @@
 # How-to — Recipes for specific tasks
 
-> [← Documentation](../index.md)
+> [← Documentation](../README.md)
 
 Task-oriented guides. Each one answers "I want to do X — give me the steps and the gotchas." Use these alongside the [Tutorial](../getting-started/) (the trail) and the [Reference](../reference/) (exact APIs).
 

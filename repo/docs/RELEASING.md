@@ -1,6 +1,6 @@
 # Releasing whest-starterkit
 
-> [← Documentation](index.md)
+> [← Documentation](README.md)
 
 Single source of truth for the bump dance. Stay current.
 
