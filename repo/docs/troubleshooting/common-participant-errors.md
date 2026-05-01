@@ -13,9 +13,9 @@ Use this page when `validate` or `run` fails.
 Fast debug ladder:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py
-whest run --estimator ./my-estimator/estimator.py --debug
-whest run --estimator ./my-estimator/estimator.py --runner local --debug
+whest run --estimator estimator.py
+whest run --estimator estimator.py --debug
+whest run --estimator estimator.py --runner local --debug
 ```
 
 Sample server-style failure:
@@ -29,7 +29,7 @@ Tip: For estimator-level tracebacks, rerun with --runner local --debug.
 Exact follow-up:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --runner local --debug
+whest run --estimator estimator.py --runner local --debug
 ```
 
 ## Estimator returned wrong shape
@@ -43,7 +43,7 @@ Fix now: ensure `predict` returns a flopscope array with shape `(mlp.depth, mlp.
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Non-finite values (`nan` or `inf`)
@@ -57,7 +57,7 @@ Fix now: add guards/clipping/checks in your prediction logic.
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## FLOP budget exceeded
@@ -76,7 +76,7 @@ Fix now:
 Verify:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --json
+whest run --estimator estimator.py --json
 ```
 
 ## Class not found
@@ -90,7 +90,7 @@ Fix now: rename your class to `Estimator`.
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Import error in estimator
@@ -104,7 +104,7 @@ Fix now: add missing dependencies to `requirements.txt`. For flopscope, use `imp
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Signature mismatch
@@ -118,7 +118,7 @@ Fix now: ensure signature is `def predict(self, mlp: MLP, budget: int) -> fnp.nd
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Predict raised an unexpected exception
@@ -131,10 +131,10 @@ Fix now:
 
 ```bash
 # Show full tracebacks in the "Estimator Errors" panel:
-whest run --estimator ./my-estimator/estimator.py --debug
+whest run --estimator estimator.py --debug
 
 # Stop at the first failure and propagate the raw Python traceback:
-whest run --estimator ./my-estimator/estimator.py --debug --fail-fast
+whest run --estimator estimator.py --debug --fail-fast
 ```
 
 The traceback in the panel (or the raw stack from `--fail-fast`) points directly at the line in your estimator that raised.
@@ -150,7 +150,7 @@ Fix now: move expensive computation from `setup()` to `predict()`, or reduce set
 Verify:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --runner local --debug
+whest run --estimator estimator.py --runner local --debug
 ```
 
 ## Predict timeout
@@ -164,7 +164,7 @@ Fix now: check for infinite loops or extremely expensive operations. This is a s
 Verify:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --runner local --debug
+whest run --estimator estimator.py --runner local --debug
 ```
 
 ## Budget exhausted mid-operation
@@ -188,7 +188,7 @@ Fix now: add overflow guards — rescale covariance when diagonal values exceed 
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Dtype mismatch
@@ -202,7 +202,7 @@ Fix now: cast your output: `return fnp.asarray(result, dtype=fnp.float32)`.
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Empty predictions
@@ -216,7 +216,7 @@ Fix now: check that you iterate over `mlp.weights` and append results per layer.
 Verify:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 ## Using numpy instead of flopscope
@@ -244,8 +244,8 @@ Tell them apart from the exit code and the report:
 Fix now: run with `--debug` to see tracebacks in the "Estimator Errors" panel (works with any runner), or `--fail-fast` to halt at the first failing MLP with the raw Python stack:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --debug
-whest run --estimator ./my-estimator/estimator.py --debug --fail-fast
+whest run --estimator estimator.py --debug
+whest run --estimator estimator.py --debug --fail-fast
 ```
 
 ## Setup runs expensive operations

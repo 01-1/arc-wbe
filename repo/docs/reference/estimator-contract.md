@@ -13,6 +13,34 @@ Optional lifecycle hooks:
 - `setup(self, context: SetupContext) -> None`
 - `teardown(self) -> None`
 
+### Lifecycle
+
+```
+  Estimator()           ──▶  __init__         (cheap; no I/O, no compute)
+       │
+       ▼
+  setup(context)        ──▶  one call before any predict()
+       │                     • runs OUTSIDE any BudgetContext (off-budget)
+       │                     • bounded by setup_timeout_s (default ~5s)
+       │                     • good for: lookup tables, config loads,
+       │                                  shape-independent precompute
+       ▼
+  predict(mlp_1, b)     ──▶  one call per MLP
+  predict(mlp_2, b)            • runs INSIDE a BudgetContext
+  ...                          • bounded by --flop-budget and (optionally)
+  predict(mlp_M, b)              --wall-time-limit / --untracked-time-limit
+       │
+       ▼
+  teardown()            ──▶  one call after all predict() calls
+                             • cleanup of resources opened in setup()
+```
+
+`setup()` and `teardown()` are entirely optional — `examples/02_*` and
+`examples/04_*` skip both. Define them when you have shape-agnostic
+precompute that's expensive enough to be worth doing once. See
+[FAQ: Can I precompute things in setup()?](../troubleshooting/faq.md#can-i-precompute-things-in-setup)
+for budget rules.
+
 ### `SetupContext` fields
 
 | Field | Type | Description |
@@ -21,7 +49,7 @@ Optional lifecycle hooks:
 | `depth` | `int` | Number of layers per MLP |
 | `flop_budget` | `int` | FLOP cap for the estimator |
 | `api_version` | `str` | Contract version string |
-| `scratch_dir` | `str \| None` | Optional writable directory for caching |
+| `scratch_dir` | `str \| None` | Optional writable directory for caching across calls (subprocess and Docker runners; otherwise typically `None`) |
 
 ## Input object quick reference
 
@@ -46,11 +74,30 @@ Your estimator must use flopscope primitives (`import flopscope as flops` and `i
 
 ## Failure semantics
 
-When validation fails (wrong shape, non-finite values), the affected prediction is treated as a **zero-filled row**. The scoring loop continues and produces a valid report -- errors are reflected as increased MSE rather than hard failures.
+The harness never crashes on a bad estimator. Every failure mode is
+surfaced as report data so that one bad MLP doesn't take down the run.
 
-Validation failures now include structured diagnostics in report output under `results.per_mlp[i].error` as
-`{"message": ..., "details": ...}` with details describing `expected_shape`, `got_shape`,
-and actionable hints.
+| Failure | Behavior | Report field(s) surfacing it | Stage that catches it first |
+|---|---|---|---|
+| Wrong return shape (not `(mlp.depth, mlp.width)`) | predictions for this MLP zeroed | `per_mlp[i].error.details.{expected_shape, got_shape}` | Stage 2 (`whest validate`) |
+| Wrong dtype (not a `flopscope.numpy.ndarray`) | predictions for this MLP zeroed | `per_mlp[i].error` with hint | Stage 2 |
+| Non-finite values (NaN, Inf) | predictions for this MLP zeroed | `per_mlp[i].error.details.cause_hints` | Stage 2 |
+| `predict()` raised an exception | predictions for this MLP zeroed; harness continues to the next MLP; CLI exits `1` and prints an "Estimator Errors" panel | `per_mlp[i].{error, error_code, traceback}`; `error_code` is the Python exception class name | Stage 3 (`whest run`) |
+| Exceeded `flop_budget` | flopscope raises `BudgetExhaustedError` *before* the over-budget op runs; predictions zeroed | `per_mlp[i].budget_exhausted: true` | Stage 3 |
+| Exceeded `--wall-time-limit` (`wall_time_limit_s`) | flopscope raises `TimeExhaustedError`; predictions zeroed | `per_mlp[i].time_exhausted: true` | Stage 3 (with `--wall-time-limit`) |
+| Exceeded `--untracked-time-limit` | scoring layer (not flopscope) zeroes the predictions after `predict()` returns | `per_mlp[i].untracked_time_exhausted: true` | Stage 3 (with `--untracked-time-limit`) |
+
+When `predict()` raises, the runner captures the exception, records the
+class name in `error_code`, and forwards a formatted `traceback` (subprocess
+runs forward it across the worker boundary). Use `--debug` to see
+tracebacks inline; `--fail-fast` to halt at the first failure.
+
+Predictions for the failed MLP are scored against zeros, so the failure
+*does* hurt your `primary_score`. If you want the run to stop at the first
+problem rather than score-against-zeros, use `--fail-fast`.
+
+For the structured `error.details` schema, see
+[score-report-fields.md](score-report-fields.md#per-mlp-fields).
 
 ## Next step
 

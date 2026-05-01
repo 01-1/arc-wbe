@@ -63,6 +63,8 @@ See [examples/README.md](examples/README.md) for the curriculum table.
 uv run whest doctor
 ```
 
+Reads as a 7-row health check; see [docs/reference/whest-doctor.md](docs/reference/whest-doctor.md) for what each row means and how to fix warnings.
+
 Or check [docs/troubleshooting/](docs/troubleshooting/).
 
 ## Repo Layout

@@ -88,6 +88,31 @@ When you run your estimator with `whest run`, the per-MLP report includes:
 
 If `budget_exhausted` is `true`, your predictions were discarded. You need to reduce FLOP usage.
 
+## Worked walkthrough: mean propagation, line by line
+
+The table below profiles [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py) on the default Stage 1 MLP (`width=32, depth=6`). Numbers are aggregated across all 6 layers; per-layer cost is roughly the row total divided by 6. Reproduce with `flops.budget_summary()` after a single `predict()` call.
+
+| Operation in `predict()` | Calls | FLOPs (total) | % of budget |
+|---|---:|---:|---:|
+| `mu_pre = w.T @ mu` and `var_pre = (w*w).T @ var` (`matmul`) | 12 | 393,216 | **96.2%** |
+| `mu_pre * Phi_alpha + sigma_pre * phi_alpha` etc. (`multiply`) | 48 | 7,488 | 1.8% |
+| `flops.stats.norm.pdf(alpha)` | 6 | 3,072 | 0.8% |
+| `flops.stats.norm.cdf(alpha)` | 6 | 3,072 | 0.8% |
+| `mu_pre * Phi_alpha + ...` etc. (`add`) | 18 | 576 | 0.1% |
+| `fnp.maximum(var_pre, 1e-12)` (`maximum`) | 12 | 384 | 0.1% |
+| `fnp.sqrt(var_pre)` | 6 | 192 | 0.0% |
+| `mu_pre / sigma_pre` (`true_divide`) | 6 | 192 | 0.0% |
+| `ez2 - mu*mu` (`subtract`) | 6 | 192 | 0.0% |
+| `fnp.stack(rows, axis=0)` | 1 | 192 | 0.0% |
+| **Total per `predict()`** | — | **408,576** | — |
+
+Two takeaways:
+
+- **`matmul` dwarfs everything else.** 96% of the budget is two matmuls per layer. Halving the matmul count (e.g., switching to a diagonal-only formulation) buys you ~50% of the budget back.
+- **Reductions, sqrt, and divides are free in practice.** Don't twist your code to avoid them; the cost is in the tens of FLOPs per layer.
+
+The same pattern holds at production widths — only the absolute numbers change. Re-run the profile on `examples/03_*.py` to see the `O(width³)` matmul cost dominate even harder.
+
 ## Optimization tips
 
 1. **Matmul dominates.** Each `fnp.matmul(W.T, mu)` on a `(width, width)` matrix costs `O(width^2)` FLOPs per layer. Reducing the number of matmuls (or their dimensions) has the biggest impact.
@@ -96,7 +121,7 @@ If `budget_exhausted` is `true`, your predictions were discarded. You need to re
 
 3. **Array creation is free.** `fnp.array()`, `fnp.zeros()`, `fnp.ones()`, `fnp.eye()` cost 0 FLOPs. Precompute and store intermediate values freely.
 
-4. **Use the combined estimator pattern.** Route between cheap (mean propagation) and expensive (covariance propagation) algorithms based on the available FLOP budget. See [`examples/estimators/combined_estimator.py`](../../examples/estimators/combined_estimator.py).
+4. **Use the combined estimator pattern.** Route between cheap (mean propagation) and expensive (covariance propagation) algorithms based on the available FLOP budget. See [`examples/04_combined.py`](../../examples/04_combined.py).
 
 ## Next step
 

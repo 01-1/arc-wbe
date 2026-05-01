@@ -4,6 +4,52 @@
 
 Use this page to understand how the leaderboard score is computed from your estimator's predictions.
 
+## Pipeline at a glance
+
+```
+   ┌─────────────────────┐
+   │  random MLP_m       │   one of M MLPs (default M=10)
+   │  flop_budget        │
+   └──────────┬──────────┘
+              │
+              ▼
+   ┌─────────────────────────────────┐
+   │  your predict(mlp_m, budget)    │   runs inside flopscope.BudgetContext
+   │  (flopscope counts every op)    │
+   └──────────┬──────────────────────┘
+              │
+              ▼
+        flops_used > flop_budget ?
+         /                     \
+     yes /                       \ no
+        ▼                         ▼
+   ┌─────────────┐         ┌─────────────────────┐
+   │ pred_m :=   │         │ pred_m := your      │
+   │   zeros     │         │   returned array    │
+   └──────┬──────┘         └──────────┬──────────┘
+          │                           │
+          └────────────┬──────────────┘
+                       ▼
+          ┌─────────────────────────────────┐
+          │ truth_m  =  Monte-Carlo means   │
+          │ MSE_m    =  mean((pred_m -      │
+          │              truth_m)²)         │
+          └────────────┬────────────────────┘
+                       │
+            (repeat for every MLP)
+                       │
+                       ▼
+            ┌────────────────────────────────────┐
+            │ primary_score = mean over m of     │
+            │  the FINAL-LAYER MSE (length n)    │
+            │                                    │
+            │ secondary_score = mean over m of   │
+            │  the ALL-LAYER MSE (d × n cells)   │
+            └────────────────────────────────────┘
+
+                       lower is better
+```
+
 ## TL;DR
 
 - Lower score is better.
@@ -27,6 +73,34 @@ For the configured FLOP budget:
 4. **Score is MSE.** Your score is pure MSE — the closer to zero, the better.
 
 Final score is the MSE averaged across MLPs (zeroed where budget was exceeded).
+
+## The formula
+
+Two headline metrics. Both are means of squared errors; they differ only in
+which cells they average over. **Lower is better** for each.
+
+```
+                   1   M    1   n
+primary_score   = ─── ∑   ─── ∑  ( pred_m[d-1, i] − truth_m[d-1, i] )²
+                   M  m=1   n  i=1
+                            └──────── final-layer cells only ────────┘
+
+                   1   M    1     d-1   n
+secondary_score = ─── ∑   ─── ∑     ∑   ( pred_m[k, i] − truth_m[k, i] )²
+                   M  m=1  d·n k=0   i=1
+                            └────── all (depth × width) cells ───────┘
+
+  M       = number of MLPs in the suite (default 10; --n-mlps overrides)
+  d       = mlp.depth, n = mlp.width
+  pred_m  = (depth, width) array your predict() returned for MLP m
+  truth_m = Monte-Carlo ground-truth means for MLP m
+            (replaced with zeros if your call exceeded flop_budget)
+```
+
+`primary_score` is what the leaderboard ranks on. `secondary_score` is
+useful for diagnosing whether your error concentrates in the final layer
+or accumulates earlier — see also `best_mlp_score` and `worst_mlp_score`
+in the [score report](../reference/score-report-fields.md).
 
 ## Budget behavior
 
@@ -71,7 +145,7 @@ The table below shows real scores from the four bundled example estimators, run 
 
 | Estimator | Final MSE | All-Layer MSE | Approach |
 |-----------|-----------|---------------|----------|
-| `random_estimator` | ~0.50 | ~0.48 | Returns random values — the interface walkthrough. The `whest init` template (all zeros) is the true baseline. |
+| `random_estimator` | ~0.50 | ~0.48 | Returns random values — the interface walkthrough. The bundled [`estimator.py`](../../estimator.py) at the repo root is the true (all-zeros) baseline; running `uv run whest init <dir>` in a fresh directory produces the same template. |
 | `mean_propagation` | ~0.004 | ~0.002 | Diagonal variance, O(depth x width^2). ~100x better than baseline. |
 | `covariance_propagation` | ~0.0003 | ~0.0002 | Full covariance, O(depth x width^3). ~1000x better than baseline. |
 | `combined_estimator` | ~0.0002 | ~0.0002 | Routes to covariance when budget allows, otherwise mean propagation. |
@@ -83,7 +157,7 @@ The table below shows real scores from the four bundled example estimators, run 
 - **Covariance propagation** is another ~10x better, but costs O(width^3) per layer. At width=100, this is affordable; at width=1000, it would exhaust the budget.
 - The **combined estimator** gets the best of both worlds by checking the budget before deciding which algorithm to run.
 
-To reproduce: `whest run --estimator examples/estimators/<name>.py --n-mlps 10`
+To reproduce: `uv run whest run --estimator examples/<NN>_<name>.py --n-mlps 10` (e.g. `examples/02_mean_propagation.py`)
 
 Scores vary slightly between runs due to random MLP generation and Monte Carlo ground truth noise.
 

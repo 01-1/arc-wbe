@@ -44,7 +44,7 @@ for w in mlp.weights:
 | Mean propagation (diagonal) | O(width^2) | Default. Budget < 30 x width^2 |
 | Covariance propagation (full) | O(width^3) | Budget >= 30 x width^2 |
 
-The combined estimator in `examples/estimators/combined_estimator.py` shows this routing pattern.
+The combined estimator in [`examples/04_combined.py`](../../examples/04_combined.py) shows this routing pattern.
 
 ## Check your budget breakdown
 
@@ -65,7 +65,7 @@ This prints a per-operation table showing call counts and cumulative FLOPs. Look
 If startup latency matters while you are iterating locally, you can skip the extra OS-native hardware fallback probes that populate report and dataset metadata:
 
 ```bash
-WHEST_SKIP_HARDWARE_FALLBACK_PROBES=1 whest run --estimator ./my_estimator.py
+WHEST_SKIP_HARDWARE_FALLBACK_PROBES=1 uv run whest run --estimator estimator.py
 ```
 
 This keeps cheap metadata collection and `psutil`-backed fields enabled. Only the fallback probes are skipped, so fields such as `cpu_count_physical` or `ram_total_bytes` may remain `null` when they are not already available.

@@ -125,6 +125,41 @@ alpha = mu_pre / sigma_pre
 E_relu = mu_pre * norm_cdf(alpha) + sigma_pre * norm_pdf(alpha)
 ```
 
+#### Why this works
+
+`ReLU(z) = max(z, 0)` zeros out everything below 0 and keeps everything
+above. If `z ~ N(µ, σ²)`, the expectation splits into the part above zero
+and the part below (which contributes 0):
+
+```
+E[ReLU(z)] = ∫_0^∞ z · f(z) dz
+           = µ · Φ(α) + σ · φ(α)        where α = µ / σ
+```
+
+Here `Φ` is the standard-normal CDF, `φ` is the standard-normal PDF, and
+`α` measures how many standard deviations the mean sits above zero.
+Intuitively: `µ · Φ(α)` is "what survives if the distribution is mostly
+positive"; `σ · φ(α)` is the "edge correction" for the part of the bell
+that's clipped at zero. This is the (rectified Gaussian) first moment;
+see e.g. Frey & Hinton (1999), Williams (1998) for derivations.
+
+#### Where the assumption breaks
+
+The pre-activation `z` is exactly Gaussian only at layer 0. After that,
+every layer is `W·ReLU(prev)`, and the resulting distribution is Gaussian
+only by approximation (Central Limit Theorem on the matmul gives a good
+fit for moderate widths). The approximation degrades when:
+
+- **Widths are small.** CLT averaging is weak below ~32 neurons per layer.
+- **Networks are very deep.** Errors compound layer-by-layer; by depth
+  ~32 you may want higher moments (skewness) or per-layer recalibration.
+- **Activations cluster near zero.** When `α ≈ 0`, the rectified-Gaussian
+  approximation is accurate, but `µ` is small and relative errors spike.
+
+If your `final_mse` is fine but `all_layer_mse` blows up, this assumption
+is usually the culprit. See [algorithm-ideas.md](../how-to/algorithm-ideas.md)
+for advanced moment-matching strategies.
+
 See [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py) for a complete working estimator using these patterns.
 
 ### Per-neuron variance propagation (diagonal)

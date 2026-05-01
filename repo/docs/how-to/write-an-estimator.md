@@ -6,7 +6,7 @@ Use this page when implementing your custom participant estimator.
 
 ## Do this now
 
-Start from [`examples/estimators/random_estimator.py`](../../examples/estimators/random_estimator.py), then replace the prediction logic.
+Start from [`examples/01_random.py`](../../examples/01_random.py), then replace the prediction logic.
 
 Minimal structure:
 
@@ -53,7 +53,7 @@ Fix: ensure `predict` returns a 2D array with shape `(mlp.depth, mlp.width)` and
 The template estimator returns all zeros. Run it to see what a bad score looks like:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --n-mlps 3
+uv run whest run --estimator estimator.py --n-mlps 3
 ```
 
 Look at `primary_score` — this is the MSE of predicting all zeros. It is your floor.
@@ -63,8 +63,8 @@ Look at `primary_score` — this is the MSE of predicting all zeros. It is your 
 Copy the mean propagation example — it uses the ReLU expectation formula:
 
 ```bash
-cp examples/estimators/mean_propagation.py ./my-estimator/estimator.py
-whest run --estimator ./my-estimator/estimator.py --n-mlps 3
+cp examples/02_mean_propagation.py estimator.py
+uv run whest run --estimator estimator.py --n-mlps 3
 ```
 
 Compare `primary_score` to the zeros baseline. Mean propagation uses the network's weights to make informed predictions, so it should score significantly better.
@@ -81,8 +81,8 @@ The report shows per-MLP results:
 The combined estimator routes between cheap and expensive algorithms based on budget:
 
 ```bash
-cp examples/estimators/combined_estimator.py ./my-estimator/estimator.py
-whest run --estimator ./my-estimator/estimator.py --n-mlps 3
+cp examples/04_combined.py estimator.py
+uv run whest run --estimator estimator.py --n-mlps 3
 ```
 
 This demonstrates the budget-aware routing pattern — a common design for production estimators.
@@ -91,11 +91,11 @@ This demonstrates the budget-aware routing pattern — a common design for produ
 
 ## Recommended learning path
 
-1. [`examples/estimators/random_estimator.py`](../../examples/estimators/random_estimator.py) — the interface
-2. [`examples/estimators/mean_propagation.py`](../../examples/estimators/mean_propagation.py) — simplest real algorithm
-3. [`examples/estimators/covariance_propagation.py`](../../examples/estimators/covariance_propagation.py) — more accurate, more expensive
-4. [`examples/estimators/combined_estimator.py`](../../examples/estimators/combined_estimator.py) — budget-aware routing
-5. [`examples/estimators/standalone_example.py`](../../examples/estimators/standalone_example.py) — self-contained pure-Python harness (runnable as `python examples/estimators/standalone_example.py` or via `whest run`); copy when you want a minimal iteration loop
+1. [`examples/01_random.py`](../../examples/01_random.py) — the interface
+2. [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py) — simplest real algorithm
+3. [`examples/03_covariance_propagation.py`](../../examples/03_covariance_propagation.py) — more accurate, more expensive
+4. [`examples/04_combined.py`](../../examples/04_combined.py) — budget-aware routing
+5. [`estimator.py`](../../estimator.py) — the repo-root template, runnable two ways: `uv run python estimator.py` for the pure-local pedagogical loop (see [Stage 1](../getting-started/stage-1-standalone.md)) and `uv run whest run --estimator estimator.py` for the harness path. Copy when you want a minimal iteration loop.
 6. [Algorithm Ideas](./algorithm-ideas.md) — full survey of strategies
 7. [Performance Tips](./performance-tips.md) — FLOP optimization patterns
 

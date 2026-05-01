@@ -1,5 +1,7 @@
 # Stage 4: Subprocess Runner
 
+> Ladder: [1](stage-1-standalone.md) · [2](stage-2-validate.md) · [3](stage-3-run-local.md) · **4** · [5](stage-5-run-docker.md) · [6](stage-6-package.md)
+
 Stage 3 runs in your interpreter. Stage 4 spawns each estimator call in a fresh subprocess — the same isolation the grader uses. Catches:
 
 - Shared global state between calls
@@ -10,10 +12,27 @@ Stage 3 runs in your interpreter. Stage 4 spawns each estimator call in a fresh 
 ## Run it
 
 ```bash
-whest run --estimator estimator.py --runner subprocess
+uv run whest run --estimator estimator.py --runner subprocess
 ```
 
 Same score format as Stage 3. If your score drops noticeably, you've found a bug masked by in-process state.
+
+## Expected outcome
+
+Your Stage 4 `primary_score` should match Stage 3 within Monte-Carlo
+noise (a few percent at default `--n-samples`). Use `--seed N` to make
+both runs deterministic for an apples-to-apples comparison.
+
+If Stage 4 is **worse** than Stage 3, the most likely culprits are:
+1. **Module-level mutable state** — `setup()` populated a global that
+   persists between MLPs in-process but resets in subprocess workers.
+2. **Caches keyed on object identity** — `id()` collisions in-process
+   accidentally hit cached results; subprocess invalidates that.
+3. **RNG seeded once at import time** — survives between in-process
+   calls; subprocess re-seeds on every call.
+
+Move state into the `Estimator` instance (or stash it on the
+`SetupContext.scratch_dir`) and re-run.
 
 ## When you're ready
 

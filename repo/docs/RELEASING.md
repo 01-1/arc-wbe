@@ -38,7 +38,7 @@ If this PR changes any of:
 - `MLP` dataclass field names
 - `local_engine.{build_mlp, monte_carlo_layer_means, compare_against_monte_carlo}` signatures
 
-→ This is a **major bump**. Update `docs/CONTRIBUTING.md` (when written — see TODOS.md v1.1) with any new contract.
+→ This is a **major bump**. Coordinate any new contract through [docs/reference/estimator-contract.md](reference/estimator-contract.md) until a separate contributing guide lands.
 
 ## Cron failures
 

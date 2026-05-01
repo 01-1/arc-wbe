@@ -4,24 +4,27 @@ Use this page when your estimator runs but the score is bad, or something feels 
 
 ## Tier 0: Pure-Python inner loop (fastest iteration)
 
-For fast, no-framework iteration — e.g. to print intermediate activations, attach `pdb`, or sweep Monte Carlo sample counts — run your estimator as a plain Python script instead of going through `whest run`. See [`examples/estimators/standalone_example.py`](https://github.com/AIcrowd/whestbench/blob/main/examples/estimators/standalone_example.py) — a self-contained ~100-line example that constructs an MLP, invokes the inline `Estimator`, and prints a FLOPs-vs-MSE convergence table. It's runnable two ways:
+For fast, no-framework iteration — e.g. to print intermediate activations, attach `pdb`, or sweep Monte Carlo sample counts — run your estimator as a plain Python script instead of going through `whest run`. The repo-root [`estimator.py`](../../estimator.py) is exactly this kind of self-contained loop: it constructs an MLP via `local_engine.build_mlp`, invokes the inline `Estimator`, and prints a FLOPs-vs-MSE convergence table. It's runnable two ways:
 
 ```bash
 # 1) Direct: no CLI, no runner, no subprocess — just Python.
-python examples/estimators/standalone_example.py
+uv run python estimator.py
+
+# 1b) Same file, with a side-by-side baseline comparison:
+uv run python estimator.py --baseline mean_propagation
 
 # 2) Scored via whestbench (same file, same class — honors BaseEstimator):
-whest run --estimator examples/estimators/standalone_example.py
+uv run whest run --estimator estimator.py
 ```
 
-Copy it as a starting point for your own debug loops.
+Edit `predict()` in `estimator.py` and re-run. See [Stage 1](../getting-started/stage-1-standalone.md) for the full walkthrough.
 
 ## Tier 1: Sanity checks (2 minutes)
 
 Run validation:
 
 ```bash
-whest validate --estimator ./my-estimator/estimator.py
+whest validate --estimator estimator.py
 ```
 
 If it fails, check:
@@ -35,7 +38,7 @@ If it fails, check:
 Run your estimator and look at the report:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --n-mlps 3 --runner local --debug
+whest run --estimator estimator.py --n-mlps 3 --runner local --debug
 ```
 
 Check:
@@ -78,7 +81,7 @@ The interactive progress display can mask the debugger prompt when you drop a br
 - **With `pdb.set_trace()`** — pass `--format plain` to disable the live display entirely:
 
   ```bash
-  whest run --estimator ./my-estimator/estimator.py --runner local --format plain
+  whest run --estimator estimator.py --runner local --format plain
   ```
 
 - **Or** set the standard env var before running:

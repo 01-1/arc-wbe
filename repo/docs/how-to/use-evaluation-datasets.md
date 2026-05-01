@@ -39,7 +39,7 @@ If you want to avoid extra host probing during local development, set `WHEST_SKI
 ### 2. Run against it (every time)
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --dataset my_dataset.npz
+whest run --estimator estimator.py --dataset my_dataset.npz
 ```
 
 The `--n-mlps` flag is ignored when `--dataset` is provided — the values come from the dataset file.
@@ -77,7 +77,7 @@ When using `--dataset`, the results JSON includes a `dataset` reference under `r
 Example seeded run command:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --seed 20260417
+whest run --estimator estimator.py --seed 20260417
 ```
 
 `run --seed` stores the chosen seed in `run_config.seed`, and all `create-dataset` metadata now records:

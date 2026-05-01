@@ -89,6 +89,19 @@ All FLOP usage is tracked analytically by flopscope — there is no wall-clock t
 Ground truth is approximated by Monte Carlo simulation over random inputs.
 The evaluator computes empirical means by depth and neuron, stored as `ground_truth_samples`.
 
+## Further reading
+
+If you want to dig into the literature behind structural estimation,
+these are useful starting points (each link should pull through the
+public web — none required to do the challenge):
+
+- [ARC: Competing with sampling](https://www.alignment.org/blog/competing-with-sampling/) — the framing post for this challenge.
+- [ARC: AlgZoo — uninterpreted models with fewer than 1,500 parameters](https://www.alignment.org/blog/algzoo-uninterpreted-models-with-fewer-than-1-500-parameters/) — concrete examples of how structural understanding compresses computation.
+- Frey & Hinton, *Variational Learning in Nonlinear Gaussian Belief Networks* (1999) — the classical derivation of the rectified-Gaussian first moment used by the mean-propagation example.
+- Schoenholz, Gilmer, Ganguli & Sohl-Dickstein, *Deep Information Propagation* (ICLR 2017, [arXiv:1611.01232](https://arxiv.org/abs/1611.01232)) — mean-field analysis of how moments propagate through deep ReLU networks; explains when/why the Gaussian assumption breaks.
+- Pennington & Worah, *Nonlinear random matrix theory for deep learning* (NeurIPS 2017) — spectral approaches to predicting layer-by-layer signal evolution.
+- Saxe, McClelland & Ganguli, *Exact solutions to the nonlinear dynamics of learning in deep linear neural networks* (ICLR 2014, [arXiv:1312.6120](https://arxiv.org/abs/1312.6120)) — singular-value-based reasoning that motivates the spectral entry in [algorithm-ideas.md](../how-to/algorithm-ideas.md).
+
 ## ➡️ Next step
 
 - [Scoring Model](./scoring-model.md)

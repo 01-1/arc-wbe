@@ -18,7 +18,20 @@ with flops.BudgetContext(flop_budget=1_000_000) as ctx:
     # BudgetExhaustedError raised here if budget exceeded
 ```
 
-You don't need to create `BudgetContext` yourself — the framework does it before calling your `predict()` method. The `budget` argument tells you how many FLOPs you have.
+You don't need to create `BudgetContext` yourself — something else opens it for you, and your `predict()` body runs inside that scope. Who that "something else" is depends on which stage you're in:
+
+| Stage | Who opens the `BudgetContext` | Where to look |
+|---|---|---|
+| 1 — `python estimator.py` | `local_engine.compare_against_monte_carlo` (default `estimator_budget=1e9`) | [local_engine.py](../../local_engine.py) |
+| 2 — `whest validate` | the validator (small probe budget on a width=4, depth=2 MLP) | the `whestbench` CLI |
+| 3 — `whest run --runner local` | the in-process harness (default `--flop-budget 1e8`) | the `whestbench` CLI |
+| 4 — `whest run --runner subprocess` | the subprocess worker (same default) | the `whestbench` CLI |
+| 5 — `whest run --runner docker` | the harness inside the grader container | the `whestbench` CLI (when shipped) |
+
+The `budget` integer your `predict(mlp, budget)` receives matches the
+`flop_budget` of the surrounding context. You can read it to route between
+algorithms (see [`examples/04_combined.py`](../../examples/04_combined.py))
+or ignore it if you always run the same strategy.
 
 `BudgetContext` also supports `wall_time_limit_s` when you want a cooperative
 wall-clock limit in addition to the FLOP cap:
@@ -73,24 +86,43 @@ Random generation itself is free. FLOPs are counted when you operate on the arra
 
 ## Budget Inspection
 
-Use `budget.summary()` for the current explicit context and
-`fnp.budget_summary()` for the accumulated session/global view:
+Inside an active `BudgetContext`, the `ctx` object exposes the following
+public attributes and methods. Most are only useful while debugging or
+profiling — your `predict()` body usually only needs the `budget` integer
+that the harness passed in.
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `flop_budget` | `int` | Cap configured at construction time. |
+| `flops_used` | `int` | Total counted FLOPs since the context was entered. |
+| `flops_remaining` | `int` | `flop_budget - flops_used`. |
+| `flop_multiplier` | `float` | Per-context FLOP scaler (default 1.0). |
+| `wall_time_s` | `float` | Elapsed wall time since the context was entered. |
+| `wall_time_limit_s` | `float \| None` | Cap configured at construction time. |
+| `total_tracked_time` | `float` | Time spent inside counted flopscope calls. |
+| `untracked_time` | `float` | `wall_time_s - total_tracked_time`. |
+| `elapsed_s` | `float` | Alias of `wall_time_s` for symmetry with the report. |
+| `namespace` | `str \| None` | Namespace this context attributes ops to (set via `with flops.namespace("name")`). |
+| `op_log` | `list[OpRecord]` | Per-op record (only populated under `--profile`). |
+| `summary()` | method | Pretty-printed summary for the current context. |
+| `summary_dict(...)` | method | Same data as a `dict` (machine-readable). |
+| `deduct(n)` | method | Manually attribute `n` FLOPs to this context (use sparingly — flopscope's instrumentation handles the common cases). |
 
 ```python
 with flops.BudgetContext(flop_budget=10_000_000) as ctx:
     # ... your computations ...
-    print(ctx.summary())        # current context only
-    print(fnp.budget_summary())  # process/session-wide summary
-    print(ctx.flops_used)       # integer FLOP count
+    print(ctx.flops_used, "/", ctx.flop_budget)   # quick check
+    print(ctx.flops_remaining)
+    print(ctx.summary())                          # rich per-op breakdown
+    print(flops.budget_summary())                 # process/session-wide
 ```
 
-Both summaries can also include timing data:
+The session-wide `flops.budget_summary()` and `flops.budget_summary_dict()`
+aggregate across every context entered in the current Python process —
+useful when you're profiling a multi-stage pipeline.
 
-- `wall_time_s`: total elapsed time in the context
-- `tracked_time_s`: time spent inside counted flopscope calls
-- `untracked_time_s`: everything else in the context
-
-This is useful during development to understand where both FLOPs and time go.
+Both summaries also include the timing trio above (`wall_time_s`,
+`tracked_time_s` aka `total_tracked_time`, and `untracked_time`).
 
 ## WhestBench-specific limits
 

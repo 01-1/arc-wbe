@@ -13,8 +13,8 @@ Yes. scipy is not part of flopscope, so you import it separately as your own dep
 Either your estimator raised during `predict()`, returned invalid data (wrong shape, NaN, non-numeric), or exhausted the FLOP / wall-time budget. Since 2026-04, explicit predict errors surface through an "Estimator Errors" panel in the report and set exit code `1`; `inf` with exit `0` means budget or time exhaustion rather than a swallowed exception. Run with `--debug` to see the tracebacks:
 
 ```bash
-whest run --estimator ./my-estimator/estimator.py --debug
-whest run --estimator ./my-estimator/estimator.py --debug --fail-fast   # halt at first error
+whest run --estimator estimator.py --debug
+whest run --estimator estimator.py --debug --fail-fast   # halt at first error
 ```
 
 ## Do I need to use the `budget` argument in `predict()`?
@@ -80,6 +80,18 @@ The default evaluation scores your estimator on 10 MLPs (configured by `n_mlps` 
 ## What if my estimator is fast but inaccurate?
 
 You are ranked by MSE, not by how few FLOPs you use. Using fewer FLOPs than the budget gives no bonus — only accuracy matters (as long as you stay within budget).
+
+## My local score is great but my submission scores 10x worse — why?
+
+Almost always one of three things:
+
+1. **Module-level state survives between predict() calls in-process.** Your Stage 3 (`--runner local`) iteration accidentally caches results between MLPs (lookup tables, RNG state, memoized partials). Stage 4 (`--runner subprocess`) and the grader run each MLP in a fresh process — that state is gone, and your score collapses. **Fix:** move state to instance attributes (`self._...`) populated in `setup()`, or use the `SetupContext.scratch_dir` for cross-call caching that's recomputed deterministically.
+
+2. **Imports that work in-process fail in a clean subprocess.** A relative import, a missing `requirements.txt` entry, or a side-effecting top-level statement. **Fix:** run `uv run whest run --estimator estimator.py --runner subprocess` locally before submitting, and read the "Estimator Errors" panel.
+
+3. **Numerical non-determinism without a seed.** Random MLP generation, Monte-Carlo ground truth, or your estimator's own RNG. **Fix:** add `--seed N` to your local runs to compare apples-to-apples, and avoid time-based seeds in your estimator.
+
+If your Stage 3 and Stage 4 scores agree but the grader still disagrees, suspect Python-version or BLAS-version drift — `uv run whest doctor` will surface the relevant runtime info.
 
 ## Next step
 

@@ -30,10 +30,19 @@ The two paths differ only in how sigma_pre is obtained:
 
 from __future__ import annotations
 
+import warnings
+
 import flopscope as flops
 import flopscope.numpy as fnp
 from whestbench import BaseEstimator
 from whestbench.domain import MLP
+
+# The covariance path's post-ReLU update — gain[i]*gain[j]*cov_pre[i,j] —
+# is mathematically symmetric, but flopscope's static analysis cannot
+# prove that from the multiply alone. Silence the cosmetic warning so
+# the example's first-run output stays clean. See `flops.as_symmetric`
+# if you'd rather re-tag the result explicitly.
+warnings.filterwarnings("ignore", category=flops.SymmetryLossWarning)
 
 # ---------------------------------------------------------------------------
 # Mean propagation path  (diagonal variance only)

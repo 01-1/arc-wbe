@@ -1,6 +1,10 @@
 # Stage 1: Iterate Locally (Just `flopscope`)
 
-You don't need the `whest` CLI to start. The `local_engine.py` in this repo gives you the same MLP factory and Monte-Carlo helpers the harness uses internally — wired up so you can iterate on `predict()` and see convergence in seconds.
+> Ladder: **1** · [2](stage-2-validate.md) · [3](stage-3-run-local.md) · [4](stage-4-run-subprocess.md) · [5](stage-5-run-docker.md) · [6](stage-6-package.md)
+
+"*Just `flopscope`*" means: **no `whest` CLI required**. You run `python estimator.py` and the bundled [`local_engine.py`](../../local_engine.py) constructs an MLP, calls your `predict()` inside a `flopscope.BudgetContext`, and sweeps Monte-Carlo sample counts to print a FLOPs-vs-MSE table. The `whestbench.BaseEstimator` and `whestbench.MLP` types you'll see imported are just the shared dataclasses — they don't pull in the harness.
+
+Iterate here until `predict()` converges, then climb to Stage 2 to confirm the contract.
 
 ## Run it
 
@@ -39,6 +43,19 @@ uv run python estimator.py --baseline mean_propagation
 ```
 
 This loads `examples/02_mean_propagation.py` and runs both estimators on the same MLP.
+
+## Expected outcome
+
+| Estimator | MSE on the default MLP | Status |
+|---|---|---|
+| Zeros template (default) | ~0.466 | floor — natural variance of the activations |
+| `--baseline mean_propagation` | ~0.003 | ~150x better; first-order analytical |
+| `--baseline covariance_propagation` | ~0.0007 | tracks neuron correlations |
+| `--baseline combined` | ~0.0007 | budget-aware routing (see [examples/README.md](../../examples/README.md)) |
+
+You're ready for Stage 2 once your estimator's MSE is comfortably below
+the zeros floor and `estimator_flops` stays under whatever budget you'd
+target downstream (Stage 3's grader default is `1e8`).
 
 ## When you're ready
 

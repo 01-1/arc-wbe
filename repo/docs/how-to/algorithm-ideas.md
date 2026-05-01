@@ -33,7 +33,7 @@ Track per-neuron means and variances through each layer using the ReLU expectati
 
 **When to use:** Default choice for most budgets. Fast and reasonably accurate for shallow-to-medium networks.
 
-**Example:** [`examples/estimators/mean_propagation.py`](../../examples/estimators/mean_propagation.py)
+**Example:** [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py)
 
 ## Covariance propagation (full matrix)
 
@@ -43,7 +43,7 @@ Track the full covariance matrix between neurons. More accurate because it captu
 
 **When to use:** When the FLOP budget is large relative to width^2, and accuracy matters more than speed. Best for narrow networks or shallow depths.
 
-**Example:** [`examples/estimators/covariance_propagation.py`](../../examples/estimators/covariance_propagation.py)
+**Example:** [`examples/03_covariance_propagation.py`](../../examples/03_covariance_propagation.py)
 
 ## Hybrid / budget-aware routing
 
@@ -58,20 +58,55 @@ def predict(self, mlp, budget):
 
 **When to use:** When you want a single estimator that adapts to different budget levels.
 
-**Example:** [`examples/estimators/combined_estimator.py`](../../examples/estimators/combined_estimator.py)
+**Example:** [`examples/04_combined.py`](../../examples/04_combined.py)
 
 ## Open directions
 
-These are approaches the organizers think are promising but haven't been tried in this challenge:
+These are approaches the organizers think are promising but haven't been
+tried in this challenge. Each entry: one-line intuition, complexity, and
+when it's likely to pay off.
 
-- **Low-rank covariance approximation:** Track a rank-k approximation of the covariance matrix. Cost O(depth x width^2 x k) — between diagonal and full.
-- **Layer-adaptive methods:** Use full covariance for the first few layers (where correlations build up), then switch to diagonal for deeper layers.
-- **Spectral approaches:** Analyze the weight matrices' singular values to predict how information flows.
-- **Importance sampling:** Sample inputs that are more informative for estimating deep-layer means.
-- **Moment matching beyond second order:** Track skewness or kurtosis to improve ReLU approximations.
+**Low-rank covariance.** Carry a rank-`k` factor `U` of shape `(width, k)`
+so `cov ≈ U Uᵀ` instead of the full `(width, width)` matrix. Cost
+`O(depth · width² · k)` per layer — between diagonal (k=1) and full
+(k=width). Try when your full covariance fits accuracy-wise but burns
+the budget; pick `k` from the spectrum of the early layers' covariance.
+Reference: any low-rank Kalman filter / Ensemble Kalman filter intro.
+
+**Layer-adaptive routing.** Use full covariance for the first few layers
+(where correlations *build*) and switch to diagonal once the
+joint distribution looks roughly factored. Cost is the integral of the
+per-layer choice. Look at per-layer `all_layer_mse` from a
+covariance-only baseline — the layer where the curve plateaus is your
+crossover point. The combined estimator above does this *across* MLPs
+based on budget; layer-adaptive does it *within* one estimator.
+
+**Spectral / weight-statistics methods.** Compute singular values of
+each `W` once in `setup()` (off-budget); use them to predict per-layer
+gain and variance growth analytically without propagating any
+distribution through the layers. Cost `O(depth · width³)` in setup,
+near-zero per `predict()` call. Mostly an academic angle today —
+sensitive to depth and to the He-init scaling, but a candidate for
+extreme-budget regimes. References: Pennington & Worah (2017), Saxe et
+al. (2014).
+
+**Importance sampling.** Bias the input distribution toward regions
+where deep-layer activations have high variance, then re-weight
+(`sum w_i · ReLU(...) / sum w_i`). Cost `O(samples · depth · width²)`
+plus the cost of designing the proposal. Try when standard MC plateaus
+above `~1/√samples` for a particular MLP — usually because most random
+inputs activate few neurons. Reference: any bridge-sampling /
+importance-sampling tutorial.
+
+**Higher-order moments.** Track skewness (third moment) or kurtosis
+(fourth moment) per neuron in addition to mean and variance. Cost
+`O(depth · width^k)` for the `k`-th moment. The ReLU expectation formula
+above assumes Gaussian pre-activations; tracking a third moment lets you
+correct for the asymmetry that builds up in deeper networks. Reference:
+mean-field analyses such as Schoenholz et al. (2017).
 
 ## Next step
 
 - [Manage Your FLOP Budget](./manage-flop-budget.md)
 - [Performance Tips](./performance-tips.md)
-- [From Problem to Code](../getting-started/from-problem-to-code.md)
+- [Stage 1: Iterate Locally](../getting-started/stage-1-standalone.md)
