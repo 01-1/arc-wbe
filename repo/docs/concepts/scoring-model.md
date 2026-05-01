@@ -1,5 +1,7 @@
 # Scoring Model
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page to understand how the leaderboard score is computed from your estimator's predictions.

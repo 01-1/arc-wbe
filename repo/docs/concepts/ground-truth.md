@@ -1,5 +1,7 @@
 # How Ground Truth Is Generated
 
+> [← Documentation](../index.md)
+
 This page explains how the evaluator computes the reference values your estimator is scored against.
 
 ## The process

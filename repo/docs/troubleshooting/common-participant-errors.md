@@ -1,5 +1,7 @@
 # Common Participant Errors
 
+> [← Documentation](../index.md)
+
 Use this page when `validate` or `run` fails.
 
 ## Understand runner modes first

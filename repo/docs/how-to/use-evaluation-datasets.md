@@ -1,5 +1,7 @@
 # Use Evaluation Datasets
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Every `whest run` generates fresh random MLPs and samples many forward passes to establish ground truth. This is correct but slow — especially when you are iterating on an estimator and re-running the same evaluation dozens of times during development.

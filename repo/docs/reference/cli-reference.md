@@ -1,5 +1,7 @@
 # CLI Reference
 
+> [← Documentation](../index.md)
+
 The `whest` CLI is shipped by [whestbench](https://github.com/AIcrowd/whestbench). The authoritative reference lives there:
 
 → [whestbench: docs/reference/cli-reference.md](https://github.com/AIcrowd/whestbench/blob/main/docs/reference/cli-reference.md)

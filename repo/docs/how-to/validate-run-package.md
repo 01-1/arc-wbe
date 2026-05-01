@@ -1,5 +1,7 @@
 # Validate, Run, and Package
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page for the standard local participant loop.

@@ -1,5 +1,7 @@
 # Problem Setup
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page when you want a better understanding of the technical framing of the problem.

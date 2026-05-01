@@ -1,5 +1,7 @@
 # Flopscope Primer
 
+> [← Documentation](../index.md)
+
 Flopscope is a numpy-compatible array library that tracks FLOPs analytically rather than timing them on hardware. Every arithmetic operation on a `fnp.ndarray` increments a FLOP counter instead of (or in addition to) performing the computation. This is how WhestBench enforces fair FLOP budgets across different machines.
 
 Source: [github.com/AIcrowd/flopscope](https://github.com/AIcrowd/flopscope)

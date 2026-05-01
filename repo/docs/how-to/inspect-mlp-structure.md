@@ -1,5 +1,7 @@
 # Inspect and Traverse MLP Structure
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page when implementing estimator logic that depends on MLP topology or layer weights.

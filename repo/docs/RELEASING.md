@@ -1,5 +1,7 @@
 # Releasing whest-starterkit
 
+> [← Documentation](index.md)
+
 Single source of truth for the bump dance. Stay current.
 
 ## Cadence

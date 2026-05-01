@@ -1,5 +1,7 @@
 # Profile Simulation Performance
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 The starter kit uses flopscope as its single simulation backend — analytical FLOP counting replaces wall-clock timing across multiple backends. The `profile-simulation` command lets you verify FLOP accounting correctness and explore how FLOP costs scale with network size.

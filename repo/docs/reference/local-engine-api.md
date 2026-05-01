@@ -1,5 +1,7 @@
 # `local_engine` API
 
+> [← Documentation](../index.md)
+
 `local_engine.py` is a pedagogical re-implementation of whestbench's MLP factory and Monte-Carlo simulator in raw `flopscope` code. You can read the whole file in 5 minutes — that's the point.
 
 > **Why pedagogical?** Stage 1 is about understanding the math. Re-implementing in raw flopscope means there's no library magic between you and the forward pass.

@@ -1,5 +1,7 @@
 # Write an Estimator
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page when implementing your custom participant estimator.

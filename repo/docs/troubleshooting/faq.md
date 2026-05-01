@@ -1,5 +1,7 @@
 # Frequently Asked Questions
 
+> [← Documentation](../index.md)
+
 ## Can I use numpy directly?
 
 All computation must go through flopscope (`import flopscope as flops` and `import flopscope.numpy as fnp`). flopscope wraps numpy with analytical FLOP counting — your score depends on the FLOP cost of your operations, and only flopscope tracks those costs.

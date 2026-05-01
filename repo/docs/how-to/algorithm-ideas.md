@@ -1,5 +1,7 @@
 # Algorithm Ideas
 
+> [← Documentation](../index.md)
+
 This page surveys estimation strategies for the ARC Whitebox Estimation Challenge. Each approach trades accuracy against FLOP cost differently.
 
 ## Monte Carlo sampling

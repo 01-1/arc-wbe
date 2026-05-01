@@ -1,5 +1,7 @@
 # Performance Tips
 
+> [← Documentation](../index.md)
+
 This page lists concrete patterns for reducing FLOP usage in your estimator.
 
 ## Matmul dominates your budget

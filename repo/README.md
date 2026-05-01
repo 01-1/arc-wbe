@@ -67,15 +67,27 @@ Reads as a 7-row health check; see [docs/reference/whest-doctor.md](docs/referen
 
 Or check [docs/troubleshooting/](docs/troubleshooting/).
 
+## Documentation
+
+The ladder above is the tutorial trail. Past Stage 1, the docs split into five jobs — pick whichever matches your need. Full map and guided reading paths at **[docs/index.md](docs/index.md)**.
+
+|     | Section | When to read |
+|---|---|---|
+| 🪜 | **[Tutorial](docs/getting-started/)** | Climbing the 6-stage ladder above. |
+| 📖 | **[Concepts](docs/concepts/)** | Why this challenge exists, what's being scored, how ground truth works. |
+| 🔧 | **[How-to](docs/how-to/)** | Recipes: write an estimator, debug, optimize, submit. |
+| 📚 | **[Reference](docs/reference/)** | Exact contracts: [estimator API](docs/reference/estimator-contract.md), [score report fields](docs/reference/score-report-fields.md), [CLI](docs/reference/cli-reference.md), [flopscope primer](docs/reference/flopscope-primer.md). |
+| 🚑 | **[Troubleshooting](docs/troubleshooting/)** | When something breaks: [common errors](docs/troubleshooting/common-participant-errors.md), [FAQ](docs/troubleshooting/faq.md). |
+| 🔬 | **[Advanced](docs/advanced/)** | [Visualizer](docs/advanced/use-whestbench-explorer.md), [profiler](docs/advanced/profile-simulation.md). |
+
 ## Repo Layout
 
 ```
-.
-├── estimator.py          ← Edit this. Stages 1-6 all use it.
-├── local_engine.py       ← Pedagogical re-implementation; iterate freely.
-├── examples/             ← Reference estimators 01-04.
-├── docs/                 ← Stage-by-stage walkthroughs, concepts, reference.
-└── tests/                ← Drift gates (README commands + local_engine parity).
+├── estimator.py     ← Edit this. Stages 1-6 all use it.
+├── local_engine.py  ← Pedagogical re-implementation; iterate freely.
+├── examples/        ← Reference estimators 01-04 (see examples/README.md).
+├── docs/            ← Full documentation. Start at docs/index.md.
+└── tests/           ← Drift gates (README commands + local_engine parity).
 ```
 
 ## License & Contributing

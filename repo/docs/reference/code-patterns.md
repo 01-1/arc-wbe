@@ -1,5 +1,7 @@
 # Code Patterns
 
+> [← Documentation](../index.md)
+
 Quick reference for flopscope operations. All examples assume `import flopscope as flops
 import flopscope.numpy as fnp`.
 

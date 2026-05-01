@@ -1,5 +1,7 @@
 # Pre-Submission Checklist
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 The minute before you click "submit" on AIcrowd. Run through these

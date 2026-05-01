@@ -1,5 +1,7 @@
 # `whest doctor`
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 You ran `uv run whest doctor` and want to interpret a `[WARN]` or

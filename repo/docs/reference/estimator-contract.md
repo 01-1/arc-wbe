@@ -1,5 +1,7 @@
 # Estimator Contract
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page when you need exact estimator I/O requirements.

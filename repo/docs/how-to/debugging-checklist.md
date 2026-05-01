@@ -1,5 +1,7 @@
 # Debugging Checklist
 
+> [← Documentation](../index.md)
+
 Use this page when your estimator runs but the score is bad, or something feels wrong. Work through the tiers in order.
 
 ## Tier 0: Pure-Python inner loop (fastest iteration)

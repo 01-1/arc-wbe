@@ -1,5 +1,7 @@
 # Manage Your FLOP Budget
 
+> [← Documentation](../index.md)
+
 ## When to use this page
 
 Use this page to understand how FLOP budgets work and how to optimize your estimator to stay within budget.
