@@ -15,6 +15,12 @@
 
 You are given a randomly-initialized ReLU MLP and a FLOP budget. Your job: predict the per-neuron mean activation under N(0, 1) input, **without** running anywhere near the budget's worth of forward passes. The lower your MSE against the ground-truth Monte-Carlo means (per FLOP spent), the better your score.
 
+<div align="center">
+  <img src="assets/whestbench-explorer-visualization.svg" alt="A small ReLU MLP (width 4, depth 5) shown as a layer-by-layer heatmap of per-neuron mean activations after Monte-Carlo ground-truth estimation; rows are layers, columns are neurons, color intensity is mean activation" width="720">
+  <br>
+  <sub><em>Per-neuron mean activations of a small MLP (width 4, depth 5) after Monte-Carlo ground truth — exactly what your estimator predicts. Generate your own at the <a href="https://aicrowd.github.io/whestbench-explorer/">hosted WhestBench Explorer</a>.</em></sub>
+</div>
+
 This kit walks you up a "ladder of formality" — start by iterating math locally with zero CLI knowledge, then graduate to the harness when you're ready.
 
 ## 🚀 Your First 5 Minutes (Stage 1: just `whest`)
