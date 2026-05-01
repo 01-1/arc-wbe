@@ -29,4 +29,4 @@ Lookup material. No tutorials here — go to [How-to](../how-to/) for guidance, 
 ## ➡️ Where to look next
 
 - Trying to do something and need a procedure? → [How-to](../how-to/).
-- Want to understand *why* the contract is shaped this way? → [Concepts](../concepts/).
+- For *why* the contract is shaped this way, see [Concepts](../concepts/).

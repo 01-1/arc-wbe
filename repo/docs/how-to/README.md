@@ -32,4 +32,4 @@ Task-oriented guides. Each one answers "I want to do X — give me the steps and
 
 - Need the exact contract / report fields? → [Reference](../reference/).
 - Estimator throws an error you don't recognize? → [Troubleshooting](../troubleshooting/).
-- Want to climb the formality ladder one stage at a time? → [Tutorial](../getting-started/).
+- For the formality ladder one stage at a time, see [Tutorial](../getting-started/).

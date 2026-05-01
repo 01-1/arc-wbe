@@ -2,7 +2,7 @@
 
 > [← Documentation](../README.md)
 
-The tutorial trail. Each stage is a single command on the same `estimator.py`, with the harness adding one more level of formality at each step. Read top-to-bottom; don't skip — Stage 4's subprocess isolation catches bugs that Stage 3 hides.
+The tutorial trail. Each stage is a single command on the same `estimator.py`, with the harness adding one more level of formality at each step. Read top-to-bottom: Stage 4's subprocess isolation catches bugs that Stage 3 hides, so skipping ahead is rarely worth it.
 
 | Stage | Command | What it adds | Doc |
 |---|---|---|---|
