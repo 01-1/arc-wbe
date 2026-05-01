@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Starter kit for the ARC Whitebox Estimation Challenge"
 requires-python = ">=3.10"
 dependencies = [
-    "whestbench @ git+https://github.com/AIcrowd/whestbench.git@28c203f57bfe1c56c6528b60019bd8a7706f276b",
+    "whestbench @ git+https://github.com/AIcrowd/whestbench.git@f3d2b55",
 ]
 
 [dependency-groups]

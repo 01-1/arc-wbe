@@ -30,7 +30,7 @@ wheels = [
 [[package]]
 name = "flopscope"
 version = "0.2.0"
-source = { git = "https://github.com/AIcrowd/flopscope.git#8ed22a205aba62fcef9c0f6e31f11285935f8b44" }
+source = { git = "https://github.com/AIcrowd/flopscope.git#b12e45e580018e0068fcf16fb59cce236d28e79e" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -404,7 +404,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "whestbench", git = "https://github.com/AIcrowd/whestbench.git?rev=28c203f57bfe1c56c6528b60019bd8a7706f276b" }]
+requires-dist = [{ name = "whestbench", git = "https://github.com/AIcrowd/whestbench.git?rev=f3d2b55" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -415,7 +415,7 @@ dev = [
 [[package]]
 name = "whestbench"
 version = "0.2.0"
-source = { git = "https://github.com/AIcrowd/whestbench.git?rev=28c203f57bfe1c56c6528b60019bd8a7706f276b#28c203f57bfe1c56c6528b60019bd8a7706f276b" }
+source = { git = "https://github.com/AIcrowd/whestbench.git?rev=f3d2b55#f3d2b5565a899aea487b3fc047edbcd40e754bbd" }
 dependencies = [
     { name = "flopscope" },
     { name = "plotext" },
