@@ -13,7 +13,7 @@
 
 ## 🎬 60-Second Overview
 
-You are given a randomly-initialized ReLU MLP and a FLOP budget. Your job: predict the per-neuron mean activation under N(0, 1) input, **without** running anywhere near the budget's worth of forward passes. The lower your MSE against the ground-truth Monte-Carlo means (per FLOP spent), the better your score.
+You are given a randomly-initialized ReLU MLP and a FLOP budget. Predict the per-neuron mean activation under N(0, 1) input — without running anywhere near the budget's worth of forward passes. Your score is the MSE against the ground-truth Monte-Carlo means: lower is better.
 
 <div align="center">
   <img src="assets/whestbench-explorer-visualization.svg" alt="A small ReLU MLP (width 4, depth 5) shown as a layer-by-layer heatmap of per-neuron mean activations after Monte-Carlo ground-truth estimation; rows are layers, columns are neurons, color intensity is mean activation" width="720">
@@ -21,7 +21,7 @@ You are given a randomly-initialized ReLU MLP and a FLOP budget. Your job: predi
   <sub><em>Per-neuron mean activations of a small MLP (width 4, depth 5) after Monte-Carlo ground truth — exactly what your estimator predicts. Generate your own at the <a href="https://aicrowd.github.io/whestbench-explorer/">hosted WhestBench Explorer</a>.</em></sub>
 </div>
 
-This kit walks you up a "ladder of formality" — start by iterating math locally with zero CLI knowledge, then graduate to the harness when you're ready.
+The kit is structured as a six-stage **ladder of formality**: each stage adds one more layer of harness rigor. Start at Stage 1 (pure local math, zero CLI knowledge); climb to Stage 6 (a packaged submission) when you're ready.
 
 ## 🚀 Your First 5 Minutes (Stage 1: just `python`)
 
@@ -34,9 +34,9 @@ cd whest-starterkit
 uv sync && uv run python estimator.py
 ```
 
-You just ran an estimator and saw it converge against ground truth. Now edit `predict()` in [estimator.py](estimator.py) and re-run.
+That run printed a Monte-Carlo convergence table — your estimator's predictions, the FLOPs it used, and the MSE against ground truth at increasing sample counts. To experiment, edit `predict()` in [estimator.py](estimator.py) and re-run.
 
-Want to compare against a reference?
+Compare against a bundled baseline:
 
 ```bash-test
 uv run python estimator.py --baseline mean_propagation
@@ -54,14 +54,14 @@ See [examples/README.md](examples/README.md) for the curriculum table.
 
 ## 🪜 Climb the Ladder (Stages 2-6)
 
-| Stage | Command | What it adds | Walkthrough |
-|---|---|---|---|
-| 1 | `uv run python estimator.py` | The math. Estimator vs Monte Carlo. | [Standalone &rarr;](docs/getting-started/stage-1-standalone.md) |
-| 2 | `uv run whest validate --estimator estimator.py` | Contract correctness (shapes, types). | [Validate &rarr;](docs/getting-started/stage-2-validate.md) |
-| 3 | `uv run whest run --estimator estimator.py --runner local` | Real scoring, in-process, debuggable with `pdb`. | [Run local &rarr;](docs/getting-started/stage-3-run-local.md) |
-| 4 | `uv run whest run --estimator estimator.py --runner subprocess` | Isolation; closer to grader environment. | [Subprocess &rarr;](docs/getting-started/stage-4-run-subprocess.md) |
-| 5 | `uv run whest run --estimator estimator.py --runner docker` | **Coming soon.** Production-equivalent grader. | [Docker &rarr;](docs/getting-started/stage-5-run-docker.md) |
-| 6 | `uv run whest package --estimator estimator.py -o submission.tar.gz` | Submission artifact. | [Package &rarr;](docs/getting-started/stage-6-package.md) |
+| Stage | Command | What it adds |
+|---|---|---|
+| [1: Iterate locally](docs/getting-started/stage-1-standalone.md) | `uv run python estimator.py` | The math. Estimator vs Monte Carlo. |
+| [2: Validate the contract](docs/getting-started/stage-2-validate.md) | `uv run whest validate --estimator estimator.py` | Contract correctness (shapes, types). |
+| [3: Run locally](docs/getting-started/stage-3-run-local.md) | `uv run whest run --estimator estimator.py --runner local` | Real scoring, in-process, debuggable with `pdb`. |
+| [4: Subprocess runner](docs/getting-started/stage-4-run-subprocess.md) | `uv run whest run --estimator estimator.py --runner subprocess` | Isolation; closer to grader environment. |
+| [5: Docker runner](docs/getting-started/stage-5-run-docker.md) | `uv run whest run --estimator estimator.py --runner docker` | **Coming soon.** Production-equivalent grader. |
+| [6: Package your submission](docs/getting-started/stage-6-package.md) | `uv run whest package --estimator estimator.py -o submission.tar.gz` | Submission artifact. |
 
 ## 🚑 When Something Breaks
 
@@ -75,7 +75,7 @@ Or check [docs/troubleshooting/](docs/troubleshooting/).
 
 ## 📚 Documentation
 
-The ladder above is the tutorial trail. Past Stage 1, the docs split into six jobs — pick whichever matches your need. Full map and guided reading paths at **[docs/](docs/README.md)**.
+Past Stage 1, the documentation is organized into six sections — pick whichever matches your task. Full map and guided reading paths at **[docs/](docs/README.md)**.
 
 <details>
 <summary>🪜 <b><a href="docs/getting-started/">Tutorial</a></b> — Climb the 6-stage ladder above</summary>
@@ -155,11 +155,11 @@ The ladder above is the tutorial trail. Past Stage 1, the docs split into six jo
 ## 📁 Repo Layout
 
 ```
-├── estimator.py     ← Edit this. Stages 1-6 all use it.
-├── local_engine.py  ← Pedagogical re-implementation; iterate freely.
-├── examples/        ← Reference estimators 01-04 (see examples/README.md).
-├── docs/            ← Full documentation. Start at docs/.
-└── tests/           ← Drift gates (README commands + local_engine parity).
+├── estimator.py     ← The participant's entry point; every stage operates on this file.
+├── local_engine.py  ← Single-file re-implementation of the harness; safe to read end-to-end.
+├── examples/        ← Numbered reference estimators (01–04) with a curriculum table.
+├── docs/            ← Full documentation; start at docs/README.md.
+└── tests/           ← Drift gates: README commands + local_engine parity.
 ```
 
 ## ⚖️ License & Contributing
