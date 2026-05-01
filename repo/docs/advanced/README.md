@@ -1,0 +1,15 @@
+# Advanced — Deeper tooling
+
+> [← Documentation](../index.md)
+
+You don't need either of these to ship a submission. They become useful once you're tuning aggressively and want better visibility into where FLOPs and time go.
+
+| Doc | When to read |
+|---|---|
+| [profile-simulation.md](profile-simulation.md) | Profile the FLOP and time breakdown of your `predict()` call — identify the dominant op before you optimize. |
+| [use-whestbench-explorer.md](use-whestbench-explorer.md) | Launch the interactive WhestBench Explorer in a browser to inspect MLPs and ground-truth activations layer-by-layer. |
+
+## Where to look next
+
+- Need a faster local iteration loop instead? → [How-to: use evaluation datasets](../how-to/use-evaluation-datasets.md).
+- Looking for the FLOP cost of specific ops? → [Reference: flopscope primer](../reference/flopscope-primer.md).
