@@ -60,6 +60,7 @@ for budget rules.
 | `MLP` | `width` | Number of neurons per layer |
 | `MLP` | `depth` | Number of weight matrices (layers) |
 | `MLP` | `weights` | Ordered weight matrices, each `(width, width)` |
+| `MLP` | `seed` | Per-MLP grader-supplied seed; use this to seed estimator-internal randomness for reproducibility under regrade. See [Reproducibility under the grader seed](#reproducibility-under-the-grader-seed) below. |
 
 For traversal examples, see [Inspect and Traverse MLP Structure](../how-to/inspect-mlp-structure.md).
 
@@ -94,12 +95,25 @@ class name in `error_code`, and forwards a formatted `traceback` (subprocess
 runs forward it across the worker boundary). Use `--debug` to see
 tracebacks inline; `--fail-fast` to halt at the first failure.
 
-Predictions for the failed MLP are scored against zeros, so the failure
-*does* hurt your `primary_score`. If you want the run to stop at the first
-problem rather than score-against-zeros, use `--fail-fast`.
+Predictions for the failed MLP are scored against zeros AND the per-MLP multiplier is forced to **1.0** (no compute discount), so the per-MLP `adjusted_final_layer_score_m = MSE(0, Y_m) × 1.0`. This is strictly worse than a trivial-zero submission that succeeds, which receives the 0.1 multiplier floor — a factor-of-ten cap on the discount. The suite mean stays finite either way; the `failure_breakdown` and `n_failed_mlps` aggregates surface how many MLPs hit which failure path. If you want the run to stop at the first problem rather than score-against-zeros, use `--fail-fast`.
 
-For the structured `error.details` schema, see
-[score-report-fields.md](score-report-fields.md#per-mlp-fields).
+For the structured `error.details` schema, see [score-report-fields.md](score-report-fields.md#per-mlp-fields).
+
+## Reproducibility under the grader seed
+
+If your estimator uses randomness — Monte Carlo sampling, randomized hashing, random projections, etc. — seed it from `mlp.seed`. The grader supplies a fixed per-MLP seed that is identical across all submissions for a given MLP, derived deterministically from the suite seed. **Submissions that use unseeded randomness or their own per-MLP seeds are NOT guaranteed to reproduce under regrade and may be disqualified for prize eligibility.**
+
+```python
+import flopscope.numpy as fnp
+
+def predict(self, mlp, budget):
+    rng = fnp.random.default_rng(mlp.seed)
+    # ... use rng for any internal randomness
+```
+
+If your estimator is deterministic (no internal randomness), you can ignore `mlp.seed`.
+
+`setup()` runs before any MLP is seen, so `mlp.seed` is not yet available there. Setup-time precompute must be deterministic — use a hard-coded constant (e.g. a class-level `SETUP_SEED`) to seed any submission-level random precompute. The resulting state is identical across all MLPs in the suite and across regrades; that is the right behavior for "precompute it once, reuse it" patterns like fixed random projections. All four bundled examples (`examples/0[1-4]_*.py`) carry the scaffold side-by-side so the pattern is visible whether you start from the random baseline or one of the deterministic propagators.
 
 ## ➡️ Next step
 

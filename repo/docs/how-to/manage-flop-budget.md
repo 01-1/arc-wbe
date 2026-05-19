@@ -24,7 +24,7 @@ For the full flopscope API and cost model, see the [flopscope documentation](htt
 | **Matrix operations** | `fnp.matmul()`, `fnp.einsum()` | Depends on dimensions — typically dominates your budget |
 | **Random samplers** | `rng.standard_normal()`, `rng.uniform()` (where `rng = fnp.random.default_rng(seed)`); same for module-level `fnp.random.standard_normal()` etc. and `fnp.random.RandomState(seed)` | Calibrated per method (default ~16 FLOPs/element for `standard_normal`) |
 
-**Key insight:** `fnp.matmul` on `(n, n)` matrices costs `O(n^3)` FLOPs. For width-100 networks, a single matmul costs ~1M FLOPs. Most of your budget goes to matrix operations.
+**Key insight:** `fnp.matmul` on `(n, n)` matrices costs `O(n^3)` FLOPs. For width-256 networks, a single matmul costs ~17M FLOPs. Most of your budget goes to matrix operations.
 
 ## Check your budget usage
 
@@ -33,8 +33,8 @@ Wrap your estimator logic in a `BudgetContext` to see how many FLOPs it consumes
 ```python
 import flopscope as flops
 
-with flops.BudgetContext(flop_budget=100_000_000) as budget:
-    result = estimator.predict(mlp, budget=100_000_000)
+with flops.BudgetContext(flop_budget=17_000_000_000) as budget:
+    result = estimator.predict(mlp, budget=17_000_000_000)
 
 print(f"FLOPs used: {budget.flops_used:,}")
 print(f"FLOPs remaining: {budget.flops_remaining:,}")
@@ -45,10 +45,10 @@ If you also want a wall-clock guardrail while debugging locally, set
 
 ```python
 with flops.BudgetContext(
-    flop_budget=100_000_000,
+    flop_budget=17_000_000_000,
     wall_time_limit_s=2.0,
 ) as budget:
-    result = estimator.predict(mlp, budget=100_000_000)
+    result = estimator.predict(mlp, budget=17_000_000_000)
 ```
 
 ## Get a per-operation breakdown
@@ -60,8 +60,8 @@ consume the most FLOPs:
 ```python
 import flopscope as flops
 
-with flops.BudgetContext(flop_budget=100_000_000) as budget:
-    result = estimator.predict(mlp, budget=100_000_000)
+with flops.BudgetContext(flop_budget=17_000_000_000) as budget:
+    result = estimator.predict(mlp, budget=17_000_000_000)
     print(budget.summary())
 
 flops.budget_summary()
@@ -87,7 +87,7 @@ When you run your estimator with `whest run`, the per-MLP report includes:
 
 - **`flops_used`**: total FLOPs your estimator consumed for that MLP.
 - **`budget_exhausted`**: `true` if your estimator exceeded the FLOP budget — predictions were zeroed.
-- **`final_mse`** / **`all_layer_mse`**: your prediction accuracy (lower is better).
+- **`final_layer_mse`** / **`all_layers_mse`**: your prediction accuracy (lower is better).
 
 If `budget_exhausted` is `true`, your predictions were discarded. You need to reduce FLOP usage.
 

@@ -62,6 +62,45 @@ available but are no longer required for tracking purposes.
 
 ## Common patterns
 
+### Seed randomness from `mlp.seed`
+
+The grader supplies a fixed per-MLP seed via `mlp.seed`. Use it to seed any randomness inside `predict()`:
+
+```python
+import flopscope.numpy as fnp
+
+def predict(self, mlp, budget):
+    rng = fnp.random.default_rng(mlp.seed)
+    samples = rng.standard_normal((n_samples, mlp.width))
+    ...
+```
+
+For multiple independent RNG streams within one `predict()` call, spawn sub-generators from the per-MLP root rather than choosing your own seeds:
+
+```python
+master = fnp.random.default_rng(mlp.seed)
+sub_a, sub_b, sub_c = (
+    fnp.random.default_rng(s)
+    for s in master.bit_generator.spawn(3)
+)
+```
+
+For submission-level random precompute (random projections, fixed sampling patterns), use a hard-coded constant in `setup()` or `__init__` — `mlp.seed` is not available there:
+
+```python
+class Estimator(BaseEstimator):
+    SETUP_SEED = 0xC0FFEE  # submission-level seed; constant across all MLPs
+
+    def __init__(self):
+        self._init_rng = fnp.random.default_rng(self.SETUP_SEED)
+
+    def setup(self, context):
+        # Precompute a (width, k) fixed random projection.
+        self.projection = self._init_rng.standard_normal((context.width, 64))
+```
+
+Participant-chosen per-MLP seeds (e.g. `fnp.random.default_rng(42)` inside `predict()`) may be disqualified for prize eligibility — see [Estimator Contract: Reproducibility](./estimator-contract.md#reproducibility-under-the-grader-seed).
+
 ### Standard normal PDF and CDF (built-in)
 
 flopscope provides built-in PDF and CDF functions that are FLOP-tracked:
@@ -158,7 +197,7 @@ fit for moderate widths). The approximation degrades when:
 - **Activations cluster near zero.** When `α ≈ 0`, the rectified-Gaussian
   approximation is accurate, but `µ` is small and relative errors spike.
 
-If your `final_mse` is fine but `all_layer_mse` blows up, this assumption
+If your `final_layer_mse` is fine but `all_layers_mse` blows up, this assumption
 is usually the culprit. See [algorithm-ideas.md](../how-to/algorithm-ideas.md)
 for advanced moment-matching strategies.
 
