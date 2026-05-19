@@ -65,7 +65,7 @@ Stage 1's `local_engine.compare_against_monte_carlo` uses `estimator_budget=1e9`
 
 ## Why a different MSE than Stage 1?
 
-Stage 1 uses one fixed MLP (`build_mlp(width=32, depth=6, seed=0)`). Stage 3 generates a fresh suite of random MLPs at the grader shape `width=256, depth=8` (or loads a pre-created dataset via `--dataset`). Lower variance per MLP, but the average is what counts — and Stage 3 also applies the budget multiplier `max(0.1, C_m / B)` on top of the raw MSE, so Stage 3's `adjusted_final_layer_score` is generally smaller than Stage 1's pure MSE.
+Stage 1 uses one fixed MLP (`build_mlp(width=256, depth=8, seed=0)`) — same shape as the grader, same single MLP every run. Stage 3 generates a fresh **suite** of random MLPs at the same shape (or loads a pre-created dataset via `--dataset`), so the raw `final_layer_mse` mean averages over more variance than Stage 1's single-MLP MSE. Stage 3 also applies the budget multiplier `max(0.1, C_m / B)` on top of the raw MSE, so Stage 3's `adjusted_final_layer_score` is generally smaller than Stage 1's pure MSE.
 
 ## Debugging
 
