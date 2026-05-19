@@ -58,7 +58,22 @@ class Estimator(BaseEstimator):
     Tracks the full (width x width) covariance matrix through every layer.
     More accurate than mean propagation for correlated networks, but costs
     O(width^2) memory and O(width^3) FLOPs per layer.
+
+    Seeding (whestbench contract -- see
+    ``docs/reference/estimator-contract.md``): this estimator is deterministic,
+    but it carries the canonical seeding scaffold so every bundled example
+    shows the pattern. ``self._init_rng`` is the submission-level RNG seeded
+    from ``SETUP_SEED``; the ``_rng`` line at the top of ``predict`` is the
+    per-MLP RNG seeded from ``mlp.seed``. Both are unused here because the
+    algorithm is purely analytical.
     """
+
+    SETUP_SEED = 0xC0FFEE  # any fixed constant; this estimator does no random precompute
+
+    def __init__(self) -> None:
+        # Submission-level RNG; unused in this deterministic estimator but
+        # carried here so every example shows the pattern.
+        self._init_rng = fnp.random.default_rng(self.SETUP_SEED)
 
     def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
         """Predict per-layer output means via full covariance propagation.
@@ -66,6 +81,10 @@ class Estimator(BaseEstimator):
         Returns an array of shape (depth, width) where row i is the predicted
         mean activation vector after the i-th ReLU layer.
         """
+        # Per-MLP RNG seeded from the grader's seed; unused here (deterministic
+        # algorithm) but carried so every example shows the pattern.
+        _rng = fnp.random.default_rng(mlp.seed)
+        _ = _rng  # silences "unused variable" linters
         _ = budget  # budget is unused by this estimator
         width = mlp.width
 

@@ -1,3 +1,22 @@
+"""Random-baseline estimator.
+
+Demonstrates the canonical contract surface (``setup`` / ``predict`` /
+``teardown``) *and* the whestbench RNG-seeding contract:
+
+* ``SETUP_SEED`` / ``self._init_rng`` -- hard-coded submission-level seed.
+  Used for random precompute that should be deterministic across MLPs and
+  across regrades (here: nothing -- this baseline has no setup-time
+  precompute, but the scaffold is present so every bundled example
+  demonstrates the pattern).
+* ``rng = fnp.random.default_rng(mlp.seed)`` inside ``predict`` -- per-MLP
+  RNG seeded from the grader-supplied ``mlp.seed``. This is the seed
+  whose determinism the grader checks under regrade. Submissions that
+  use their own per-MLP seeds (or unseeded randomness) may be
+  disqualified -- see
+  ``docs/reference/estimator-contract.md``
+  ("Reproducibility under the grader seed") for the contract.
+"""
+
 from __future__ import annotations
 
 import flopscope.numpy as fnp
@@ -6,26 +25,23 @@ from whestbench.domain import MLP
 
 
 class Estimator(BaseEstimator):
-    """Random estimator: returns random predictions for all layers."""
+    SETUP_SEED = 0xC0FFEE  # any fixed constant; identifies this submission's setup state
 
     def __init__(self) -> None:
-        self._predict_calls = 0
         self._context = None
+        self._init_rng = fnp.random.default_rng(self.SETUP_SEED)
 
     def setup(self, context: SetupContext) -> None:
         self._context = context
-        self._predict_calls = 0
 
     def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
-        self._predict_calls += 1
-        seed_text = f"random|call={self._predict_calls}|w={mlp.width}|d={mlp.depth}|b={budget}"
-        seed_entropy = fnp.frombuffer(seed_text.encode("utf-8"), dtype=fnp.uint8).astype(fnp.int32)
-        rng = fnp.random.default_rng(seed_entropy)
-        return fnp.asarray(rng.uniform(0.0, 1.0, size=(mlp.depth, mlp.width)).astype(fnp.float32))
+        rng = fnp.random.default_rng(mlp.seed)
+        return fnp.asarray(
+            rng.uniform(0.0, 1.0, size=(mlp.depth, mlp.width)).astype(fnp.float32)
+        )
 
     def teardown(self) -> None:
         self._context = None
-        self._predict_calls = 0
 
 
 if __name__ == "__main__":
