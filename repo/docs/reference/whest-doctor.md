@@ -19,7 +19,7 @@ whest doctor
 ------------
   [OK]    Python version         3.10.17 satisfies >=3.10
   [OK]    uv on PATH             /Users/mohanty/.local/bin/uv
-  [OK]    whest install mode     from-source · https://github.com/AIcrowd/whestbench.git
+  [OK]    whest install mode     wheel/pip
   [WARN]  BLAS thread pool       no BLAS pool detected
                                  threadpoolctl detected no BLAS pool; numpy may be using a fallback. Usually harmless.
   [OK]    Free disk in CWD       168.8 GiB free
@@ -37,7 +37,7 @@ Add `--format json` for a machine-readable record.
 |---|---|---|
 | **Python version** | Interpreter is Python 3.10+ as required by `pyproject.toml`. | Install Python 3.10+ (`uv python install 3.10`) and rerun `uv sync`. |
 | **uv on PATH** | `uv` binary is reachable. Required for the `uv run …` commands the docs use. | Install uv: <https://docs.astral.sh/uv/getting-started/installation/>. |
-| **whest install mode** | Reports whether `whestbench` was installed from a published wheel or `git+https://…@<sha>` (the starter-kit pin). | None — informational. If you see `from-source`, your runs match the kit's pinned upstream commit. |
+| **whest install mode** | Reports whether `whestbench` was installed from a published wheel (`pip`) or source checkout. | None — informational. A wheel install is expected for the standard starter-kit dependency stack. |
 | **BLAS thread pool** | `threadpoolctl` finds a BLAS pool (OpenBLAS, MKL, Accelerate). When absent, numpy falls back to a less-optimized path; FLOPs counts are unaffected, but wall-clock time may be higher and `--max-threads` has no effect. | Install a BLAS-backed numpy (the default `pip install numpy` usually has one). On macOS Apple Silicon, `pip install numpy` ships Accelerate. The warning is harmless for scoring; only matters if you're optimizing wall time. |
 | **Free disk in CWD** | At least a few GiB free. Datasets, logs, and the per-run report can grow on long iteration sessions. | Clear space; `whest run` may fail to write reports otherwise. |
 | **CWD writable** | The directory you're invoking `whest` from is writable. | `cd` into a writable directory or fix permissions. |

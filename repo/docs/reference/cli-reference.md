@@ -6,8 +6,6 @@ The `whest` CLI is shipped by [whestbench](https://github.com/AIcrowd/whestbench
 
 → [whestbench: docs/reference/cli-reference.md](https://github.com/AIcrowd/whestbench/blob/main/docs/reference/cli-reference.md)
 
-This kit pins a specific version of whestbench. Check `pyproject.toml` for the tag in use.
-
 ## Quick lookup
 
 | Command | What it does | Stage |

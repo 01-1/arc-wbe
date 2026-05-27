@@ -16,7 +16,7 @@ You've climbed the ladder. Now ship it.
 uv run whest package --estimator estimator.py -o submission.tar.gz
 ```
 
-This produces `submission.tar.gz` containing your `estimator.py`, the pinned `whestbench` version, and any imports your estimator needs (auto-detected). Upload that file to the AIcrowd submission portal.
+This produces `submission.tar.gz` containing your `estimator.py`, the resolved `whestbench` version, and any imports your estimator needs (auto-detected). Upload that file to the AIcrowd submission portal.
 
 ## What's in the artifact
 
@@ -29,7 +29,7 @@ This produces `submission.tar.gz` containing your `estimator.py`, the pinned `wh
 What happens once you upload `submission.tar.gz`:
 
 1. **AIcrowd unpacks the artifact** into a clean grader container that
-   pre-installs the pinned `whestbench` version plus the contents of
+   pre-installs the runner’s `whestbench` release plus the contents of
    your `requirements.txt`.
 2. **The grader runs `whest run --runner docker`** against a held-out
    MLP suite (same `width`, `depth`, `flop_budget` as the public

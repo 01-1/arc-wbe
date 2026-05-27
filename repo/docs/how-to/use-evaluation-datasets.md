@@ -10,19 +10,31 @@ Pre-created evaluation datasets let you do that expensive work once and reuse it
 
 - **Faster iteration** — `whest run --dataset` skips MLP generation and ground truth sampling entirely.
 - **Fair comparisons** — every estimator you test is scored against the exact same MLPs with the same ground truth.
-- **Reproducibility** — the dataset file records the seed and all creation parameters, so anyone can recreate it exactly.
+- **Reproducibility** — the dataset artifact records the seed and all creation parameters, so anyone can recreate it exactly.
 
 For explicit seeds, `create-dataset` now uses a hierarchical `SeedSequence` split: each MLP gets one child stream for weight sampling and one child stream for Monte Carlo sampling.
+
+## 💾 Public starter dataset
+
+The public baseline dataset now lives on Hugging Face:
+
+<https://huggingface.co/datasets/aicrowd/arc-whestbench-public-2026>
+
+Use that dataset (or a locally generated HF-compatible dataset) as the input to `--dataset` so you and your collaborators run against the same fixed ground-truth set:
+
+```bash
+whest run --estimator estimator.py --dataset aicrowd/arc-whestbench-public-2026
+```
 
 ## 🚀 Do this now
 
 ### 1. Create your dataset (once)
 
 ```bash
-whest create-dataset -o my_dataset.npz
+whest create-dataset -o my_dataset
 ```
 
-This generates MLPs and samples ground truth means. Everything is saved to a single `.npz` file.
+This generates MLPs and samples ground truth means. Output is saved as a Hugging Face-compatible dataset artifact for easy sharing.
 
 Common options:
 
@@ -31,7 +43,7 @@ Common options:
 | `--n-mlps` | 10 | Number of random MLPs to generate |
 | `--n-samples` | 10000 | Samples per MLP for ground truth estimation |
 | `--seed` | auto | RNG seed (auto-generated if omitted, always recorded) |
-| `-o, --output` | `eval_dataset.npz` | Output file path |
+| `-o, --output` | `eval_dataset` | Output dataset path/id |
 | `--width` | (contest default) | Neuron count per MLP |
 | `--depth` | (contest default) | Layers per MLP |
 | `--flop-budget` | (contest default) | FLOP cap for the estimator |
@@ -41,16 +53,16 @@ If you want to avoid extra host probing during local development, set `WHEST_SKI
 ### 2. Run against it (every time)
 
 ```bash
-whest run --estimator estimator.py --dataset my_dataset.npz
+whest run --estimator estimator.py --dataset my_dataset
 ```
 
-The `--n-mlps` flag is ignored when `--dataset` is provided — the values come from the dataset file.
+The `--n-mlps` flag is ignored when `--dataset` is provided — the values come from the dataset artifact.
 
 You can keep reusing the same dataset file across your entire development cycle. Edit your estimator, re-run the command, compare scores — the ground truth stays the same so differences reflect only your estimator changes.
 
 ## ✅ Expected outcome
 
-- `create-dataset` produces a `.npz` file at the specified path.
+- `create-dataset` produces a HF-compatible dataset at the specified location.
 - `run --dataset` shows "Loading dataset" instead of "Generating MLPs" and skips ground truth sampling.
 - `run --dataset` still shows a `Sampling Budget Breakdown (Ground Truth)` section in human output, restored from the dataset metadata for exactly the MLPs used in that run.
 - Score reports are consistent across runs with the same dataset.
@@ -67,7 +79,7 @@ When using `--dataset`, the results JSON includes a `dataset` reference under `r
 {
   "run_config": {
     "dataset": {
-      "path": "/path/to/my_dataset.npz",
+      "path": "my_dataset",
       "sha256": "a1b2c3...",
       "seed": 42,
       "n_mlps": 10

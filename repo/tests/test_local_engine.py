@@ -142,7 +142,6 @@ def test_compare_against_mc_runs_clean_on_zeros_estimator(capsys):
         ("examples/01_random.py", 1.0),
         ("examples/02_mean_propagation.py", 0.10),
         ("examples/03_covariance_propagation.py", 0.10),
-        ("examples/04_combined.py", 0.10),
     ],
 )
 def test_example_mse_within_table_tolerance(name, max_mse):

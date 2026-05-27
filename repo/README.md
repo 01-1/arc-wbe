@@ -5,7 +5,6 @@
 # Whitebox Estimation — Starter Kit
 
 [![CI](https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml/badge.svg)](https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml)
-[![whestbench pin](https://github.com/AIcrowd/whest-starterkit/actions/workflows/bump-whestbench.yml/badge.svg)](https://github.com/AIcrowd/whest-starterkit/actions/workflows/bump-whestbench.yml)
 
 <div align="center">
   <img src="assets/demo.gif" alt="whest-starterkit first 5 minutes" width="720">
@@ -47,7 +46,6 @@ uv run python estimator.py --baseline mean_propagation
 ```bash-test
 uv run python examples/02_mean_propagation.py
 uv run python examples/03_covariance_propagation.py
-uv run python examples/04_combined.py
 ```
 
 See [examples/README.md](examples/README.md) for the curriculum table.
@@ -157,7 +155,7 @@ Past Stage 1, the documentation is organized into six sections — pick whicheve
 ```
 ├── estimator.py     ← The participant's entry point; every stage operates on this file.
 ├── local_engine.py  ← Single-file re-implementation of the harness; safe to read end-to-end.
-├── examples/        ← Numbered reference estimators (01–04) with a curriculum table.
+├── examples/        ← Numbered reference estimators (01–03) with a curriculum table.
 ├── docs/            ← Full documentation; start at docs/README.md.
 └── tests/           ← Drift gates: README commands + local_engine parity.
 ```

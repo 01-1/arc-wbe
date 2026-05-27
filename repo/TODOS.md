@@ -15,7 +15,6 @@
 - Stage 5 (Docker runner) is "coming soon" until whestbench ships `--runner docker`.
   No fixed target. Update `docs/getting-started/stage-5-run-docker.md` placeholder
   when it lands.
-- Bump-cron currently SHA-pins `whestbench` because no releases have been cut yet.
-  Once whestbench cuts its first tag (e.g. `v0.1.0`), `.github/workflows/bump-whestbench.yml`
-  will start preferring tags automatically (the `gh api .../releases/latest` call
-  already handles both modes).
+- Whestbench currently has to be synced from PyPI until its public release cadence
+  becomes stable. Update `pyproject.toml` and lock files as part of each release
+  refresh.

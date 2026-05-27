@@ -45,7 +45,7 @@ if __name__ == "__main__":
         "--baseline",
         default=None,
         help="Compare your estimator against an example: 'random', 'mean_propagation', "
-        "'covariance_propagation', or 'combined'.",
+        "or 'covariance_propagation'.",
     )
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--depth", type=int, default=8)

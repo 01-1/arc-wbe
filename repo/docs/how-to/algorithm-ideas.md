@@ -47,20 +47,12 @@ Track the full covariance matrix between neurons. More accurate because it captu
 
 **Example:** [`examples/03_covariance_propagation.py`](../../examples/03_covariance_propagation.py)
 
-## Hybrid / budget-aware routing
+## Fixed single-strategy design
 
-Switch between cheap and expensive strategies based on the available FLOP budget:
-
-```python
-def predict(self, mlp, budget):
-    if budget >= 30 * mlp.width * mlp.width:
-        return self._covariance_path(mlp)
-    return self._mean_path(mlp)
-```
-
-**When to use:** When you want a single estimator that adapts to different budget levels.
-
-**Example:** [`examples/04_combined.py`](../../examples/04_combined.py)
+The grader’s budget is fixed for a given run. For stable behavior, this
+starter kit now uses single-strategy baselines (mean propagation and full
+covariance propagation), then encourages tuning one strategy for that fixed
+budget envelope.
 
 ## Open directions
 
@@ -80,8 +72,8 @@ Reference: any low-rank Kalman filter / Ensemble Kalman filter intro.
 joint distribution looks roughly factored. Cost is the integral of the
 per-layer choice. Look at per-layer `all_layers_mse` from a
 covariance-only baseline — the layer where the curve plateaus is your
-crossover point. The combined estimator above does this *across* MLPs
-based on budget; layer-adaptive does it *within* one estimator.
+crossover point. Layer-adaptive switching is one possible per-layer optimization
+on top of a full-covariance implementation.
 
 **Spectral / weight-statistics methods.** Compute singular values of
 each `W` once in `setup()` (off-budget); use them to predict per-layer

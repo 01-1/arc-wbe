@@ -46,8 +46,6 @@ for w in mlp.weights:
 | Mean propagation (diagonal) | O(width^2) | Default. Budget < 30 x width^2 |
 | Covariance propagation (full) | O(width^3) | Budget >= 30 x width^2 |
 
-The combined estimator in [`examples/04_combined.py`](../../examples/04_combined.py) shows this routing pattern.
-
 ## Check your budget breakdown
 
 Use `flops.budget_summary()` inside a `BudgetContext` to see exactly where your FLOPs go:
