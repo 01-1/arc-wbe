@@ -29,7 +29,8 @@ See [Estimator Contract: Failure semantics](../reference/estimator-contract.md#f
 
 ## Do I need to use the `budget` argument in `predict()`?
 
-The `budget` argument tells you how many FLOPs you are allowed. You can use it to choose between cheap and expensive algorithms (like the combined estimator does), or you can ignore it and always use the same strategy.
+The `budget` argument tells you how many FLOPs you are allowed. It's usually best
+to use it as a fixed hard cap and stay with one strategy throughout the run.
 
 flopscope enforces the budget regardless — if your operations exceed it, `BudgetExhaustedError` is raised and your predictions are zeroed.
 

@@ -2,7 +2,7 @@
 
 > [← Documentation](README.md)
 
-Single source of truth for the bump dance. Stay current.
+Single source of truth for release operations. Stay current.
 
 ## Cadence
 
@@ -10,11 +10,11 @@ Single source of truth for the bump dance. Stay current.
 - **Minor** (`v1.0.0` → `v1.1.0`): when whestbench bumps to a new minor.
 - **Major** (`v1.0.0` → `v2.0.0`): when participant-visible workflow changes.
 
-## Routine release (responding to a `bump-whestbench.yml` PR)
+## Routine release
 
-1. **Verify CI is green.** All Stage 1-3 smokes pass on the bump PR.
-2. **Scan whestbench changelog.** If the upstream release notes mention any of {`BaseEstimator.predict` signature, `MLP` constructor, runner CLI flags}, this is a **major** bump and you need extra review.
-3. **Run `python estimator.py` locally** against the bumped pin.
+1. **Verify CI is green.** All Stage 1-3 smokes pass before release.
+2. **Refresh and review dependencies.** Run `uv lock` after dependency updates and inspect release notes when either `whestbench` or `flopscope` has semantically significant changes.
+3. **Run `python estimator.py` locally** to sanity-check the default template output after dependency refresh.
 4. **Banner sweep:** if the *previous* release added a "removed example" banner to README, delete it now (retire-after-1-release rule).
 5. **Banner add:** if this release removes or renames any example or doc, add a banner block at the top of README:
 
@@ -41,15 +41,6 @@ If this PR changes any of:
 - `local_engine.{build_mlp, monte_carlo_layer_means, compare_against_monte_carlo}` signatures
 
 → This is a **major bump**. Coordinate any new contract through [docs/reference/estimator-contract.md](reference/estimator-contract.md) until a separate contributing guide lands.
-
-## Cron failures
-
-The `bump-whestbench.yml` workflow runs weekly. Status visible in the README badge.
-
-- **Red badge after one firing:** transient (network, GitHub API). Wait for next firing.
-- **Red badge after two firings:** investigate. Common causes: GitHub auth expired, whestbench renamed a tag, `uv lock` fails on a breaking-change pin.
-
-We do NOT auto-create issues on cron failure. The badge is the signal.
 
 ## v1 launch sequence (one-time)
 

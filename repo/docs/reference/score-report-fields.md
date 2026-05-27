@@ -154,7 +154,7 @@ When using `whest run --dataset`, the report includes `run_config.dataset`:
 
 | Field | Description |
 |---|---|
-| `path` | Absolute path to the dataset file |
+| `path` | Path, id, or repository reference used for the dataset input |
 | `sha256` | SHA-256 hash of the file for integrity |
 | `seed` | RNG seed used to generate the dataset |
 | `n_mlps` | Number of MLPs in the dataset |

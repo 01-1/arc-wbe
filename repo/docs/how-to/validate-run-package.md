@@ -27,8 +27,8 @@ whest run --estimator estimator.py
 Run against a pre-created dataset (skips sampling — much faster for repeated runs):
 
 ```bash
-whest create-dataset -o my_dataset.npz
-whest run --estimator estimator.py --dataset my_dataset.npz
+whest create-dataset -o my_dataset
+whest run --estimator estimator.py --dataset my_dataset
 ```
 
 See [Use Evaluation Datasets](./use-evaluation-datasets.md) for details.

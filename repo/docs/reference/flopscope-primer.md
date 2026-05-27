@@ -31,8 +31,7 @@ You don't need to create `BudgetContext` yourself — something else opens it fo
 | 5 — `whest run --runner docker` | the harness inside the grader container | the `whestbench` CLI (when shipped) |
 
 The `budget` integer your `predict(mlp, budget)` receives matches the
-`flop_budget` of the surrounding context. You can read it to route between
-algorithms (see [`examples/04_combined.py`](../../examples/04_combined.py))
+`flop_budget` of the surrounding context and is the hard cap for that call.
 or ignore it if you always run the same strategy.
 
 `BudgetContext` also supports `wall_time_limit_s` when you want a cooperative

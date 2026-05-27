@@ -126,7 +126,7 @@ The same pattern holds for `examples/03_covariance_propagation.py`, where the `O
 
 3. **Array creation is free.** `fnp.array()`, `fnp.zeros()`, `fnp.ones()`, `fnp.eye()` cost 0 FLOPs. Precompute and store intermediate values freely.
 
-4. **Use the combined estimator pattern.** Route between cheap (mean propagation) and expensive (covariance propagation) algorithms based on the available FLOP budget. See [`examples/04_combined.py`](../../examples/04_combined.py).
+4. **Pick one strategy per estimator.** Use either mean propagation or full covariance as your default implementation, then optimize it for the fixed budget.
 
 ## ➡️ Next step
 
