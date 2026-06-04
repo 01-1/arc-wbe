@@ -18,15 +18,15 @@ You should see a table like:
 
 ```
 --- Your estimator ---
-MLP: width=32 depth=6 seed=0
+MLP: width=256 depth=8 seed=0
 
  n_samples | sampling_flops | estimator_flops |        MSE
 ----------------------------------------------------------
-        10 |         70,912 |               0 |   0.605731
-       100 |        707,392 |               0 |   0.520049
-     1,000 |      7,072,192 |               0 |   0.466525
-    10,000 |     70,720,192 |               0 |   0.464739
-   100,000 |    707,200,192 |               0 |   0.465598
+        10 |     10,551,808 |               0 |   0.706450
+       100 |    105,499,648 |               0 |   0.718928
+     1,000 |  1,054,978,048 |               0 |   0.739125
+    10,000 | 10,549,762,048 |               0 |   0.735092
+   100,000 | 105,497,602,048 |               0 |   0.737172
 ```
 
 The stub `predict()` returns all zeros, so `estimator_flops` is `0` and the MSE
@@ -50,13 +50,13 @@ This loads `examples/02_mean_propagation.py` and runs both estimators on the sam
 
 | Estimator | MSE on the default MLP | Status |
 |---|---|---|
-| Zeros template (default) | ~0.466 | floor — natural variance of the activations |
-| `--baseline mean_propagation` | ~0.003 | ~150x better; first-order analytical |
-| `--baseline covariance_propagation` | ~0.0007 | tracks neuron correlations |
+| Zeros template (default) | ~0.74 | floor — natural variance of the activations |
+| `--baseline mean_propagation` | ~0.0005 | ~1400x better; first-order analytical |
+| `--baseline covariance_propagation` | ~0.00002 | ~20x better than mean; tracks neuron correlations |
 
 You're ready for Stage 2 once your estimator's MSE is comfortably below
 the zeros floor and `estimator_flops` stays under whatever budget you'd
-target downstream (Stage 3's grader default is `1e8`).
+target downstream (Stage 3's grader default is `6.8e10`).
 
 ## ✅ When you're ready
 

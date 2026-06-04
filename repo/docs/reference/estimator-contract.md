@@ -94,9 +94,10 @@ class name in `error_code`, and forwards a formatted `traceback` (subprocess
 runs forward it across the worker boundary). Use `--debug` to see
 tracebacks inline; `--fail-fast` to halt at the first failure.
 
-Predictions for the failed MLP are scored against zeros, so the failure
-*does* hurt your `primary_score`. If you want the run to stop at the first
-problem rather than score-against-zeros, use `--fail-fast`.
+Predictions for the failed MLP are scored against zeros, and the compute
+multiplier is forced to 1.0 (no discount), so the failure *does* hurt your
+`adjusted_final_layer_score`. If you want the run to stop at the first problem
+rather than score-against-zeros, use `--fail-fast`.
 
 For the structured `error.details` schema, see
 [score-report-fields.md](score-report-fields.md#per-mlp-fields).
