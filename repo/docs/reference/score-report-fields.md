@@ -158,7 +158,7 @@ When using `whest run --dataset`, the report includes `run_config.dataset`:
 | `sha256` | SHA-256 hash of the file for integrity |
 | `seed` | RNG seed used to generate the dataset |
 | `n_mlps` | Number of MLPs in the dataset |
-| `seed_protocol` | Object with `name` and `version`. WhestBench currently requires `version = "2.0"`. |
+| `seed_protocol` | Object with `name` and `version`. WhestBench currently requires `version = "3.0"`. |
 
 ### Dataset format compatibility
 

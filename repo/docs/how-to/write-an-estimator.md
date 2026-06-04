@@ -58,7 +58,7 @@ The template estimator returns all zeros. Run it to see what a bad score looks l
 uv run whest run --estimator estimator.py --n-mlps 3
 ```
 
-Look at `primary_score` — this is the MSE of predicting all zeros. It is your floor.
+Look at `final_layer_mse` — the raw accuracy of predicting all zeros — and `adjusted_final_layer_score`, the budget-scaled metric the leaderboard ranks on. The zeros baseline is your accuracy floor.
 
 ### Step 2: Mean propagation
 
@@ -69,12 +69,13 @@ cp examples/02_mean_propagation.py estimator.py
 uv run whest run --estimator estimator.py --n-mlps 3
 ```
 
-Compare `primary_score` to the zeros baseline. Mean propagation uses the network's weights to make informed predictions, so it should score significantly better.
+Compare `adjusted_final_layer_score` (and the underlying `final_layer_mse`) to the zeros baseline. Mean propagation uses the network's weights to make informed predictions, so it should score significantly better.
 
 ### Step 3: Understand the score report
 
 The report shows per-MLP results:
-- `final_mse`: your accuracy on the final layer (primary ranking metric)
+- `final_layer_mse`: your raw accuracy on the final layer (the diagnostic that drives your score)
+- `adjusted_final_layer_score`: `final_layer_mse` scaled by your compute use — the leaderboard ranking metric
 - `flops_used`: how many FLOPs your estimator consumed
 - `budget_exhausted`: whether you exceeded the budget (predictions zeroed if true)
 

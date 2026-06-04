@@ -12,7 +12,7 @@
 
 ## 🎬 60-Second Overview
 
-You are given a randomly-initialized ReLU MLP and a FLOP budget. Predict the per-neuron mean activation under N(0, 1) input — without running anywhere near the budget's worth of forward passes. Your score is the MSE against the ground-truth Monte-Carlo means: lower is better.
+You are given a randomly-initialized ReLU MLP and a FLOP budget. Predict the per-neuron mean activation under N(0, 1) input — without running anywhere near the budget's worth of forward passes. Your score is that error (MSE against the ground-truth Monte-Carlo means) scaled by the share of the FLOP budget you actually spend — so both accuracy and low compute count. Lower is better.
 
 <div align="center">
   <img src="assets/whestbench-explorer-visualization.svg" alt="A small ReLU MLP (width 4, depth 5) shown as a layer-by-layer heatmap of per-neuron mean activations after Monte-Carlo ground-truth estimation; rows are layers, columns are neurons, color intensity is mean activation" width="720">
