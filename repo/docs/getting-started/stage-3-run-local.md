@@ -4,7 +4,7 @@
 
 > Ladder: [1](stage-1-standalone.md) · [2](stage-2-validate.md) · **3** · [4](stage-4-run-subprocess.md) · [5](stage-5-package.md)
 
-Stage 2 confirms the contract. Stage 3 actually scores you against the same MLPs the grader uses — but in-process, so you can drop `import pdb; pdb.set_trace()` anywhere in `predict()` and step through it.
+Stage 2 confirms the contract. Stage 3 runs the **real scoring pipeline** (the same one the grader uses) — in-process, so you can drop `import pdb; pdb.set_trace()` anywhere in `predict()` and step through it. By default it scores a fresh random MLP suite; pass `--dataset` to score the exact public-eval MLPs behind the leaderboard.
 
 ## 🚀 Run it
 
