@@ -181,7 +181,7 @@ class Estimator(BaseEstimator):
             if n_samples >= 2_048:
                 rng = fnp.random.default_rng(mlp.seed)
                 sampled = _antithetic_sample_means(mlp, int(n_samples), rng)
-                sample_weight = min(0.5, n_samples / (n_samples + 14_000.0))
+                sample_weight = min(0.5, n_samples / (n_samples + 5_000.0))
                 estimate = estimate * (1.0 - sample_weight) + sampled * sample_weight
             return estimate
 

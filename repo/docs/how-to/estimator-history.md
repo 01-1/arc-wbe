@@ -41,7 +41,9 @@ Commit `04bab80` tuned the root estimator for the `6.8e10` FLOP/MLP budget:
   paired `x` and `-x` samples give zero empirical mean, then each input
   coordinate is rescaled to unit empirical variance.
 - Tuned the blend weight to avoid over-weighting noisy samples:
-  `n_samples / (n_samples + 14_000)`, capped at `0.5`.
+  `n_samples / (n_samples + 5_000)`, capped at `0.5`. The earlier
+  `14_000` denominator underweighted the sampled correction at the default
+  width-256/depth-8 budget; a small local sweep favored reaching the cap.
 - Kept a guard so the sampling correction only runs when at least 2,048 samples
   fit, avoiding very noisy corrections on wider/deeper MLPs.
 
@@ -90,4 +92,3 @@ full covariance propagation
 
 Further improvements should be benchmark-gated against this baseline under the
 same `6.8e9` effective-compute target.
-
