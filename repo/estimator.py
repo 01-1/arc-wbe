@@ -13,7 +13,10 @@ comfortably inside the per-MLP FLOP budget:
 * Mean propagation (K=1)       – diagonal variance only, O(depth·width²) FLOPs.
 
 Both variants use the exact ReLU Gaussian-moment formulas (power cumulants)
-described in the paper.
+described in the paper.  When the supplied FLOP budget has room below the
+score multiplier floor, the K=2 path is blended with a small antithetic
+Monte-Carlo estimate to reduce residual bias without changing the default
+sample-free behavior under tight budgets.
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ import flopscope.numpy as fnp
 from whestbench import BaseEstimator, SetupContext
 from whestbench.domain import MLP
 
+
+_MIN_VARIANCE = 1e-30
 
 def _relu_moments(mu: fnp.ndarray, var: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
     """Return (mean, second_moment, gain) of ReLU(N(mu, var)).
@@ -43,7 +48,7 @@ def _relu_moments(mu: fnp.ndarray, var: fnp.ndarray) -> tuple[fnp.ndarray, fnp.n
     The ``gain`` is the c_i factor from the paper's Algorithm 2 (covariance
     propagation) and is used to approximate off-diagonal post-ReLU covariances.
     """
-    sigma = fnp.sqrt(fnp.maximum(var, 1e-30))
+    sigma = fnp.sqrt(fnp.maximum(var, _MIN_VARIANCE))
     alpha = mu / sigma
 
     phi = flops.stats.norm.pdf(alpha)
@@ -54,6 +59,21 @@ def _relu_moments(mu: fnp.ndarray, var: fnp.ndarray) -> tuple[fnp.ndarray, fnp.n
     gain = Phi
 
     return mean, ez2, gain
+
+
+def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
+    """Return batched Monte-Carlo layer means with paired x and -x inputs."""
+    half = max(n_samples // 2, 1)
+    x_half = rng.standard_normal((half, mlp.width))
+    x = fnp.concatenate((x_half, -x_half), axis=0)
+    x_std = fnp.sqrt(fnp.maximum(fnp.mean(x * x, axis=0), _MIN_VARIANCE))
+    x = x / x_std
+
+    rows = []
+    for w in mlp.weights:
+        x = fnp.maximum(x @ w, 0.0)
+        rows.append(fnp.mean(x, axis=0))
+    return fnp.stack(rows, axis=0)
 
 
 def _mean_propagation(mlp: MLP) -> fnp.ndarray:
@@ -143,17 +163,29 @@ class Estimator(BaseEstimator):
         width = mlp.width
         depth = mlp.depth
 
-        # Rough FLOP estimates (empirically calibrated against the bundled
-        # examples on width=256, depth=8).
+        # Rough FLOP estimates, calibrated against flopscope's measured counts.
         mean_flops = 3 * depth * width * width
-        cov_flops = 5 * depth * width * width * width
+        cov_flops = 3.05 * depth * width * width * width
 
         # Use covariance propagation if it fits inside the budget with some
         # headroom for overhead.  Otherwise fall back to mean propagation.
         if cov_flops < budget * 0.8:
-            return _covariance_propagation(mlp)
-        else:
-            return _mean_propagation(mlp)
+            estimate = _covariance_propagation(mlp)
+
+            # The benchmark score multiplier bottoms out at 10% of budget.
+            # Spend otherwise-free headroom on a small unbiased correction, but
+            # avoid it when the budget is too tight to get useful samples.
+            sampling_flops_per_input = max(1, 2 * depth * width * width)
+            spare_for_floor = int(max(0.0, budget * 0.098 - cov_flops))
+            n_samples = min(100_000, spare_for_floor // sampling_flops_per_input)
+            if n_samples >= 2_048:
+                rng = fnp.random.default_rng(mlp.seed)
+                sampled = _antithetic_sample_means(mlp, int(n_samples), rng)
+                sample_weight = min(0.5, n_samples / (n_samples + 14_000.0))
+                estimate = estimate * (1.0 - sample_weight) + sampled * sample_weight
+            return estimate
+
+        return _mean_propagation(mlp)
 
 
 def _load_baseline(name: str) -> type[BaseEstimator]:
