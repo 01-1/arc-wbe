@@ -1,5 +1,15 @@
 .PHONY: demo-cast install test lint help
 
+l:
+	uv run whest run --estimator estimator.py \
+   --dataset hf://aicrowd/arc-whestbench-public-2026 \
+   --split mini --runner local
+
+sub:
+	uv run whest run --estimator estimator.py \
+   --dataset hf://aicrowd/arc-whestbench-public-2026 \
+   --split mini --runner subprocess
+
 help:
 	@echo "Targets:"
 	@echo "  install     uv sync --group dev"
