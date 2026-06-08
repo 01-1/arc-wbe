@@ -18,6 +18,7 @@ Task-oriented guides. Each one answers "I want to do X — give me the steps and
 | Doc | When to read |
 |---|---|
 | [algorithm-ideas.md](algorithm-ideas.md) | Survey of estimation strategies — Monte Carlo, mean propagation, covariance, hybrid routing, plus open directions (low-rank, layer-adaptive, spectral, importance sampling, higher moments). |
+| [estimator-history.md](estimator-history.md) | Repository-root estimator experiment log — what changed, what failed, and why the current version targets the 10% score floor. |
 | [manage-flop-budget.md](manage-flop-budget.md) | Where your FLOPs go and how to fit a tighter budget. Includes a line-by-line walkthrough of `examples/02_mean_propagation.py`. |
 | [performance-tips.md](performance-tips.md) | Concrete patterns — matmul placement, free ops, diagonal vs covariance, env-var knobs. |
 
