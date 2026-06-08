@@ -1,5 +1,7 @@
 """Cumulant-propagation estimator for ReLU MLPs.
 
+Submission for https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026.
+
 Implements the K=1 (mean propagation) and K=2 (covariance propagation)
 algorithms from Wu et al., "Estimating the expected output of wide random
 MLPs more efficiently than sampling" (arXiv:2605.05179).

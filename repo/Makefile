@@ -5,7 +5,7 @@ l:
    --dataset hf://aicrowd/arc-whestbench-public-2026 \
    --split mini --runner local
 
-sub:
+s:
 	uv run whest run --estimator estimator.py \
    --dataset hf://aicrowd/arc-whestbench-public-2026 \
    --split mini --runner subprocess
