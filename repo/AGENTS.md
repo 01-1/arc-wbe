@@ -8,6 +8,8 @@ Guidance for coding agents working in this repository:
 - After changing estimator behavior, update relevant docs in the same turn;
   for root `estimator.py` changes, update
   [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
+- Run tests with a workspace-local uv cache:
+  `UV_CACHE_DIR=/i/e/.uv-cache uv run pytest -q`.
 - The grader budget is `6.8e10` FLOPs/MLP. The score multiplier is
   `max(0.1, C / 6.8e10)`, so the score-efficient target is just under
   `6.8e9` effective FLOPs.

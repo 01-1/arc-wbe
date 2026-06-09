@@ -1,14 +1,16 @@
 .PHONY: demo-cast install test lint help
 
+subp:
+	uv run whest run --estimator estimator.py \
+   --dataset hf://aicrowd/arc-whestbench-public-2026 \
+   --split mini --runner subprocess
 l:
 	uv run whest run --estimator estimator.py \
    --dataset hf://aicrowd/arc-whestbench-public-2026 \
    --split mini --runner local
 
 s:
-	uv run whest run --estimator estimator.py \
-   --dataset hf://aicrowd/arc-whestbench-public-2026 \
-   --split mini --runner subprocess
+	uv run whest package --estimator estimator.py --output submission.tar.gz
 
 help:
 	@echo "Targets:"

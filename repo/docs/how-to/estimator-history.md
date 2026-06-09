@@ -92,3 +92,45 @@ full covariance propagation
 
 Further improvements should be benchmark-gated against this baseline under the
 same `6.8e9` effective-compute target.
+
+## Full Factorized K=3 Port
+
+The root estimator now contains a flopscope-native port of the upstream
+factorized K=3 data path from
+`alignment-research-center/mlp_cumulant_propagation`: ReLU Wick coefficients
+through the required orders, a factored symmetric third-cumulant container, and
+the covariance-generated factor updates used to avoid materializing an `n^3`
+tensor. The port also includes the pieces that the first partial attempt was
+missing: diagonal-slice evaluation, `pK -> K` conversion, repeated-slice
+subtraction for the factored third cumulant, and the fourth-order `r=2`
+harmonic projection.
+
+The implementation was checked against the upstream PyTorch code on tiny
+two-layer MLPs with `use_avg_metric=False`; layer means matched to about
+`1e-7`. Local smoke sweeps with 50k Monte Carlo reference samples showed the
+expected asymptotic behavior:
+
+- width 8, depth 2: covariance about `1.6e-03` MSE; factorized K=3 about
+  `5.2e-04`.
+- width 16, depth 3: covariance about `1.5e-03` MSE; factorized K=3 about
+  `1.3e-03`.
+- width 32, depth 3: covariance about `2.8e-04` MSE; factorized K=3 about
+  `7.7e-05`.
+
+Full factorized K=3 is much more expensive than the K=2 covariance path in
+flopscope, and the factor rank grows across layers. Caching repeated diagonal
+slices is essential; without it, the same factored `(2, 1)` slice is rebuilt
+many times inside the Wick expansion. With that cache, contest-style checks on
+a width 256, depth 8 MLP showed that full K=3 improves final-layer MSE enough
+to beat the score-floor K=2-plus-sampling route despite its higher compute
+multiplier:
+
+- K=2 plus sampling: about `6.69e9` FLOPs, `2.12e-05` final-layer MSE,
+  `2.12e-06` adjusted score proxy.
+- Full factorized K=3: about `4.41e10` FLOPs, `1.18e-06` final-layer MSE,
+  `7.67e-07` adjusted score proxy.
+
+The root estimator therefore uses the conservative routing estimate
+`50 * depth^2 * width^3` to choose full K=3 whenever it fits inside the actual
+per-MLP budget, and falls back to covariance-plus-sampling only when K=3 is
+too expensive.
