@@ -22,9 +22,11 @@ sample-free behavior under tight budgets.
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib.util
 import itertools
 import math
+import os
 from collections import defaultdict
 from functools import cache
 from pathlib import Path
@@ -34,11 +36,33 @@ import flopscope.numpy as fnp
 from whestbench import BaseEstimator, SetupContext
 from whestbench.domain import MLP
 
-flops.configure(symmetry_warnings=False)
+if hasattr(flops, "configure"):
+    flops.configure(symmetry_warnings=False)
 
 _MIN_VARIANCE = 1e-30
 _K3_MIN_WIDTH = 16
 _ENABLE_FACTOR_K3 = True
+_FACTOR_K3_MODE = "r1"
+_AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
+_MIXED_AUGMENTED_FACTOR_K3_MODE = "last4_r1_slices_k211"
+_K3_ROUTE_MODES = {
+    "none",
+    "r1",
+    "r1_111",
+    "r1_slices",
+    "r1_slices_111",
+    "r1_slices_k211_only",
+    "r1_slices_k211",
+    "full",
+    "last1_r1_slices_k211",
+    "last2_r1_slices_k211",
+    "last3_r1_slices_k211",
+    "last4_r1_slices_k211",
+    "last5_r1_slices_k211",
+    "last6_r1_slices_k211",
+    "last7_r1_slices_k211",
+    "last8_r1_slices_k211",
+}
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -54,17 +78,16 @@ def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
     return prev1
 
 
-def _relu_wick(mean: fnp.ndarray, var: fnp.ndarray, k: int, p: int = 1) -> fnp.ndarray:
-    """Return ``E[d^k ReLU(Z)^p / dZ^k]`` for ``Z ~ N(mean, var)``.
-
-    This is the ReLU Wick-coefficient helper used by the factorized algorithm.
-    Only the orders needed by the K=3 factorized propagation are implemented.
-    """
-    sigma = fnp.sqrt(fnp.maximum(var, _MIN_VARIANCE))
-    alpha = mean / sigma
-    phi = flops.stats.norm.pdf(alpha)
-    Phi = flops.stats.norm.cdf(alpha)
-
+def _relu_wick_from_stats(
+    mean: fnp.ndarray,
+    var: fnp.ndarray,
+    sigma: fnp.ndarray,
+    alpha: fnp.ndarray,
+    phi: fnp.ndarray,
+    Phi: fnp.ndarray,
+    k: int,
+    p: int = 1,
+) -> fnp.ndarray:
     if k < p:
         order = p - k
         falling = _prod(range(p - k + 1, p + 1))
@@ -81,7 +104,7 @@ def _relu_wick(mean: fnp.ndarray, var: fnp.ndarray, k: int, p: int = 1) -> fnp.n
         return falling * moment
 
     if p > 1:
-        return math.factorial(p) * _relu_wick(mean, var, k - p + 1, 1)
+        return math.factorial(p) * _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k - p + 1, 1)
 
     if p == 1:
         if k == 0:
@@ -91,6 +114,20 @@ def _relu_wick(mean: fnp.ndarray, var: fnp.ndarray, k: int, p: int = 1) -> fnp.n
         return (-1.0) ** (k - 2) * sigma ** (-(k - 1)) * _hermite_prob(k - 2, alpha) * phi
 
     raise ValueError(f"unsupported ReLU Wick coefficient p={p}")
+
+
+def _relu_wick(mean: fnp.ndarray, var: fnp.ndarray, k: int, p: int = 1) -> fnp.ndarray:
+    """Return ``E[d^k ReLU(Z)^p / dZ^k]`` for ``Z ~ N(mean, var)``.
+
+    This is the ReLU Wick-coefficient helper used by the factorized algorithm.
+    Only the orders needed by the K=3 factorized propagation are implemented.
+    """
+    sigma = fnp.sqrt(fnp.maximum(var, _MIN_VARIANCE))
+    alpha = mean / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+
+    return _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
 
 def _relu_moments(mu: fnp.ndarray, var: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
     """Return (mean, second_moment, gain) of ReLU(N(mu, var)).
@@ -265,14 +302,60 @@ def _all_terms_iso_k3():
     return tuple((int_part, vec_part, count) for (int_part, vec_part), count in grouped.items())
 
 
+@cache
+def _terms_iso_k3_for_mode(augment_mode: str):
+    include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
+    terms = []
+    for int_part, vec_part, count in _all_terms_iso_k3():
+        if (
+            len(int_part) > 3
+            or (not include_aug_slices and int_part in ((3, 1), (2, 1, 1)))
+            or int_part == (1, 1, 1)
+            or (int_part, set(vec_part)) == ((2, 1, 1), {(1, 1, 1)})
+        ):
+            continue
+        factors = []
+        for vec in vec_part:
+            nonzero = tuple(i for i, value in enumerate(vec) if value > 0)
+            factors.append((sum(vec), vec, nonzero, tuple(vec[i] for i in nonzero)))
+        terms.append((
+            int_part,
+            vec_part,
+            count,
+            _check_vec_partition(vec_part, len(int_part)),
+            len(int_part),
+            _vec_part_coef(vec_part, divide_fac=True),
+            tuple(factors),
+        ))
+    return tuple(terms)
+
+
+@cache
+def _terms_iso_k3_grouped_for_mode(augment_mode: str):
+    grouped = defaultdict(list)
+    for term in _terms_iso_k3_for_mode(augment_mode):
+        grouped[term[0]].append(term)
+    return tuple((int_part, tuple(terms)) for int_part, terms in grouped.items())
+
+
+@cache
+def _zero_repeated_mask(shape: tuple[int, ...]) -> fnp.ndarray:
+    idxs = fnp.indices(shape)
+    mask = fnp.ones(shape)
+    for i in range(len(shape)):
+        for j in range(i + 1, len(shape)):
+            mask = mask * (idxs[i] != idxs[j])
+    return mask
+
+
 def _zero_repeated(a: fnp.ndarray) -> fnp.ndarray:
     if a.ndim <= 1:
         return a
-    idxs = fnp.indices(a.shape)
-    mask = fnp.ones(a.shape)
-    for i in range(a.ndim):
-        for j in range(i + 1, a.ndim):
-            mask = mask * (idxs[i] != idxs[j])
+    if a.ndim == 2:
+        out = fnp.array(a)
+        fnp.fill_diagonal(out, 0.0)
+        return out
+    mask = _zero_repeated_mask(tuple(a.shape))
     return a * mask
 
 
@@ -372,6 +455,45 @@ def _harmonic_dslice_r2_scalar(core: fnp.ndarray, metric: fnp.ndarray, part: tup
     return _zero_repeated(out * core)
 
 
+def _harmonic_dslice_general(core: fnp.ndarray, metric: fnp.ndarray, r: int, part: tuple[int, ...]) -> fnp.ndarray:
+    n = metric.shape[0]
+    s = core.ndim if hasattr(core, "ndim") else 0
+    out = fnp.zeros((n,) * len(part))
+    out_labels = list("abcd"[: len(part)])
+    core_base = list("wxyz"[:s])
+    for graph in _multigraphs(len(part), r):
+        coef = _multigraph_coef(graph, part, lap_coef=False)
+        if coef == 0.0:
+            continue
+        core_labels = list(core_base)
+        metric_labels = [["m", "n"] for _ in range(r)]
+        used = [0] * len(part)
+        edge_idx = 0
+        for (a, b), mult in graph:
+            for _ in range(mult):
+                metric_labels[edge_idx] = [out_labels[a], out_labels[b]]
+                used[a] += 1
+                used[b] += 1
+                edge_idx += 1
+        core_idx = 0
+        for axis, block_size in enumerate(part):
+            while used[axis] < block_size:
+                core_labels[core_idx] = out_labels[axis]
+                used[axis] += 1
+                core_idx += 1
+        factors = []
+        labels = []
+        if s > 0:
+            factors.append(core)
+            labels.append(" ".join(core_labels))
+        factors.extend(metric for _ in range(r))
+        labels.extend(" ".join(labels_i) for labels_i in metric_labels)
+        expr = ", ".join(labels) + " -> " + " ".join(out_labels)
+        term = fnp.einsum(expr, *factors) if factors else core
+        out = out + coef * term
+    return _zero_repeated(out)
+
+
 class _HTensor:
     def __init__(self, core: fnp.ndarray | float, r: int = 0, n: int | None = None, metric=None):
         self.core = core
@@ -385,6 +507,7 @@ class _HTensor:
             self.metric = fnp.diag(metric)
         else:
             self.metric = metric
+        self._dslice_cache = {}
 
     @property
     def ndim(self) -> int:
@@ -405,11 +528,19 @@ class _HTensor:
         return _HTensor(core, r=self.r, n=w.shape[1], metric=metric)
 
     def get_dslice(self, part: tuple[int, ...]) -> fnp.ndarray:
+        cache_key = tuple(part)
+        if cache_key in self._dslice_cache:
+            return self._dslice_cache[cache_key]
         if self.r == 0:
-            return _tensor_dslice(self.core, part)
-        if self.r == 2 and (not hasattr(self.core, "ndim") or self.core.ndim == 0):
-            return _harmonic_dslice_r2_scalar(self.core, self.metric, part)
-        raise NotImplementedError("Only r=0 and scalar r=2 HTensors are needed for K=3 SIMPLE")
+            out = _tensor_dslice(self.core, part)
+        elif self.r == 2 and (not hasattr(self.core, "ndim") or self.core.ndim == 0):
+            out = _harmonic_dslice_r2_scalar(self.core, self.metric, part)
+        elif self.r == 1 and hasattr(self.core, "ndim") and self.core.ndim == 2:
+            out = _harmonic_dslice_general(self.core, self.metric, self.r, part)
+        else:
+            raise NotImplementedError("Unsupported K=3 harmonic tensor diagonal slice")
+        self._dslice_cache[cache_key] = out
+        return out
 
 
 def _tensor_dslice(a: fnp.ndarray, part: tuple[int, ...], output_zero_repeated: bool = False) -> fnp.ndarray:
@@ -546,17 +677,24 @@ class _DSTower(dict):
 
 
 def _ds_part_sum(tower: _DSTower, coef_fn, strict: bool = True) -> _DSTower:
+    block_cache = {}
+
     def get_block(block):
         nonzero = tuple(i for i, value in enumerate(block) if value > 0)
         part = tuple(block[i] for i in nonzero)
         if not part:
             return 1.0
+        key = (part, nonzero, len(block))
+        if key in block_cache:
+            return block_cache[key]
         try:
-            return _expand(tower.get_slice(part, strict=True), nonzero, len(block))
+            out = _expand(tower.get_slice(part, strict=True), nonzero, len(block))
         except KeyError:
             if strict:
                 raise
-            return 0.0
+            out = 0.0
+        block_cache[key] = out
+        return out
 
     out = {}
     for degree in range(1, max(tower.keys()) + 1):
@@ -566,8 +704,17 @@ def _ds_part_sum(tower: _DSTower, coef_fn, strict: bool = True) -> _DSTower:
         for int_part, like in tower[degree].slices.items():
             acc = fnp.zeros_like(like)
             for vpart in _vector_partitions(int_part):
-                term = _prod(get_block(block) for block in vpart)
-                acc = acc + term * _vec_part_coef(vpart, divide_fac=False) * coef_fn(vpart)
+                coef = _vec_part_coef(vpart, divide_fac=False) * coef_fn(vpart)
+                term = None
+                for block in vpart:
+                    factor = get_block(block)
+                    if term is None:
+                        term = coef * factor if coef != 1.0 else factor
+                    else:
+                        term = term * factor
+                if term is None:
+                    term = coef
+                acc = acc + term
             slices[int_part] = _symmetrize(acc, vec=int_part)
         out[degree] = _DSTensor(slices, autozero=True)
     return _DSTower(out)
@@ -601,8 +748,41 @@ def _lap_m_dslice_scalar(dslice: fnp.ndarray, part: tuple[int, ...], m: int = 2)
         coef = _multigraph_coef(tuple(((i, i), g) for i, g in enumerate(graph) if g), part)
         reduced = tuple(part[i] - 2 * graph[i] for i in range(len(part)))
         axes = tuple(i for i, value in enumerate(reduced) if value == 0)
-        term = fnp.sum(dslice, axis=axes) if axes else dslice
+        term = dslice
+        for axis in reversed(axes):
+            term = fnp.sum(term, axis=axis)
         acc = acc + coef * term
+    return acc * _int_partition_coef(part)
+
+
+def _embed_dslice(dslice: fnp.ndarray, part: tuple[int, ...], d_out: int, n: int):
+    if d_out == 0:
+        return dslice
+    if d_out == 1:
+        return dslice
+    if d_out == 2:
+        if part == (2,):
+            return fnp.diag(dslice)
+        return dslice
+    raise NotImplementedError("Only degree-4, r=1 projection is needed for K=3 augment")
+
+
+def _lap_m_dslice_tensor(dslice: fnp.ndarray, part: tuple[int, ...], m: int, n: int):
+    d_out = sum(part) - 2 * m
+    acc = 0.0 if d_out == 0 else fnp.zeros((n,) * d_out)
+    for graph in _weak_compositions(len(part), m):
+        if any(2 * graph[i] > part[i] for i in range(len(part))):
+            continue
+        coef = _multigraph_coef(tuple(((i, i), g) for i, g in enumerate(graph) if g), part)
+        reduced = tuple(part[i] - 2 * graph[i] for i in range(len(part)))
+        axes = tuple(i for i, value in enumerate(reduced) if value == 0)
+        term = dslice
+        for axis in reversed(axes):
+            term = fnp.sum(term, axis=axis)
+        reduced_part = tuple(value for value in reduced if value > 0)
+        acc = acc + coef * _embed_dslice(term, reduced_part, d_out, n)
+    if d_out >= 2:
+        acc = _symmetrize(acc)
     return acc * _int_partition_coef(part)
 
 
@@ -615,11 +795,27 @@ def _ds_harmonic_proj_r2(d_tensor: _DSTensor) -> _HTensor:
     return _HTensor(core, r=2, n=n)
 
 
+def _ds_harmonic_proj_r1(d_tensor: _DSTensor) -> _HTensor:
+    n = d_tensor.n
+    p1 = _proj_coef(n, 4, 1)
+    p2 = _proj_coef(n, 4, 2)
+    coef_l1 = p1[1]
+    coef_l2 = p1[2] + p2[2]
+    eye = fnp.eye(n)
+    core = fnp.zeros((n, n))
+    for part, dslice in d_tensor.slices.items():
+        core = core + coef_l1 * _lap_m_dslice_tensor(dslice, part, 1, n)
+        core = core + coef_l2 * _lap_m_dslice_scalar(dslice, part, 2) * eye
+    return _HTensor(_symmetrize(core), r=1, n=n)
+
+
 def _diagslice(obj, part: tuple[int, ...], output_zero_repeated: bool = False):
     if hasattr(obj, "get_dslice"):
         out = obj.get_dslice(part)
     else:
         out = _tensor_dslice(obj, part)
+    if output_zero_repeated and getattr(obj, "_repeated_slices_zeroed", False):
+        return out
     return _zero_repeated(out) if output_zero_repeated and hasattr(out, "ndim") else out
 
 
@@ -652,8 +848,25 @@ def _multiply_wicks(value, k_vec, p_vec, wick_lookup):
     return value
 
 
+def _dslice_21_diag_middle(a: fnp.ndarray, diag_b: fnp.ndarray, c: fnp.ndarray) -> fnp.ndarray:
+    diag_a = fnp.diag(a)
+    diag_c = fnp.diag(c)
+    out = (
+        (diag_a * diag_b)[:, None] * c.T
+        + a * c * diag_b[None, :]
+        + (diag_b * diag_c)[:, None] * a.T
+    ) / 3.0
+    return _zero_repeated(out)
+
+
+def _diag_diag_middle(a: fnp.ndarray, diag_b: fnp.ndarray, c: fnp.ndarray) -> fnp.ndarray:
+    return fnp.diag(a) * diag_b * fnp.diag(c)
+
+
 class _FactoredThird:
     """Symmetric third cumulant stored as ``Sym(sum_r A_i,r B_j,r C_k,r)``."""
+
+    _repeated_slices_zeroed = True
 
     def __init__(self, width: int, factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray] | None = None):
         self.width = width
@@ -678,13 +891,55 @@ class _FactoredThird:
     def contract_w(self, w: fnp.ndarray) -> "_FactoredThird":
         return _FactoredThird(self.width, tuple(w.T @ factor for factor in self.factors))
 
-    def contract_wick(self, wick: fnp.ndarray) -> "_FactoredThird":
-        return _FactoredThird(self.width, tuple(factor * wick[:, None] for factor in self.factors))
+    def contract_wick(self, wick: fnp.ndarray, propagate_cache: bool = True) -> "_FactoredThird":
+        out = _FactoredThird(self.width, tuple(factor * wick[:, None] for factor in self.factors))
+        if propagate_cache and (2, 1) in self._dslice_cache:
+            out._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] * (wick[:, None] * wick[:, None] * wick[None, :])
+        if propagate_cache and (3,) in self._dslice_cache:
+            out._dslice_cache[(3,)] = self._dslice_cache[(3,)] * wick * wick * wick
+        return out
 
-    def add_factors(self, factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]) -> "_FactoredThird":
+    def add_factors(
+        self,
+        factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray],
+        dslice_21_increment: fnp.ndarray | None = None,
+        diag_increment: fnp.ndarray | None = None,
+    ) -> "_FactoredThird":
         self.factors = tuple(
             fnp.concatenate((old, new), axis=1) for old, new in zip(self.factors, factors)
         )
+        if (2, 1) in self._dslice_cache and dslice_21_increment is not None:
+            self._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] + dslice_21_increment
+        else:
+            self._dslice_cache.pop((2, 1), None)
+        if (3,) in self._dslice_cache and diag_increment is not None:
+            self._dslice_cache[(3,)] = self._dslice_cache[(3,)] + diag_increment
+        else:
+            self._dslice_cache.pop((3,), None)
+        return self
+
+    def add_factor_groups(
+        self,
+        factor_groups: list[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]],
+        dslice_21_increments: list[fnp.ndarray | None],
+        diag_increments: list[fnp.ndarray | None],
+    ) -> "_FactoredThird":
+        if not factor_groups:
+            return self
+        self.factors = tuple(
+            fnp.concatenate((old, *(group[i] for group in factor_groups)), axis=1)
+            for i, old in enumerate(self.factors)
+        )
+        if (2, 1) in self._dslice_cache and all(value is not None for value in dslice_21_increments):
+            for value in dslice_21_increments:
+                self._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] + value
+        else:
+            self._dslice_cache.pop((2, 1), None)
+        if (3,) in self._dslice_cache and all(value is not None for value in diag_increments):
+            for value in diag_increments:
+                self._dslice_cache[(3,)] = self._dslice_cache[(3,)] + value
+        else:
+            self._dslice_cache.pop((3,), None)
         return self
 
     def diag(self) -> fnp.ndarray:
@@ -743,7 +998,7 @@ class _FactoredThird:
             },
             n=self.width,
             d=3,
-            autozero=True,
+            autozero=False,
         )
 
     def __add__(self, other: "_FactoredThird") -> "_FactoredThird":
@@ -776,33 +1031,80 @@ def _dst_sub(a: _DSTensor, b: _DSTensor) -> _DSTensor:
     return _DSTensor(slices, n=a.n, d=a.d, autozero=True)
 
 
-def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
+def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> dict[int, object]:
+    if augment is True:
+        augment_mode = "full"
+    elif augment is False:
+        augment_mode = "none"
+    else:
+        augment_mode = augment
+    project_r1 = augment_mode in {"r1", "r1_111", "r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
+    include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
+    include_aug_111 = augment_mode in {"r1_111", "r1_slices_111", "r1_slices_k211", "full"}
+    include_k211 = augment_mode in {"r1_slices_k211_only", "r1_slices_k211", "full"}
+
     width = wk[1].n
     mean = wk[1].core
     var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
+    sigma = fnp.sqrt(var)
+    alpha = mean / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+    eval_cache = {}
+    dslice_cache = {}
 
     @cache
     def wick(k: int, p: int):
-        return _relu_wick(mean, var, k, p)
+        if p > 1 and k >= p:
+            return math.factorial(p) * wick(k - p + 1, 1)
+        return _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
+
+    @cache
+    def wick_view(k: int, p: int, dim: int, axis: int):
+        shape = [1] * dim
+        shape[axis] = -1
+        return fnp.reshape(wick(k, p), tuple(shape))
+
+    def dslice(degree: int, part: tuple[int, ...]):
+        key = (degree, part)
+        if key not in dslice_cache:
+            dslice_cache[key] = _diagslice(wk[degree], part, output_zero_repeated=True)
+        return dslice_cache[key]
+
+    def eval_term(vec_part, dim: int, coef: float, factors):
+        key = (vec_part, dim)
+        if key not in eval_cache:
+            if any(degree not in wk for degree, _, _, _ in factors):
+                eval_cache[key] = None
+            elif not factors:
+                eval_cache[key] = fnp.ones((width,) * dim)
+            else:
+                product = None
+                for degree, _, nonzero, part in factors:
+                    factor = _expand(dslice(degree, part), nonzero, dim)
+                    if product is None:
+                        product = coef * factor if coef != 1.0 else factor
+                    else:
+                        product = product * factor
+                eval_cache[key] = product
+        return eval_cache[key]
 
     p_slices = {}
-    for int_part, vec_part, count in _all_terms_iso_k3():
-        if (
-            len(int_part) > 3
-            or int_part in ((3, 1), (2, 1, 1))
-            or int_part == (1, 1, 1)
-            or (int_part, set(vec_part)) == ((2, 1, 1), {(1, 1, 1)})
-        ):
-            continue
-        term = _eval_part(wk, vec_part, len(int_part), output_zero_repeated=True)
-        if term is None:
-            continue
-        k_vec = _check_vec_partition(vec_part, len(int_part))
-        term = count * _multiply_wicks(term, k_vec, int_part, wick)
-        p_slices[int_part] = p_slices.get(int_part, 0.0) + term
-
-    for int_part, value in list(p_slices.items()):
-        p_slices[int_part] = _symmetrize(value, vec=int_part)
+    for int_part, terms in _terms_iso_k3_grouped_for_mode(augment_mode):
+        acc = 0.0
+        for _, vec_part, count, k_vec, dim, coef, factors in terms:
+            term = eval_term(vec_part, dim, coef, factors)
+            if term is None:
+                continue
+            first_axis = True
+            for axis, (k, p) in enumerate(zip(k_vec, int_part)):
+                view = wick_view(int(k), int(p), dim, axis)
+                if first_axis and count != 1:
+                    view = count * view
+                term = term * view
+                first_axis = False
+            acc = acc + term
+        p_slices[int_part] = _symmetrize(acc, vec=int_part)
 
     w1 = wick(1, 1)
     w2 = wick(2, 1)
@@ -811,13 +1113,18 @@ def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
 
     wk_11 = _zero_repeated(wk[2].core)
     if 3 in wk:
-        p111 = wk[3].clone().contract_wick(w1)
-        wk_21 = _diagslice(wk[3], (2, 1), output_zero_repeated=True)
+        wk_21 = dslice(3, (2, 1))
+        wk_3 = dslice(3, (3,))
+        p111 = wk[3].contract_wick(w1, propagate_cache=False)
+        p111._dslice_cache[(2, 1)] = wk_21 * (w1[:, None] * w1[:, None] * w1[None, :])
+        p111._dslice_cache[(3,)] = wk_3 * w1 * w1 * w1
     else:
         p111 = _FactoredThird(width)
+        p111._dslice_cache[(2, 1)] = fnp.zeros_like(wk_11)
+        p111._dslice_cache[(3,)] = fnp.zeros(width)
         wk_21 = fnp.zeros_like(wk_11)
     if 4 in wk:
-        wk_22 = _diagslice(wk[4], (2, 2), output_zero_repeated=True)
+        wk_22 = dslice(4, (2, 2))
     else:
         wk_22 = fnp.zeros_like(wk_11)
 
@@ -825,6 +1132,19 @@ def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
     wk_12 = wk_21.T
     wk_22 = wk_22 / 4.0
     eye = fnp.eye(width)
+    ones = fnp.ones(width)
+    factor_groups: list[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]] = []
+    dslice_21_increments: list[fnp.ndarray | None] = []
+    diag_increments: list[fnp.ndarray | None] = []
+
+    def queue_factors(
+        factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray],
+        dslice_21_increment: fnp.ndarray | None,
+        diag_increment: fnp.ndarray | None,
+    ) -> None:
+        factor_groups.append(factors)
+        dslice_21_increments.append(dslice_21_increment)
+        diag_increments.append(diag_increment)
 
     fac1 = w1[:, None] * wk_11 + w2[:, None] * wk_21
     fac2 = eye * 3.0
@@ -834,7 +1154,12 @@ def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
         + w2[:, None] * w2[None, :] * wk_12
         + w3[:, None] * w2[None, :] * wk_22
     ).T
-    p111.add_factors((fac1, fac2, fac3))
+    diag2 = ones * 3.0
+    queue_factors(
+        (fac1, fac2, fac3),
+        _dslice_21_diag_middle(fac1, diag2, fac3),
+        _diag_diag_middle(fac1, diag2, fac3),
+    )
 
     fac1 = w1[:, None] * wk_12 + w2[:, None] * wk_22
     fac2 = eye * 3.0
@@ -844,28 +1169,101 @@ def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
         + w3[:, None] * w2[None, :] * wk_12
         + w4[:, None] * w2[None, :] * wk_22
     ).T
-    p111.add_factors((fac1, fac2, fac3))
+    queue_factors(
+        (fac1, fac2, fac3),
+        _dslice_21_diag_middle(fac1, diag2, fac3),
+        _diag_diag_middle(fac1, diag2, fac3),
+    )
 
-    if 4 in wk and wk[4].metric.ndim == 2:
+    if not project_r1 and 4 in wk and wk[4].r == 2 and wk[4].metric.ndim == 2:
         core = wk[4].core
         metric = wk[4].metric
         metric_diag = fnp.diag(metric)
-        ones = fnp.ones_like(metric_diag)
 
         fac1 = w2[:, None] * (core * metric_diag)[:, None] * ones[None, :]
         fac2 = w1[:, None] * eye
         fac3 = w1[:, None] * metric / 2.0
-        p111.add_factors((fac1, fac2, fac3))
+        queue_factors(
+            (fac1, fac2, fac3),
+            _dslice_21_diag_middle(fac1, w1, fac3),
+            _diag_diag_middle(fac1, w1, fac3),
+        )
 
         fac1 = w1[:, None] * metric * core
         fac2 = w2[:, None] * eye
         fac3 = w1[:, None] * metric
-        p111.add_factors((fac1, fac2, fac3))
+        queue_factors(
+            (fac1, fac2, fac3),
+            _dslice_21_diag_middle(fac1, w2, fac3),
+            _diag_diag_middle(fac1, w2, fac3),
+        )
+
+    if include_aug_111 and 4 in wk:
+        core = wk[4].core
+        metric = wk[4].metric
+        metric_diag = fnp.diag(metric)
+        metric_full = metric
+
+        fac1 = w2[:, None] * fnp.diag(core)[:, None] * ones[None, :]
+        fac2 = w1[:, None] * metric_full
+        fac3 = w1[:, None] * eye / 4.0
+        queue_factors(
+            (fac1, fac3, fac2),
+            _dslice_21_diag_middle(fac1, w1 / 4.0, fac2),
+            _diag_diag_middle(fac1, w1 / 4.0, fac2),
+        )
+
+        fac1 = w1[:, None] * core
+        fac2 = w2[:, None] * eye
+        fac3 = w1[:, None] * metric_full
+        queue_factors(
+            (fac1, fac2, fac3),
+            _dslice_21_diag_middle(fac1, w2, fac3),
+            _diag_diag_middle(fac1, w2, fac3),
+        )
+
+        fac1 = w1[:, None] * core
+        fac2 = w1[:, None] * eye
+        fac3 = w2[:, None] * metric_diag[:, None] * ones[None, :] / 4.0
+        queue_factors(
+            (fac1, fac2, fac3),
+            _dslice_21_diag_middle(fac1, w1, fac3),
+            _diag_diag_middle(fac1, w1, fac3),
+        )
+
+    p111.add_factor_groups(factor_groups, dslice_21_increments, diag_increments)
 
     p_ds = _DSTower.from_slices(p_slices, autozero=True)
-    k_ds = _ds_pk_to_k(p_ds, strict=True)
+    k_ds = _ds_pk_to_k(p_ds, strict=not include_aug_slices)
     if 3 in k_ds:
         k_ds[3] = _dst_sub(k_ds[3], p111.get_repeated())
+
+    k211_contrib = None
+    if include_k211:
+        rep = _FactoredThird.from_dstensor(p111.get_repeated())
+        a = fnp.concatenate((p111.factors[0], -rep.factors[0]), axis=1)
+        b = fnp.concatenate((p111.factors[1], rep.factors[1]), axis=1)
+        c = fnp.concatenate((p111.factors[2], rep.factors[2]), axis=1)
+        pk1 = p_ds[1].slices[(1,)]
+        p111_k211 = _symmetrize(
+            (fnp.sum(pk1[:, None] * a, axis=0) * b) @ c.T
+            + (fnp.sum(pk1[:, None] * b, axis=0) * c) @ a.T
+            + (fnp.sum(pk1[:, None] * c, axis=0) * a) @ b.T
+        ) / 3.0
+        k211_contrib = p111_k211 * (-2.0 * 6.0 * 2.0 / (2.0 * width + 8.0))
+
+        if 3 in wk:
+            rep = _FactoredThird.from_dstensor(wk[3].get_repeated())
+            a = fnp.concatenate((wk[3].factors[0], -rep.factors[0]), axis=1)
+            b = fnp.concatenate((wk[3].factors[1], rep.factors[1]), axis=1)
+            c = fnp.concatenate((wk[3].factors[2], rep.factors[2]), axis=1)
+            w12 = wick(1, 2)
+            p211_k211 = _symmetrize(
+                (fnp.sum(w12[:, None] * a, axis=0) * w1[:, None] * b) @ (w1[:, None] * c).T
+                + (fnp.sum(w12[:, None] * b, axis=0) * w1[:, None] * c) @ (w1[:, None] * a).T
+                + (fnp.sum(w12[:, None] * c, axis=0) * w1[:, None] * a) @ (w1[:, None] * b).T
+            ) / 3.0
+            k211_contrib = k211_contrib + p211_k211 * (6.0 * 2.0 / (2.0 * width + 8.0))
 
     out: dict[int, object] = {
         1: _HTensor(k_ds[1].to_tensor(), r=0),
@@ -873,32 +1271,63 @@ def _factored_nonlin_k3(wk: dict[int, object]) -> dict[int, object]:
         3: p111 + _FactoredThird.from_dstensor(k_ds[3]),
     }
     if 4 in k_ds:
-        out[4] = _ds_harmonic_proj_r2(k_ds[4])
+        if project_r1:
+            out[4] = _ds_harmonic_proj_r1(k_ds[4])
+            if k211_contrib is not None:
+                out[4].core = out[4].core + k211_contrib
+                out[4]._dslice_cache = {}
+        else:
+            out[4] = _ds_harmonic_proj_r2(k_ds[4])
     return out
 
 
-def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
+def _factorized_k3_propagation(mlp: MLP, augment: bool | str = "r1") -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
     This ports the upstream factorized K=3 path into the narrower whestbench
     setting: square ReLU MLPs, standard normal inputs, no biases, and per-hidden
     layer activation means as output.
     """
-    width = mlp.width
-    tower: dict[int, object] = {
-        1: _HTensor(fnp.zeros(width), r=0),
-        2: _HTensor(fnp.eye(width), r=0),
-    }
+    was_gc_enabled = gc.isenabled()
+    if was_gc_enabled:
+        gc.disable()
+    try:
+        width = mlp.width
+        tower: dict[int, object] = {
+            1: _HTensor(fnp.zeros(width), r=0),
+            2: _HTensor(fnp.eye(width), r=0),
+        }
 
-    rows = []
-    for w_mat in mlp.weights:
-        wk = {}
-        for degree, value in tower.items():
-            wk[degree] = value.contract_w(w_mat)
-        tower = _factored_nonlin_k3(wk)
-        rows.append(tower[1].core)
+        rows = []
+        mixed_suffix = "_r1_slices_k211"
+        switch_at = None
+        if isinstance(augment, str) and augment.startswith("last") and augment.endswith(mixed_suffix):
+            n_aug_layers = int(augment[len("last") : -len(mixed_suffix)])
+            switch_at = max(0, mlp.depth - n_aug_layers)
 
-    return fnp.stack(rows, axis=0)
+        for layer_idx, w_mat in enumerate(mlp.weights):
+            wk = {}
+            for degree, value in tower.items():
+                wk[degree] = value.contract_w(w_mat)
+            layer_augment = _AUGMENTED_FACTOR_K3_MODE if switch_at is not None and layer_idx >= switch_at else augment
+            if switch_at is not None and layer_idx < switch_at:
+                layer_augment = _FACTOR_K3_MODE
+            tower = _factored_nonlin_k3(wk, augment=layer_augment)
+            rows.append(tower[1].core)
+
+        return fnp.stack(rows, axis=0)
+    finally:
+        if was_gc_enabled:
+            gc.enable()
+
+
+def _forced_k3_mode() -> str | None:
+    mode = os.environ.get("WHEST_K3_MODE")
+    if not mode:
+        return None
+    if mode not in _K3_ROUTE_MODES:
+        raise ValueError(f"unsupported WHEST_K3_MODE={mode!r}")
+    return mode
 
 
 def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
@@ -991,6 +1420,21 @@ class Estimator(BaseEstimator):
 
     def setup(self, ctx: SetupContext) -> None:
         self._setup_rng = fnp.random.default_rng(ctx.seed)
+        _all_terms_iso_k3()
+        _terms_iso_k3_for_mode("none")
+        _terms_iso_k3_grouped_for_mode("none")
+        _terms_iso_k3_for_mode(_FACTOR_K3_MODE)
+        _terms_iso_k3_grouped_for_mode(_FACTOR_K3_MODE)
+        _terms_iso_k3_for_mode("r1_slices_k211")
+        _terms_iso_k3_grouped_for_mode("r1_slices_k211")
+        _terms_iso_k3_for_mode("r1_slices")
+        _terms_iso_k3_grouped_for_mode("r1_slices")
+        forced_mode = _forced_k3_mode()
+        if forced_mode is not None:
+            _terms_iso_k3_for_mode(forced_mode)
+            _terms_iso_k3_grouped_for_mode(forced_mode)
+        for vertices in range(1, 5):
+            _multigraphs(vertices, 2)
 
     def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
         """Predict per-layer mean activations.
@@ -1002,6 +1446,9 @@ class Estimator(BaseEstimator):
 
         width = mlp.width
         depth = mlp.depth
+        forced_mode = _forced_k3_mode()
+        if forced_mode is not None and width >= _K3_MIN_WIDTH:
+            return _factorized_k3_propagation(mlp, augment=forced_mode)
 
         # Rough FLOP estimates, calibrated against flopscope's measured counts.
         cov_flops = 3.05 * depth * width * width * width
@@ -1010,13 +1457,27 @@ class Estimator(BaseEstimator):
         # factor rank grows by layer, so a conservative score-floor router uses
         # a depth^2 term.
         factor_k3_flops = 50 * depth * depth * width * width * width
+        mixed_augmented_k3_flops = 70 * depth * depth * width * width * width
+        augmented_k3_flops = 100 * depth * depth * width * width * width
 
-        # Prefer the full factorized algorithm when it fits inside the actual
-        # benchmark budget. On the contest-size MLP its final-layer MSE drop is
-        # large enough to beat the score-floor K=2+sampling route despite the
-        # higher compute multiplier.
+        # Use the full corrected augmentation when the caller provides enough
+        # budget for it. At contest size it is much more accurate but still too
+        # expensive for the default 6.8e10 budget.
+        if _ENABLE_FACTOR_K3 and augmented_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
+            return _factorized_k3_propagation(mlp, augment=_AUGMENTED_FACTOR_K3_MODE)
+
+        # A mixed route turns on corrected augmentation only for the final
+        # layers. This keeps much of the MSE gain at substantially lower raw
+        # FLOPs, but still needs more residual headroom than the contest budget.
+        if _ENABLE_FACTOR_K3 and mixed_augmented_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
+            return _factorized_k3_propagation(mlp, augment=_MIXED_AUGMENTED_FACTOR_K3_MODE)
+
+        # Otherwise prefer the optimized factorized K=3 route when it fits
+        # inside the actual benchmark budget. The r=1 harmonic projection
+        # variant is cheaper than simple K=3 on contest-size MLPs and has
+        # matched or slightly beaten it in local final-layer MSE checks.
         if _ENABLE_FACTOR_K3 and factor_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
-            return _factorized_k3_propagation(mlp)
+            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
 
         # Use covariance propagation if it fits inside the budget with some
         # headroom for overhead.  Otherwise fall back to mean propagation.

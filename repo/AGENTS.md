@@ -10,6 +10,11 @@ Guidance for coding agents working in this repository:
   [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
 - Run tests with a workspace-local uv cache:
   `UV_CACHE_DIR=/i/e/.uv-cache uv run pytest -q`.
+- Prefer the Makefile for WhestBench runs. Use `make mini` for the cached
+  public mini split with five MLPs and subprocess isolation; vary `MINI_MLPS`,
+  `BUDGET`, and `WALL_TIME` as needed. Use `make mini-mode MODE=<mode>` for
+  forced K=3 route comparisons, and reserve `make mini-*-local` targets for
+  long augmentation diagnostics that time out under subprocess isolation.
 - The grader budget is `6.8e10` FLOPs/MLP. The score multiplier is
   `max(0.1, C / 6.8e10)`, so the score-efficient target is just under
   `6.8e9` effective FLOPs.

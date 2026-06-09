@@ -1,12 +1,62 @@
-.PHONY: demo-cast install test lint help
+.PHONY: demo-cast install test lint help mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local full e v local
 
-subp:
-	uv run whest run --estimator estimator.py \
-   --dataset hf://aicrowd/arc-whestbench-public-2026 \
-   --split mini --runner subprocess
-l:
-	uv run whest run --estimator estimator.py \
-   --dataset hf://aicrowd/arc-whestbench-public-2026 \
+UV := UV_CACHE_DIR=/i/e/.uv-cache uv
+MINI_DATASET := hf://aicrowd/arc-whestbench-public-2026
+MINI_MLPS ?= 5
+BUDGET ?= 68000000000
+WALL_TIME ?= 60
+
+mini:
+	$(UV) run whest run --estimator estimator.py \
+   --dataset $(MINI_DATASET) \
+   --split mini --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
+   --wall-time-limit $(WALL_TIME)
+
+mini-mode:
+	WHEST_K3_MODE=$(MODE) $(UV) run whest run --estimator estimator.py \
+   --dataset $(MINI_DATASET) \
+   --split mini --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
+   --wall-time-limit $(WALL_TIME)
+
+mini-local-mode:
+	WHEST_K3_MODE=$(MODE) $(UV) run whest run --estimator estimator.py \
+   --dataset $(MINI_DATASET) \
+   --split mini --runner local --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
+   --wall-time-limit $(WALL_TIME)
+
+mini-r1:
+	$(MAKE) mini-mode MODE=r1 BUDGET=$(BUDGET) MINI_MLPS=$(MINI_MLPS) WALL_TIME=$(WALL_TIME)
+
+mini-simple:
+	$(MAKE) mini-mode MODE=none BUDGET=$(BUDGET) MINI_MLPS=$(MINI_MLPS) WALL_TIME=$(WALL_TIME)
+
+mini-aug:
+	$(MAKE) mini-mode MODE=r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
+
+mini-mixed:
+	$(MAKE) mini-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
+
+mini-aug-local:
+	$(MAKE) mini-local-mode MODE=r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
+
+mini-mixed-local:
+	$(MAKE) mini-local-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
+
+full:
+	$(UV) run whest run --estimator estimator.py \
+   --dataset $(MINI_DATASET) \
+   --split mini --runner subprocess --fail-fast
+
+e:
+	$(UV) run python estimator.py
+
+v:
+	$(UV) run whest validate --estimator estimator.py
+
+
+local:
+	$(UV) run whest run --estimator estimator.py \
+   --dataset $(MINI_DATASET) \
    --split mini --runner local
 
 s:
@@ -20,13 +70,13 @@ help:
 	@echo "  demo-cast   record asciinema cast for README opener"
 
 install:
-	uv sync --group dev
+	$(UV) sync --group dev
 
 test:
-	uv run pytest tests/ -v
+	$(UV) run pytest tests/ -v
 
 lint:
-	uv run ruff check .
+	$(UV) run ruff check .
 
 # Records a fresh-clone walkthrough cast and renders to GIF.
 # Sequence: git clone -> cd -> uv sync -> python estimator.py -> whest validate
