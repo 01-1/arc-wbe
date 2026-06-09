@@ -1,22 +1,25 @@
-"""Cumulant-propagation estimator for ReLU MLPs.
+"""Budget-routed cumulant-propagation estimator for ReLU MLPs.
 
 Submission for https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026.
 
-Implements the K=1 (mean propagation) and K=2 (covariance propagation)
-algorithms from Wu et al., "Estimating the expected output of wide random
-MLPs more efficiently than sampling" (arXiv:2605.05179).
+Implements the low-order cumulant propagation family from Wu et al.,
+"Estimating the expected output of wide random MLPs more efficiently than
+sampling" (arXiv:2605.05179), specialized to the WhestBench setting.
 
-The estimator automatically selects the highest-order algorithm that fits
-comfortably inside the per-MLP FLOP budget:
+The default contest-size route is an optimized factorized K=3 estimator that
+tracks a symmetric third cumulant plus the cheap r=1 degree-4 harmonic state.
+It avoids materializing dense order-3/order-4 tensors by carrying factored
+third-cumulant terms, cached diagonal slices, and harmonic projections.
 
-* Covariance propagation (K=2) – full covariance matrix, O(depth·width³) FLOPs.
-* Mean propagation (K=1)       – diagonal variance only, O(depth·width²) FLOPs.
+The router selects the most accurate path that fits the supplied per-MLP
+budget, in this order:
 
-Both variants use the exact ReLU Gaussian-moment formulas (power cumulants)
-described in the paper.  When the supplied FLOP budget has room below the
-score multiplier floor, the K=2 path is blended with a small antithetic
-Monte-Carlo estimate to reduce residual bias without changing the default
-sample-free behavior under tight budgets.
+* Corrected augmented K=3/order-4 slice propagation for very large budgets.
+* Mixed late-layer corrected augmentation when it has enough residual headroom.
+* Optimized factorized K=3 with r=1 harmonic tracking for contest budgets.
+* K=2 covariance propagation, optionally blended with antithetic samples below
+  the score multiplier floor.
+* K=1 mean propagation as the tight-budget fallback.
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ _MIXED_AUGMENTED_FACTOR_K3_MODE = "last4_r1_slices_k211"
 _K3_ROUTE_MODES = {
     "none",
     "r1",
+    "r1_no4",
     "r1_111",
     "r1_slices",
     "r1_slices_111",
@@ -305,10 +309,12 @@ def _all_terms_iso_k3():
 @cache
 def _terms_iso_k3_for_mode(augment_mode: str):
     include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
+    skip_degree4 = augment_mode == "r1_no4"
     terms = []
     for int_part, vec_part, count in _all_terms_iso_k3():
         if (
             len(int_part) > 3
+            or (skip_degree4 and sum(int_part) > 3)
             or (not include_aug_slices and int_part in ((3, 1), (2, 1, 1)))
             or int_part == (1, 1, 1)
             or (int_part, set(vec_part)) == ((2, 1, 1), {(1, 1, 1)})
@@ -318,6 +324,8 @@ def _terms_iso_k3_for_mode(augment_mode: str):
         for vec in vec_part:
             nonzero = tuple(i for i, value in enumerate(vec) if value > 0)
             factors.append((sum(vec), vec, nonzero, tuple(vec[i] for i in nonzero)))
+        if skip_degree4 and any(degree > 3 for degree, *_ in factors):
+            continue
         terms.append((
             int_part,
             vec_part,
@@ -346,6 +354,31 @@ def _zero_repeated_mask(shape: tuple[int, ...]) -> fnp.ndarray:
         for j in range(i + 1, len(shape)):
             mask = mask * (idxs[i] != idxs[j])
     return mask
+
+
+@cache
+def _eye(width: int) -> fnp.ndarray:
+    return fnp.eye(width)
+
+
+@cache
+def _ones(width: int) -> fnp.ndarray:
+    return fnp.ones(width)
+
+
+@cache
+def _zeros_vec(width: int) -> fnp.ndarray:
+    return fnp.zeros(width)
+
+
+@cache
+def _empty_factor(width: int) -> fnp.ndarray:
+    return fnp.zeros((width, 0))
+
+
+@cache
+def _idx(width: int) -> fnp.ndarray:
+    return fnp.arange(width)
 
 
 def _zero_repeated(a: fnp.ndarray) -> fnp.ndarray:
@@ -499,10 +532,12 @@ class _HTensor:
         self.core = core
         self.r = r
         self.n = n if n is not None else core.shape[0]
-        if metric is None:
-            self.metric = fnp.eye(self.n)
+        if r == 0:
+            self.metric = None
+        elif metric is None:
+            self.metric = _eye(self.n)
         elif not hasattr(metric, "ndim") or metric.ndim == 0:
-            self.metric = fnp.eye(self.n) * metric
+            self.metric = _eye(self.n) * metric
         elif metric.ndim == 1:
             self.metric = fnp.diag(metric)
         else:
@@ -524,7 +559,7 @@ class _HTensor:
             core = _symmetrize(core)
         else:
             core = self.core
-        metric = w_t @ self.metric @ w
+        metric = w_t @ self.metric @ w if self.r > 0 else None
         return _HTensor(core, r=self.r, n=w.shape[1], metric=metric)
 
     def get_dslice(self, part: tuple[int, ...]) -> fnp.ndarray:
@@ -549,16 +584,15 @@ def _tensor_dslice(a: fnp.ndarray, part: tuple[int, ...], output_zero_repeated: 
     elif a.ndim == 2:
         out = fnp.diag(a) if part == (2,) else a
     elif a.ndim == 3:
+        idx = _idx(a.shape[0])
         if part == (3,):
-            idx = fnp.arange(a.shape[0])
             out = a[idx, idx, idx]
         elif part == (2, 1):
-            idx = fnp.arange(a.shape[0])
             out = a[idx[:, None], idx[:, None], idx[None, :]]
         else:
             out = a
     elif a.ndim == 4:
-        idx = fnp.arange(a.shape[0])
+        idx = _idx(a.shape[0])
         if part == (4,):
             out = a[idx, idx, idx, idx]
         elif part == (3, 1):
@@ -634,7 +668,7 @@ class _DSTensor:
                     tmp = dslice
                 out = out + _int_partition_coef(part) * _symmetrize(tmp)
             elif self.d == 4:
-                idx = fnp.arange(self.n)
+                idx = _idx(self.n)
                 tmp = fnp.zeros((self.n,) * 4)
                 if part == (4,):
                     tmp[idx, idx, idx, idx] = dslice
@@ -801,7 +835,7 @@ def _ds_harmonic_proj_r1(d_tensor: _DSTensor) -> _HTensor:
     p2 = _proj_coef(n, 4, 2)
     coef_l1 = p1[1]
     coef_l2 = p1[2] + p2[2]
-    eye = fnp.eye(n)
+    eye = _eye(n)
     core = fnp.zeros((n, n))
     for part, dslice in d_tensor.slices.items():
         core = core + coef_l1 * _lap_m_dslice_tensor(dslice, part, 1, n)
@@ -871,7 +905,7 @@ class _FactoredThird:
     def __init__(self, width: int, factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray] | None = None):
         self.width = width
         if factors is None:
-            empty = fnp.zeros((width, 0))
+            empty = _empty_factor(width)
             self.factors = (empty, empty, empty)
         else:
             self.factors = factors
@@ -947,7 +981,7 @@ class _FactoredThird:
             return self._dslice_cache[(3,)]
         a, b, c = self.factors
         if a.shape[1] == 0:
-            out = fnp.zeros(self.width)
+            out = _zeros_vec(self.width)
         else:
             out = fnp.sum(a * b * c, axis=1)
         self._dslice_cache[(3,)] = out
@@ -1009,8 +1043,8 @@ class _FactoredThird:
 
     @staticmethod
     def from_dstensor(ds: _DSTensor) -> "_FactoredThird":
-        eye = fnp.eye(ds.n)
-        k3 = ds.slices.get((3,), fnp.zeros(ds.n))
+        eye = _eye(ds.n)
+        k3 = ds.slices.get((3,), _zeros_vec(ds.n))
         k21 = ds.slices.get((2, 1), fnp.zeros((ds.n, ds.n)))
         factors = ((k3[:, None] * eye + k21.T * 3.0), eye, eye)
         return _FactoredThird(ds.n, factors)
@@ -1031,6 +1065,158 @@ def _dst_sub(a: _DSTensor, b: _DSTensor) -> _DSTensor:
     return _DSTensor(slices, n=a.n, d=a.d, autozero=True)
 
 
+def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
+    width = wk[1].n
+    mean = wk[1].core
+    var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
+    sigma = fnp.sqrt(var)
+    alpha = mean / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+
+    wick_values: dict[tuple[int, int], fnp.ndarray] = {}
+
+    def wick(k: int, p: int):
+        key = (k, p)
+        value = wick_values.get(key)
+        if value is None:
+            if p > 1 and k >= p:
+                value = math.factorial(p) * wick(k - p + 1, 1)
+            else:
+                value = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
+            wick_values[key] = value
+        return value
+
+    wick_views: dict[tuple[int, int, int, int], fnp.ndarray] = {}
+
+    def wick_view(k: int, p: int, dim: int, axis: int):
+        key = (k, p, dim, axis)
+        value = wick_views.get(key)
+        if value is None:
+            shape = [1] * dim
+            shape[axis] = -1
+            value = fnp.reshape(wick(k, p), tuple(shape))
+            wick_views[key] = value
+        return value
+
+    dslice_cache = {
+        (2, (1, 1)): _zero_repeated(wk[2].core),
+        (2, (2,)): fnp.diag(wk[2].core),
+    }
+    if 3 in wk:
+        dslice_cache[(3, (3,))] = _diagslice(wk[3], (3,), output_zero_repeated=True)
+        dslice_cache[(3, (2, 1))] = _diagslice(wk[3], (2, 1), output_zero_repeated=True)
+        dslice_cache[(3, (1, 2))] = fnp.transpose(dslice_cache[(3, (2, 1))])
+        dslice_cache[(3, (3, 0))] = dslice_cache[(3, (3,))]
+        dslice_cache[(3, (0, 3))] = dslice_cache[(3, (3,))]
+    if 4 in wk:
+        dslice_cache[(4, (4,))] = _diagslice(wk[4], (4,), output_zero_repeated=True)
+        dslice_cache[(4, (2, 2))] = _diagslice(wk[4], (2, 2), output_zero_repeated=True)
+        dslice_cache[(4, (3, 1))] = _diagslice(wk[4], (3, 1), output_zero_repeated=True)
+        dslice_cache[(4, (1, 3))] = fnp.transpose(dslice_cache[(4, (3, 1))])
+        dslice_cache[(4, (4, 0))] = dslice_cache[(4, (4,))]
+        dslice_cache[(4, (0, 4))] = dslice_cache[(4, (4,))]
+
+    eval_cache = {}
+
+    def eval_term(vec_part, dim: int, coef: float, factors):
+        key = (vec_part, dim)
+        value = eval_cache.get(key, ...)
+        if value is not ...:
+            return value
+        if any((degree, part) not in dslice_cache for degree, _, _, part in factors):
+            eval_cache[key] = None
+            return None
+        if not factors:
+            value = fnp.ones((width,) * dim)
+        else:
+            value = None
+            for degree, _, nonzero, part in factors:
+                factor = _expand(dslice_cache[(degree, part)], nonzero, dim)
+                if value is None:
+                    value = coef * factor if coef != 1.0 else factor
+                else:
+                    value = value * factor
+        eval_cache[key] = value
+        return value
+
+    p_slices = {}
+    for int_part, terms in _terms_iso_k3_grouped_for_mode("r1"):
+        acc = 0.0
+        for _, vec_part, count, k_vec, dim, coef, factors in terms:
+            term = eval_term(vec_part, dim, coef, factors)
+            if term is None:
+                continue
+            for axis, (k, p) in enumerate(zip(k_vec, int_part)):
+                view = wick_view(int(k), int(p), dim, axis)
+                if axis == 0 and count != 1:
+                    view = count * view
+                term = term * view
+            acc = acc + term
+        p_slices[int_part] = _symmetrize(acc, vec=int_part)
+
+    w1 = wick(1, 1)
+    w2 = wick(2, 1)
+    w3 = wick(3, 1)
+    w4 = wick(4, 1)
+
+    wk_11 = dslice_cache[(2, (1, 1))]
+    if 3 in wk:
+        wk_21_raw = dslice_cache[(3, (2, 1))]
+        wk_3 = dslice_cache[(3, (3,))]
+        p111 = wk[3].contract_wick(w1, propagate_cache=False)
+        p111._dslice_cache[(2, 1)] = wk_21_raw * (w1[:, None] * w1[:, None] * w1[None, :])
+        p111._dslice_cache[(3,)] = wk_3 * w1 * w1 * w1
+    else:
+        p111 = _FactoredThird(width)
+        p111._dslice_cache[(2, 1)] = fnp.zeros_like(wk_11)
+        p111._dslice_cache[(3,)] = _zeros_vec(width)
+        wk_21_raw = fnp.zeros_like(wk_11)
+    wk_22_raw = dslice_cache.get((4, (2, 2)), fnp.zeros_like(wk_11))
+
+    wk_21 = wk_21_raw / 2.0
+    wk_12 = wk_21.T
+    wk_22 = wk_22_raw / 4.0
+    eye = _eye(width)
+    ones = _ones(width)
+    diag2 = ones * 3.0
+
+    fac1a = w1[:, None] * wk_11 + w2[:, None] * wk_21
+    fac2a = eye * 3.0
+    fac3a = (
+        w2[:, None] * w1[None, :] * wk_11
+        + w3[:, None] * w1[None, :] * wk_21
+        + w2[:, None] * w2[None, :] * wk_12
+        + w3[:, None] * w2[None, :] * wk_22
+    ).T
+
+    fac1b = w1[:, None] * wk_12 + w2[:, None] * wk_22
+    fac2b = fac2a
+    fac3b = (
+        w3[:, None] * w1[None, :] * wk_11
+        + w4[:, None] * w1[None, :] * wk_21
+        + w3[:, None] * w2[None, :] * wk_12
+        + w4[:, None] * w2[None, :] * wk_22
+    ).T
+
+    p111.add_factor_groups(
+        [(fac1a, fac2a, fac3a), (fac1b, fac2b, fac3b)],
+        [_dslice_21_diag_middle(fac1a, diag2, fac3a), _dslice_21_diag_middle(fac1b, diag2, fac3b)],
+        [_diag_diag_middle(fac1a, diag2, fac3a), _diag_diag_middle(fac1b, diag2, fac3b)],
+    )
+
+    p_ds = _DSTower.from_slices(p_slices, autozero=True)
+    k_ds = _ds_pk_to_k(p_ds, strict=True)
+    if 3 in k_ds:
+        k_ds[3] = _dst_sub(k_ds[3], p111.get_repeated())
+
+    return {
+        1: _HTensor(k_ds[1].to_tensor(), r=0),
+        2: _HTensor(k_ds[2].to_tensor(), r=0),
+        3: p111 + _FactoredThird.from_dstensor(k_ds[3]),
+        4: _ds_harmonic_proj_r1(k_ds[4]),
+    }
+
 def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> dict[int, object]:
     if augment is True:
         augment_mode = "full"
@@ -1038,7 +1224,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         augment_mode = "none"
     else:
         augment_mode = augment
-    project_r1 = augment_mode in {"r1", "r1_111", "r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
+    project_r1 = augment_mode in {"r1", "r1_no4", "r1_111", "r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
     include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
     include_aug_111 = augment_mode in {"r1_111", "r1_slices_111", "r1_slices_k211", "full"}
     include_k211 = augment_mode in {"r1_slices_k211_only", "r1_slices_k211", "full"}
@@ -1121,7 +1307,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
     else:
         p111 = _FactoredThird(width)
         p111._dslice_cache[(2, 1)] = fnp.zeros_like(wk_11)
-        p111._dslice_cache[(3,)] = fnp.zeros(width)
+        p111._dslice_cache[(3,)] = _zeros_vec(width)
         wk_21 = fnp.zeros_like(wk_11)
     if 4 in wk:
         wk_22 = dslice(4, (2, 2))
@@ -1131,8 +1317,8 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
     wk_21 = wk_21 / 2.0
     wk_12 = wk_21.T
     wk_22 = wk_22 / 4.0
-    eye = fnp.eye(width)
-    ones = fnp.ones(width)
+    eye = _eye(width)
+    ones = _ones(width)
     factor_groups: list[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]] = []
     dslice_21_increments: list[fnp.ndarray | None] = []
     diag_increments: list[fnp.ndarray | None] = []
@@ -1312,7 +1498,10 @@ def _factorized_k3_propagation(mlp: MLP, augment: bool | str = "r1") -> fnp.ndar
             layer_augment = _AUGMENTED_FACTOR_K3_MODE if switch_at is not None and layer_idx >= switch_at else augment
             if switch_at is not None and layer_idx < switch_at:
                 layer_augment = _FACTOR_K3_MODE
-            tower = _factored_nonlin_k3(wk, augment=layer_augment)
+            if layer_augment == "r1":
+                tower = _factored_nonlin_k3_r1_fast(wk)
+            else:
+                tower = _factored_nonlin_k3(wk, augment=layer_augment)
             rows.append(tower[1].core)
 
         return fnp.stack(rows, axis=0)
@@ -1411,8 +1600,9 @@ def _covariance_propagation(mlp: MLP) -> fnp.ndarray:
 class Estimator(BaseEstimator):
     """Adaptive cumulant-propagation estimator.
 
-    Chooses between covariance propagation (K=2) and mean propagation (K=1)
-    based on the FLOP budget.  Both are sample-free estimators from the paper.
+    Chooses among corrected augmented K=3/order-4 slice propagation,
+    optimized factorized K=3, K=2 covariance propagation with optional
+    score-floor sampling, and K=1 mean propagation based on the FLOP budget.
     """
 
     def __init__(self) -> None:
@@ -1435,15 +1625,18 @@ class Estimator(BaseEstimator):
             _terms_iso_k3_grouped_for_mode(forced_mode)
         for vertices in range(1, 5):
             _multigraphs(vertices, 2)
+        for width in (16, 32, 64, 128, 256):
+            _eye(width)
+            _ones(width)
+            _zeros_vec(width)
+            _empty_factor(width)
+            _idx(width)
 
     def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
         """Predict per-layer mean activations.
 
         Returns an array of shape ``(depth, width)``.
         """
-        _rng = fnp.random.default_rng(mlp.seed)
-        _ = _rng
-
         width = mlp.width
         depth = mlp.depth
         forced_mode = _forced_k3_mode()

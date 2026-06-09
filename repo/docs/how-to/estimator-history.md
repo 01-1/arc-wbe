@@ -6,6 +6,28 @@ This page records the main estimator experiments for the repository-root
 [`estimator.py`](../../estimator.py). It is not a general recipe; it is a short
 engineering log so future changes do not repeat known dead ends.
 
+## Current Router
+
+The root estimator is now a budget-routed cumulant propagator. At contest-size
+width/depth and budget, the default route is optimized factorized K=3 with
+`r=1` degree-4 harmonic tracking. Larger budgets may route into corrected
+augmented order-4 slice variants, while tighter budgets fall back to K=2
+covariance propagation, K=2 plus score-floor-aware antithetic sampling, or K=1
+mean propagation.
+
+Current route order in `predict()`:
+
+- **Full corrected augmentation:** `r1_slices_k211`, behind a conservative
+  `100 * depth^2 * width^3` estimate.
+- **Mixed late-layer corrected augmentation:** `last4_r1_slices_k211`, behind
+  `70 * depth^2 * width^3`.
+- **Default contest route:** optimized factorized K=3 `r1`, behind
+  `50 * depth^2 * width^3`.
+- **Fallback route:** full K=2 covariance propagation, with antithetic
+  moment-matched Monte Carlo blending only when it fits under the score
+  multiplier floor.
+- **Tight-budget fallback:** K=1 mean/diagonal-variance propagation.
+
 ## Starting point
 
 Before the score-floor tuning pass, `estimator.py` already implemented the
@@ -28,9 +50,9 @@ competition's free score region. The leaderboard multiplier is
 gets the same 0.1 multiplier. Spending only a few percent of the full budget
 left score-free compute unused.
 
-## Current committed change
+## K=2 Score-Floor Tuning
 
-Commit `04bab80` tuned the root estimator for the `6.8e10` FLOP/MLP budget:
+Commit `04bab80` tuned the old K=2 default for the `6.8e10` FLOP/MLP budget:
 
 - Calibrated the covariance-propagation FLOP estimate from
   `5 * depth * width^3` to about `3.05 * depth * width^3`, matching flopscope
@@ -47,9 +69,10 @@ Commit `04bab80` tuned the root estimator for the `6.8e10` FLOP/MLP budget:
 - Kept a guard so the sampling correction only runs when at least 2,048 samples
   fit, avoiding very noisy corrections on wider/deeper MLPs.
 
-At width 256 and depth 8, the current estimator uses about `6.69e9` FLOPs,
-roughly `9.84%` of the `6.8e10` budget, so it remains on the 0.1 multiplier
-floor while spending most of the free region.
+At width 256 and depth 8, that K=2 plus sampling fallback uses about `6.69e9`
+FLOPs, roughly `9.84%` of the `6.8e10` budget, so it remains on the 0.1
+multiplier floor while spending most of the free region. This is no longer the
+contest-size default because factorized K=3 scores better despite costing more.
 
 ## Tried and Rejected
 
@@ -79,19 +102,19 @@ Both covariance-update experiments were removed from the committed estimator.
 ## Practical Takeaway
 
 For leaderboard score, raw full-budget Monte Carlo is not automatically better:
-spending above `6.8e9` FLOPs increases the multiplier. The useful target is
-therefore "best final-layer MSE under the 10% floor", not "lowest raw MSE at
-the full budget".
+spending above `6.8e9` FLOPs increases the multiplier. The useful target is the
+best adjusted final-layer score, not the lowest raw MSE at any cost.
 
-The current clean strategy is:
+The current clean default strategy is:
 
 ```text
-full covariance propagation
-+ score-floor-aware antithetic, moment-matched Monte Carlo blend
+factorized K=3
++ r=1 degree-4 harmonic tracking
++ K=2/sampled fallback only when K=3 does not fit
 ```
 
-Further improvements should be benchmark-gated against this baseline under the
-same `6.8e9` effective-compute target.
+Further improvements should be benchmark-gated against the routed default on
+the cached public mini split, not only against the older K=2 floor route.
 
 ## Full Factorized K=3 Port
 
@@ -239,3 +262,30 @@ same five MLPs. A one-MLP local-runner corrected mixed augmentation check
 FLOPs, `2.36s` residual wall time, `5.03e-7` raw final-layer MSE, and `2.02e-7`
 all-layer MSE, confirming the augmentation is more accurate on that fixed MLP
 but still far too residual-heavy for the contest-like subprocess route.
+
+A later residual pass found that `_HTensor` was allocating and contracting an
+auxiliary metric even for `r=0` tensors, where the metric is never used.
+Skipping that unused propagation preserves predictions but lowers default `r1`
+FLOPs on width-256/depth-8 from about `1.96e10` to about `1.85e10` per MLP.
+On the first 20 baked mini MLPs, the default route measured `1.85e10`
+FLOPs/MLP, `95.6ms` residual wall time/MLP, `8.80e-7` raw final-layer MSE,
+`2.90e-7` all-layer MSE, and `3.63e-7` adjusted score. The same pass also
+removed an unused predict-time RNG allocation and warms common shape constants
+in `setup()`.
+
+The `r1_no4` diagnostic mode tests dropping the carried degree-4 `r=1`
+harmonic state entirely. It is faster (`~56ms` residual wall time/MLP and
+`1.76e10` FLOPs/MLP on the first five baked mini MLPs), but it is not a good
+contest route: final-layer MSE worsened to `2.70e-6`, all-layer MSE to
+`1.38e-6`, and adjusted score to `9.20e-7` on that same five-MLP check.
+
+A follow-up specialization split the default `r1` nonlinear step into
+`_factored_nonlin_k3_r1_fast`, hard-coding the mode and precomputing the exact
+diagonal slices used by the 94 `r1` terms. A width-16/depth-3 comparison against
+the generic `r1` path matched exactly (`max_abs=0.0`), and
+`make mini-r1 MINI_MLPS=5 BUDGET=1000000000000000 WALL_TIME=240` measured
+`1.85e10` FLOPs/MLP, `~91.7ms` residual wall time/MLP, `8.96e-7` raw
+final-layer MSE, and `2.96e-7` all-layer MSE. An analogous
+`r1_slices_k211` fast draft matched the generic augmented path on a small smoke
+to roundoff, but timed out on the width-256 cached mini subprocess check, so it
+is intentionally not routed.
