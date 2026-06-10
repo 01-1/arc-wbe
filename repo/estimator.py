@@ -1,4 +1,4 @@
-"""Budget-routed cumulant-propagation estimator for ReLU MLPs.
+"""Optimized cumulant-propagation estimator for ReLU MLPs.
 
 Submission for https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026.
 
@@ -6,20 +6,10 @@ Implements the low-order cumulant propagation family from Wu et al.,
 "Estimating the expected output of wide random MLPs more efficiently than
 sampling" (arXiv:2605.05179), specialized to the WhestBench setting.
 
-The default contest-size route is an optimized factorized K=3 estimator that
-tracks a symmetric third cumulant plus the cheap r=1 degree-4 harmonic state.
-It avoids materializing dense order-3/order-4 tensors by carrying factored
-third-cumulant terms, cached diagonal slices, and harmonic projections.
-
-The router selects the most accurate path that fits the supplied per-MLP
-budget, in this order:
-
-* Corrected augmented K=3/order-4 slice propagation for very large budgets.
-* Mixed late-layer corrected augmentation when it has enough residual headroom.
-* Optimized factorized K=3 with r=1 harmonic tracking for contest budgets.
-* K=2 covariance propagation, optionally blended with antithetic samples below
-  the score multiplier floor.
-* K=1 mean propagation as the tight-budget fallback.
+The estimator uses the optimized factorized K=3 path with r=1 degree-4
+harmonic tracking. It avoids materializing dense order-3/order-4 tensors by
+carrying factored third-cumulant terms, cached diagonal slices, harmonic
+projections, and a diagonal-only final-layer mean specialization.
 """
 
 from __future__ import annotations
@@ -29,7 +19,6 @@ import gc
 import importlib.util
 import itertools
 import math
-import os
 from collections import defaultdict
 from functools import cache
 from pathlib import Path
@@ -43,30 +32,8 @@ if hasattr(flops, "configure"):
     flops.configure(symmetry_warnings=False)
 
 _MIN_VARIANCE = 1e-30
-_K3_MIN_WIDTH = 16
-_ENABLE_FACTOR_K3 = True
 _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
-_MIXED_AUGMENTED_FACTOR_K3_MODE = "last4_r1_slices_k211"
-_K3_ROUTE_MODES = {
-    "none",
-    "r1",
-    "r1_no4",
-    "r1_111",
-    "r1_slices",
-    "r1_slices_111",
-    "r1_slices_k211_only",
-    "r1_slices_k211",
-    "full",
-    "last1_r1_slices_k211",
-    "last2_r1_slices_k211",
-    "last3_r1_slices_k211",
-    "last4_r1_slices_k211",
-    "last5_r1_slices_k211",
-    "last6_r1_slices_k211",
-    "last7_r1_slices_k211",
-    "last8_r1_slices_k211",
-}
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1467,6 +1434,119 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
     return out
 
 
+def _factored_relu_mean_from_pre(wk: dict[int, object], augment: bool | str = "r1") -> fnp.ndarray:
+    """Return only the post-ReLU mean from a pre-activation K=3 tower."""
+    if augment is True:
+        augment_mode = "full"
+    elif augment is False:
+        augment_mode = "none"
+    else:
+        augment_mode = augment
+
+    width = wk[1].n
+    mean = wk[1].core
+    var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
+    sigma = fnp.sqrt(var)
+    alpha = mean / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+
+    wick_values: dict[tuple[int, int], fnp.ndarray] = {}
+
+    def wick(k: int, p: int):
+        key = (k, p)
+        value = wick_values.get(key)
+        if value is None:
+            if p > 1 and k >= p:
+                value = math.factorial(p) * wick(k - p + 1, 1)
+            else:
+                value = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
+            wick_values[key] = value
+        return value
+
+    dslice_cache = {}
+
+    def dslice(degree: int, part: tuple[int, ...]):
+        key = (degree, part)
+        if key not in dslice_cache:
+            dslice_cache[key] = _diagslice(wk[degree], part, output_zero_repeated=True)
+        return dslice_cache[key]
+
+    acc = 0.0
+    for int_part, vec_part, count, k_vec, dim, coef, factors in _terms_iso_k3_for_mode(augment_mode):
+        if int_part != (1,):
+            continue
+        if any(degree not in wk for degree, _, _, _ in factors):
+            continue
+        if not factors:
+            term = fnp.ones(width)
+        else:
+            term = None
+            for degree, _, _, part in factors:
+                factor = dslice(degree, part)
+                if term is None:
+                    term = coef * factor if coef != 1.0 else factor
+                else:
+                    term = term * factor
+        value = term * wick(int(k_vec[0]), 1)
+        if count != 1:
+            value = count * value
+        acc = acc + value
+    return acc
+
+
+def _relu_mean_from_cumulant_diags(
+    mean: fnp.ndarray,
+    var: fnp.ndarray,
+    k3_diag: fnp.ndarray | float,
+    k4_diag: fnp.ndarray | float,
+) -> fnp.ndarray:
+    var = fnp.maximum(var, _MIN_VARIANCE)
+    sigma = fnp.sqrt(var)
+    alpha = mean / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+
+    base = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 0, 1)
+    w3 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 3, 1)
+    w4 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 4, 1)
+    w6 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 6, 1)
+    w7 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 7, 1)
+    w8 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 8, 1)
+
+    return (
+        base
+        + (k3_diag / 6.0) * w3
+        + (k4_diag / 24.0) * w4
+        + (k3_diag * k3_diag / 72.0) * w6
+        + (k3_diag * k4_diag / 144.0) * w7
+        + (k4_diag * k4_diag / 1152.0) * w8
+    )
+
+
+def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> fnp.ndarray:
+    mean = w.T @ tower[1].core
+    var = fnp.einsum("ij,ia,ja->a", tower[2].core, w, w)
+
+    if 3 in tower:
+        a, b, c = tower[3].factors
+        aw = w.T @ a
+        bw = w.T @ b
+        cw = w.T @ c
+        k3_diag = fnp.sum(aw * bw * cw, axis=1)
+    else:
+        k3_diag = 0.0
+
+    if 4 in tower and tower[4].r == 1:
+        core_diag = fnp.einsum("ij,ia,ja->a", tower[4].core, w, w)
+        metric_diag = fnp.einsum("ij,ia,ja->a", tower[4].metric, w, w)
+        k4_diag = core_diag * metric_diag
+    else:
+        k4_diag = 0.0
+
+    return _relu_mean_from_cumulant_diags(mean, var, k3_diag, k4_diag)
+
+
 def _factorized_k3_propagation(mlp: MLP, augment: bool | str = "r1") -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
@@ -1492,12 +1572,18 @@ def _factorized_k3_propagation(mlp: MLP, augment: bool | str = "r1") -> fnp.ndar
             switch_at = max(0, mlp.depth - n_aug_layers)
 
         for layer_idx, w_mat in enumerate(mlp.weights):
-            wk = {}
-            for degree, value in tower.items():
-                wk[degree] = value.contract_w(w_mat)
             layer_augment = _AUGMENTED_FACTOR_K3_MODE if switch_at is not None and layer_idx >= switch_at else augment
             if switch_at is not None and layer_idx < switch_at:
                 layer_augment = _FACTOR_K3_MODE
+            if layer_idx == mlp.depth - 1 and layer_augment == "r1":
+                rows.append(_final_r1_relu_mean_from_tower(tower, w_mat))
+                break
+            wk = {}
+            for degree, value in tower.items():
+                wk[degree] = value.contract_w(w_mat)
+            if layer_idx == mlp.depth - 1:
+                rows.append(_factored_relu_mean_from_pre(wk, augment=layer_augment))
+                break
             if layer_augment == "r1":
                 tower = _factored_nonlin_k3_r1_fast(wk)
             else:
@@ -1508,15 +1594,6 @@ def _factorized_k3_propagation(mlp: MLP, augment: bool | str = "r1") -> fnp.ndar
     finally:
         if was_gc_enabled:
             gc.enable()
-
-
-def _forced_k3_mode() -> str | None:
-    mode = os.environ.get("WHEST_K3_MODE")
-    if not mode:
-        return None
-    if mode not in _K3_ROUTE_MODES:
-        raise ValueError(f"unsupported WHEST_K3_MODE={mode!r}")
-    return mode
 
 
 def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
@@ -1598,12 +1675,7 @@ def _covariance_propagation(mlp: MLP) -> fnp.ndarray:
 
 
 class Estimator(BaseEstimator):
-    """Adaptive cumulant-propagation estimator.
-
-    Chooses among corrected augmented K=3/order-4 slice propagation,
-    optimized factorized K=3, K=2 covariance propagation with optional
-    score-floor sampling, and K=1 mean propagation based on the FLOP budget.
-    """
+    """Factorized K=3 cumulant-propagation estimator."""
 
     def __init__(self) -> None:
         self._setup_rng = None
@@ -1619,10 +1691,6 @@ class Estimator(BaseEstimator):
         _terms_iso_k3_grouped_for_mode("r1_slices_k211")
         _terms_iso_k3_for_mode("r1_slices")
         _terms_iso_k3_grouped_for_mode("r1_slices")
-        forced_mode = _forced_k3_mode()
-        if forced_mode is not None:
-            _terms_iso_k3_for_mode(forced_mode)
-            _terms_iso_k3_grouped_for_mode(forced_mode)
         for vertices in range(1, 5):
             _multigraphs(vertices, 2)
         for width in (16, 32, 64, 128, 256):
@@ -1637,60 +1705,7 @@ class Estimator(BaseEstimator):
 
         Returns an array of shape ``(depth, width)``.
         """
-        width = mlp.width
-        depth = mlp.depth
-        forced_mode = _forced_k3_mode()
-        if forced_mode is not None and width >= _K3_MIN_WIDTH:
-            return _factorized_k3_propagation(mlp, augment=forced_mode)
-
-        # Rough FLOP estimates, calibrated against flopscope's measured counts.
-        cov_flops = 3.05 * depth * width * width * width
-        # Full factorized K=3 includes the factored third cumulant plus all
-        # non-factored diagonal-slice power-cumulant conversion terms. The
-        # factor rank grows by layer, so a conservative score-floor router uses
-        # a depth^2 term.
-        factor_k3_flops = 50 * depth * depth * width * width * width
-        mixed_augmented_k3_flops = 70 * depth * depth * width * width * width
-        augmented_k3_flops = 100 * depth * depth * width * width * width
-
-        # Use the full corrected augmentation when the caller provides enough
-        # budget for it. At contest size it is much more accurate but still too
-        # expensive for the default 6.8e10 budget.
-        if _ENABLE_FACTOR_K3 and augmented_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
-            return _factorized_k3_propagation(mlp, augment=_AUGMENTED_FACTOR_K3_MODE)
-
-        # A mixed route turns on corrected augmentation only for the final
-        # layers. This keeps much of the MSE gain at substantially lower raw
-        # FLOPs, but still needs more residual headroom than the contest budget.
-        if _ENABLE_FACTOR_K3 and mixed_augmented_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
-            return _factorized_k3_propagation(mlp, augment=_MIXED_AUGMENTED_FACTOR_K3_MODE)
-
-        # Otherwise prefer the optimized factorized K=3 route when it fits
-        # inside the actual benchmark budget. The r=1 harmonic projection
-        # variant is cheaper than simple K=3 on contest-size MLPs and has
-        # matched or slightly beaten it in local final-layer MSE checks.
-        if _ENABLE_FACTOR_K3 and factor_k3_flops < budget * 0.8 and width >= _K3_MIN_WIDTH:
-            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
-
-        # Use covariance propagation if it fits inside the budget with some
-        # headroom for overhead.  Otherwise fall back to mean propagation.
-        if cov_flops < budget * 0.8:
-            estimate = _covariance_propagation(mlp)
-
-            # The benchmark score multiplier bottoms out at 10% of budget.
-            # Spend otherwise-free headroom on a small unbiased correction, but
-            # avoid it when the budget is too tight to get useful samples.
-            sampling_flops_per_input = max(1, 2 * depth * width * width)
-            spare_for_floor = int(max(0.0, budget * 0.098 - cov_flops))
-            n_samples = min(100_000, spare_for_floor // sampling_flops_per_input)
-            if n_samples >= 2_048:
-                rng = fnp.random.default_rng(mlp.seed)
-                sampled = _antithetic_sample_means(mlp, int(n_samples), rng)
-                sample_weight = min(0.5, n_samples / (n_samples + 5_000.0))
-                estimate = estimate * (1.0 - sample_weight) + sampled * sample_weight
-            return estimate
-
-        return _mean_propagation(mlp)
+        return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
 
 
 def _load_baseline(name: str) -> type[BaseEstimator]:

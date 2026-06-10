@@ -6,27 +6,16 @@ This page records the main estimator experiments for the repository-root
 [`estimator.py`](../../estimator.py). It is not a general recipe; it is a short
 engineering log so future changes do not repeat known dead ends.
 
-## Current Router
+## Current Estimator
 
-The root estimator is now a budget-routed cumulant propagator. At contest-size
-width/depth and budget, the default route is optimized factorized K=3 with
-`r=1` degree-4 harmonic tracking. Larger budgets may route into corrected
-augmented order-4 slice variants, while tighter budgets fall back to K=2
-covariance propagation, K=2 plus score-floor-aware antithetic sampling, or K=1
-mean propagation.
+The root estimator now runs the optimized factorized K=3 path directly. It
+tracks the symmetric third cumulant plus the `r=1` degree-4 harmonic state and
+uses a diagonal-only final-layer mean specialization for the primary score
+path. The previous budget router was removed so `predict()` no longer switches
+between augmented K=3 variants, covariance-plus-sampling, or mean propagation.
 
-Current route order in `predict()`:
-
-- **Full corrected augmentation:** `r1_slices_k211`, behind a conservative
-  `100 * depth^2 * width^3` estimate.
-- **Mixed late-layer corrected augmentation:** `last4_r1_slices_k211`, behind
-  `70 * depth^2 * width^3`.
-- **Default contest route:** optimized factorized K=3 `r1`, behind
-  `50 * depth^2 * width^3`.
-- **Fallback route:** full K=2 covariance propagation, with antithetic
-  moment-matched Monte Carlo blending only when it fits under the score
-  multiplier floor.
-- **Tight-budget fallback:** K=1 mean/diagonal-variance propagation.
+Historical router experiments remain documented below because they are useful
+for interpreting benchmark results and avoiding repeated dead ends.
 
 ## Starting point
 
@@ -110,11 +99,11 @@ The current clean default strategy is:
 ```text
 factorized K=3
 + r=1 degree-4 harmonic tracking
-+ K=2/sampled fallback only when K=3 does not fit
++ diagonal-only final-layer mean specialization
 ```
 
-Further improvements should be benchmark-gated against the routed default on
-the cached public mini split, not only against the older K=2 floor route.
+Further improvements should be benchmark-gated against the direct K=3 default
+on the cached public mini split, not only against the older K=2 floor route.
 
 ## Full Factorized K=3 Port
 
@@ -240,17 +229,12 @@ harmonic tracking:
 - `r1_111`: add the extra degree-4-to-`111` factored feed-forward terms without
   the augmented slice projection. This did not look useful in local smokes.
 
-The Makefile now includes cached-public-dataset targets for comparing these
-routes against the baked `mini` split without recomputing Monte Carlo ground
-truth. `make mini` runs the default estimator on five fixed width-256/depth-8
-MLPs with subprocess isolation. `make mini-r1`, `make mini-simple`, and
-`make mini-mode MODE=<mode> BUDGET=<flops>` force a specific K=3 harmonic route
-through the same cached dataset. Long corrected-augmentation diagnostics can
-use `make mini-mixed-local MINI_MLPS=1` or
-`make mini-aug-local MINI_MLPS=1`, which
-keeps the same baked ground truth but uses the local runner because the
-subprocess harness currently times out before the corrected augmentation route
-returns.
+The Makefile cached-public-dataset targets were used for comparing these
+historical routes against the baked `mini` split without recomputing Monte
+Carlo ground truth. `make mini` runs the current default estimator on five
+fixed width-256/depth-8 MLPs with subprocess isolation. Earlier route-comparison
+targets forced K=3 harmonic modes through `WHEST_K3_MODE`; the live estimator no
+longer reads that environment variable after the router removal.
 
 On the first five baked mini MLPs, the default `r1` route measured about
 `1.96e10` FLOPs/MLP, `~0.10s` residual wall time/MLP, `8.96e-7` raw final-layer
@@ -289,3 +273,23 @@ final-layer MSE, and `2.96e-7` all-layer MSE. An analogous
 `r1_slices_k211` fast draft matched the generic augmented path on a small smoke
 to roundoff, but timed out on the width-256 cached mini subprocess check, so it
 is intentionally not routed.
+
+The latest exact optimization specializes the final `r1` layer for the primary
+score path. The final ReLU mean only needs diagonal pre-activation cumulants:
+mean, variance, the diagonal transformed factored third cumulant, and the
+degree-4 `r=1` harmonic diagonal. Computing those diagonals directly avoids
+building the full final post-ReLU cumulant tower and skips the full final
+covariance/harmonic matrices. A width-32/depth-4 smoke matched the generic
+final-layer path to about `7e-16` max absolute difference. On the first five
+baked mini MLPs, the default kept the same `8.96e-7` raw final-layer MSE
+and `2.96e-7` all-layer MSE while reducing measured FLOPs to about `1.63e10`
+per MLP. Residual wall time varied across five-MLP subprocess runs from roughly
+`77ms` to `91ms` per MLP, with adjusted final-layer score landing around
+`3.2e-7` to `3.4e-7`.
+
+Two score-floor-shaped approximations were tested and rejected in the same pass:
+starting K=3 only for the last 2-4 layers after a K=2 covariance prefix landed
+near the desired compute band but had final-layer MSE around `2e-5` to `3e-5`,
+and hard-capping the factored third-cumulant rank by keeping only recent factor
+columns reduced nominal FLOPs but invalidated useful repeated-slice caches and
+worsened adjusted score.
