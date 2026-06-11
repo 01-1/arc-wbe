@@ -532,3 +532,10 @@ multiplier, versus grouped exact `r1` at `3.21e-7` adjusted score with
 timing window. The default route was promoted to this structured cap because it
 is the current calibrated `make mini` best, but the gain is modest and still
 well short of the `<1e-7` adjusted-score target.
+
+Refitting the six final ReLU mean coefficients for the structured-cap default
+on the full 100-MLP public mini split gave only a tiny raw-MSE improvement:
+`7.2706e-7` versus `7.2754e-7` with the previous exact-route coefficients.
+The refit coefficients were
+`[1.00021399, 0.16840459, 0.03457216, -0.01232764, -0.00447162, -0.00173340]`;
+this is a near-free calibration tweak, not a route to the `<1e-7` target.
