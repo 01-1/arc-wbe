@@ -389,3 +389,95 @@ subprocess smoke measured raw final-layer MSE `7.13e-7`, adjusted score
 `2.26e-7`, mean score multiplier `0.3167`, and no failures. This is a useful
 compute reduction but still not enough by itself for the `<1e-7` adjusted-score
 target.
+
+## Heuristic Rank Compression Recheck
+
+After structured factor grouping, the old heuristic compression ideas were
+retested as guarded experiment modes rather than default behavior. The
+estimator exposes:
+
+- `WHEST_K3_MODE=r1_cap<N>`: keep the top-`N` third-cumulant CP columns after
+  each hidden ReLU, ranked by the product of factor-column squared norms.
+- `WHEST_K3_MODE=r1_compressed` or `r1_rank_schedule`: use the previous
+  increasing schedule `[768, 1024, 1280, 1536, 1536, 1536, 1536]`, with
+  `WHEST_R1_RANK_SCHEDULE` available for comma-separated overrides.
+- `WHEST_R1_COMPRESS=recent`: diagnostic group-recency truncation instead of
+  top-k. This preserves whole groups when possible, but it was much less
+  accurate in the first smoke checks.
+- `WHEST_R1_COMPRESS=groups`: diagnostic whole-group truncation. Groups are
+  ranked by the sum of their per-column products of squared factor norms, then
+  retained whole while the rank cap allows. This avoids collapsing every CP
+  column into dense factor slabs, but it is coarser than column top-k.
+
+The prior heuristic contenders that motivated this recheck were:
+
+- Top-k cap 1536: raw final-layer MSE about `1.04e-6`, adjusted score about
+  `1.33e-7`.
+- Increasing rank schedule `[768, 1024, 1280, 1536, 1536, 1536, 1536]`: raw
+  final-layer MSE about `1.05e-6`, adjusted score about `1.26e-7`.
+- Richer cheap-feature distillation: best adjusted score about `1.29e-7`.
+- Dropped-tail final K=3 correction: improved raw MSE, but the added FLOPs
+  worsened adjusted score.
+- Augmented suffixes: reached raw final-layer MSE around `3.1e-7`, but compute
+  exceeded the score-efficient budget.
+
+The new grouping changed the tradeoff: the default route already benefits from
+reusing unique structured factors, while top-k compression materializes the
+factored third cumulant when it actually truncates. On the first five baked
+mini MLPs under the standard budget, the recheck found:
+
+- Default grouped `r1`: raw final-layer MSE `7.13e-7`, adjusted score
+  `2.28e-7`, mean multiplier `0.3199`.
+- Top-k `r1_cap1536`: raw final-layer MSE `1.13e-6`, adjusted score
+  `2.89e-7`, mean multiplier `0.2571`.
+- Top-k scheduled `r1_compressed`: raw final-layer MSE `1.16e-6`, adjusted
+  score `2.87e-7`, mean multiplier `0.2482`.
+- Top-k `r1_cap1024`: raw final-layer MSE `2.89e-6`, adjusted score
+  `8.76e-7`.
+- Top-k `r1_cap1280`: raw final-layer MSE `1.70e-6`, adjusted score
+  `5.04e-7`.
+- Top-k `r1_cap2048`: raw final-layer MSE `8.23e-7`, adjusted score
+  `2.94e-7`.
+- Recent-group `r1_cap1536`: raw final-layer MSE `7.80e-6`, adjusted score
+  `1.77e-6`.
+- Recent-group scheduled `r1_compressed`: raw final-layer MSE `8.00e-6`,
+  adjusted score `1.71e-6`.
+
+So the old cap/schedule family remains the most important compression lead,
+but the pre-grouping `~1.2e-7` adjusted-score result should not be read as a
+drop-in setting for the current grouped estimator. The useful next project is
+to recover that old tradeoff under the grouped representation: a structured
+top-k path that scores columns within groups, keeps retained whole-group
+diagonal-slice increments exact, and only materializes boundary columns when it
+really truncates a group. That would directly target the old `r1_compressed`
+win while avoiding the dense-materialization penalty that caused the grouped
+recheck to regress.
+
+A follow-up whole-group pruning check found a small compute/score improvement,
+but still far from the `<1e-7` target and not enough to justify changing the
+default without broader validation. On the first five baked mini MLPs:
+
+- Whole-group `r1_cap3072`: raw final-layer MSE `7.70e-7`, adjusted score
+  `2.20e-7`, mean multiplier `0.2869`.
+- Whole-group `r1_cap3328`: raw final-layer MSE `7.28e-7`, adjusted score
+  `2.13e-7`, mean multiplier `0.2941`.
+- Whole-group `r1_cap3584`: raw final-layer MSE `7.21e-7`, adjusted score
+  `2.18e-7`, mean multiplier `0.3024`.
+- Whole-group `r1_cap4096`: raw final-layer MSE `7.16e-7`, adjusted score
+  `2.20e-7`, mean multiplier `0.3088`.
+
+On the first 20 baked mini MLPs, the direct comparison was:
+
+- Default grouped `r1`: raw final-layer MSE `7.42e-7`, adjusted score
+  `2.33e-7`, mean multiplier `0.3149`.
+- Whole-group `r1_cap3584`: raw final-layer MSE `7.46e-7`, adjusted score
+  `2.22e-7`, mean multiplier `0.2974`.
+- Whole-group `r1_cap3328`: raw final-layer MSE `7.60e-7`, adjusted score
+  `2.29e-7`, mean multiplier `0.3020`.
+
+The cap3584 variant only starts pruning once the hidden-layer third-cumulant
+rank would exceed 3584, so it preserves the early layers exactly and drops a
+small number of low-scored structured groups late in the network. It remains an
+experiment mode rather than the default route because the gain is modest and
+does not change the main conclusion: compression alone is not currently enough
+to reach the leaderboard target.
