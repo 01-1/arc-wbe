@@ -369,8 +369,7 @@ def _symmetrize(a: fnp.ndarray, vec: tuple[int, ...] | None = None) -> fnp.ndarr
         p for p in itertools.permutations(range(a.ndim))
         if tuple(vec[i] for i in p) == vec
     ]
-    stacked = fnp.stack([fnp.transpose(a, p) for p in perms], axis=0)
-    return fnp.sum(stacked, axis=0) / float(len(perms))
+    return sum(fnp.transpose(a, p) for p in perms) / float(len(perms))
 
 
 def _expand(a: fnp.ndarray | float, positions: tuple[int, ...], dim: int):
