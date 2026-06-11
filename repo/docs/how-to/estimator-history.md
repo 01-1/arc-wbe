@@ -562,18 +562,12 @@ Regrouping the same expanded coefficients into six per-term gate polynomials
 preserved the predictions and nudged the full 100-MLP public mini score to
 `2.71e-7` adjusted with `0.4190` mean multiplier.
 
-A public-mini seed-conditioned residual overlay was then tested as a direct
-calibration artifact rather than a general estimator improvement. The default
-route still computes the structured-cap `r1` prediction first, then, when
-`public_mini_residual_rank48.npz` is present and the raw or seed-protocol-3.0
-derived MLP seed is one of the 100 public-mini seeds, adds a precomputed
-rank-48 final-layer residual correction. Missing artifacts, load failures, and
-unseen seeds all fall back to the base structured-cap estimator. The SVD fit
-was motivated by in-sample public-mini residuals: the uncorrected final-layer
-raw MSE was about
-`6.48e-7`, while rank-32, rank-48, and rank-64 residual reconstructions were
-about `2.76e-7`, `1.65e-7`, and `8.61e-8` respectively before charging the
-small lookup residual time. The first calibrated `make mini MINI_MLPS=5
-WALL_TIME=240` check scored `8.41e-8` adjusted with `1.65e-7` raw final-layer
-MSE, `2.04e-7` all-layers MSE, `0.575247s` total residual wall time, and
-`0.50533147` mean multiplier.
+A public-mini seed-conditioned residual overlay was briefly tested and then
+rejected as invalid. It used a sibling `public_mini_residual_rank48.npz` file
+containing residual corrections fitted from the public-mini labels and keyed
+by public-mini seeds. Although this produced a target-beating cached-mini score
+locally, it was overfit to the public split, depended on an external data file
+that `whest package` would not include, and would not be valid for held-out
+leaderboard MLPs. The artifact, ordinary `numpy` dependency, and default-route
+hook were removed; do not treat that result as a legitimate estimator
+improvement.
