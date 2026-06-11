@@ -556,3 +556,6 @@ beating the previous structured-cap default while remaining far above the
 `<1e-7` adjusted-score target. A full 100-MLP public mini run gave the more
 stable residual-aware estimate: `2.72e-7` adjusted score with `6.48e-7` raw
 final-layer MSE, `2.66e-7` all-layers MSE, and `0.4194` mean multiplier.
+Regrouping the same expanded coefficients into six per-term gate polynomials
+preserved the predictions and nudged the full 100-MLP public mini score to
+`2.71e-7` adjusted with `0.4190` mean multiplier.
