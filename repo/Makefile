@@ -44,6 +44,9 @@ mini-aug-local:
 mini-mixed-local:
 	$(MAKE) mini-local-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
 
+p:
+	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py
+
 full:
 	$(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \

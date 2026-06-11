@@ -15,6 +15,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+profile_residual_tree.html
 
 # OS
 .DS_Store
