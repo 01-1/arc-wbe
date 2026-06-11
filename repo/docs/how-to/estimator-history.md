@@ -553,4 +553,6 @@ calibrated five-MLP `make mini` smoke scored `2.78e-7` adjusted with
 `6.47e-7` raw final-layer MSE. The 20-MLP calibrated gate scored `2.82e-7`
 adjusted with `6.62e-7` raw final-layer MSE and `0.4263` mean multiplier,
 beating the previous structured-cap default while remaining far above the
-`<1e-7` adjusted-score target.
+`<1e-7` adjusted-score target. A full 100-MLP public mini run gave the more
+stable residual-aware estimate: `2.72e-7` adjusted score with `6.48e-7` raw
+final-layer MSE, `2.66e-7` all-layers MSE, and `0.4194` mean multiplier.
