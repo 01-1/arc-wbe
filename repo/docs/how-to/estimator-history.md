@@ -13,6 +13,9 @@ tracks the symmetric third cumulant plus the `r=1` degree-4 harmonic state and
 uses a diagonal-only final-layer mean specialization for the primary score
 path. The previous budget router was removed so `predict()` no longer switches
 between augmented K=3 variants, covariance-plus-sampling, or mean propagation.
+The shared `_symmetrize` helper sums transposed views with `fnp.sum` over a
+stacked permutation axis so flopscope records the reduction directly instead
+of attributing residual time to Python's built-in `sum`.
 
 Historical router experiments remain documented below because they are useful
 for interpreting benchmark results and avoiding repeated dead ends.

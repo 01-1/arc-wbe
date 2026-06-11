@@ -3,6 +3,14 @@
 Guidance for coding agents working in this repository:
 
 - Use `rg`/`rg --files` for search.
+- Do not cheat under the ARC White-Box Estimation Challenge rules. Treat the
+  MLP object passed to `predict()` as the only legitimate input: do not read or
+  use ground-truth Monte-Carlo samples, private test suites, private seeds,
+  reference outputs, or grader-internal state; do not modify or circumvent
+  `flopscope` accounting or FLOP-budget enforcement; and do not rely on network
+  access during evaluation. Do not fit, tune, branch on, memorize, special-case,
+  or otherwise optimize estimator behavior for public test MLPs, public seeds,
+  public leaderboard cases, or any other identifiable evaluation instances.
 - Keep estimator changes focused in `estimator.py` unless the user asks for
   docs, examples, or harness changes.
 - After changing estimator behavior, update relevant docs in the same turn;
