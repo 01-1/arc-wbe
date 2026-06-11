@@ -43,6 +43,7 @@ _FINAL_RELU_MEAN_COEFFS = (
     -0.00335731,
     -0.00143425,
 )
+_R1_RANK_SCHEDULE = (768, 1024, 1280, 1536, 1536, 1536, 1536)
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -873,60 +874,6 @@ def _diag_diag_middle(a: fnp.ndarray, diag_b: fnp.ndarray, c: fnp.ndarray) -> fn
     return fnp.diag(a) * diag_b * fnp.diag(c)
 
 
-class _DiagFactor:
-    def __init__(self, diag: fnp.ndarray):
-        self.diag = diag
-        self.shape = (diag.shape[0], diag.shape[0])
-
-
-def _diag_factor(diag: fnp.ndarray | float, width: int | None = None) -> _DiagFactor:
-    if hasattr(diag, "shape"):
-        return _DiagFactor(diag)
-    if width is None:
-        raise ValueError("width is required for scalar diagonal factors")
-    return _DiagFactor(_ones(width) * diag)
-
-
-def _materialize_factor(factor):
-    if isinstance(factor, _DiagFactor):
-        return fnp.diag(factor.diag)
-    return factor
-
-
-def _copy_factor(factor):
-    if isinstance(factor, _DiagFactor):
-        return _DiagFactor(fnp.array(factor.diag))
-    return fnp.array(factor)
-
-
-def _scale_factor_rows(factor, scale: fnp.ndarray):
-    if isinstance(factor, _DiagFactor):
-        return _DiagFactor(factor.diag * scale)
-    return factor * scale[:, None]
-
-
-def _contract_factor_w(factor, w: fnp.ndarray):
-    if isinstance(factor, _DiagFactor):
-        return w.T * factor.diag[None, :]
-    return w.T @ factor
-
-
-def _factor_rank(factor) -> int:
-    return len(factor.diag) if isinstance(factor, _DiagFactor) else factor.shape[1]
-
-
-def _slice_factor_columns(factor, start: int, stop: int):
-    if isinstance(factor, _DiagFactor):
-        return _materialize_factor(factor)[:, start:stop]
-    return factor[:, start:stop]
-
-
-def _factor_column_norms_sq(factor) -> fnp.ndarray:
-    if isinstance(factor, _DiagFactor):
-        return factor.diag * factor.diag
-    return fnp.sum(factor * factor, axis=0)
-
-
 class _FactoredThird:
     """Symmetric third cumulant stored as ``Sym(sum_r A_i,r B_j,r C_k,r)``."""
 
@@ -934,10 +881,11 @@ class _FactoredThird:
 
     def __init__(self, width: int, factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray] | None = None):
         self.width = width
-        self._groups: tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...] = (
-            () if factors is None or factors[0].shape[1] == 0 else (factors,)
-        )
-        self._factor_cache = None
+        if factors is None:
+            empty = _empty_factor(width)
+            self.factors = (empty, empty, empty)
+        else:
+            self.factors = factors
         self._dslice_cache = {}
 
     @property
@@ -948,173 +896,32 @@ class _FactoredThird:
     def ndim(self) -> int:
         return 3
 
-    @property
-    def factors(self) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
-        if self._factor_cache is not None:
-            return self._factor_cache
-        if not self._groups:
-            empty = _empty_factor(self.width)
-            self._factor_cache = (empty, empty, empty)
-            return self._factor_cache
-        self._factor_cache = tuple(
-            fnp.concatenate(tuple(_materialize_factor(group[axis]) for group in self._groups), axis=1)
-            for axis in range(3)
-        )
-        return self._factor_cache
-
-    def _replace_groups(self, groups: tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...]) -> "_FactoredThird":
-        out = _FactoredThird(self.width)
-        out._groups = groups
-        out._factor_cache = None
-        return out
-
-    @staticmethod
-    def _map_unique_factors(
-        groups: tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...],
-        transform,
-    ) -> tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...]:
-        mapped = {}
-        out_groups = []
-        for group in groups:
-            out_group = []
-            for factor in group:
-                key = id(factor)
-                value = mapped.get(key)
-                if value is None:
-                    value = transform(factor)
-                    mapped[key] = value
-                out_group.append(value)
-            out_groups.append(tuple(out_group))
-        return tuple(out_groups)
-
-    @staticmethod
-    def _contract_groups(
-        groups: tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...],
-        w: fnp.ndarray,
-    ) -> tuple[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray], ...]:
-        if not groups:
-            return ()
-        unique = {}
-        dense_ordered = []
-        dense_keys = []
-        diag_keys = []
-        for group in groups:
-            for factor in group:
-                key = id(factor)
-                if key not in unique:
-                    unique[key] = factor
-                    if isinstance(factor, _DiagFactor):
-                        diag_keys.append(key)
-                    else:
-                        dense_keys.append(key)
-                        dense_ordered.append(factor)
-        mapped = {}
-        if dense_ordered:
-            slab = fnp.concatenate(tuple(dense_ordered), axis=1)
-            contracted = w.T @ slab
-            dense_start = 0
-            for key in dense_keys:
-                factor = unique[key]
-                width = factor.shape[1]
-                mapped[key] = contracted[:, dense_start : dense_start + width]
-                dense_start += width
-        for key in diag_keys:
-            factor = unique[key]
-            mapped[key] = _contract_factor_w(factor, w)
-        return tuple(tuple(mapped[id(factor)] for factor in group) for group in groups)
-
     def clone(self) -> "_FactoredThird":
-        out = _FactoredThird(self.width)
-        out._groups = tuple(
-            tuple(_copy_factor(factor) for factor in group)
-            for group in self._groups
-        )
-        out._factor_cache = None
-        return out
+        return _FactoredThird(self.width, tuple(fnp.array(factor) for factor in self.factors))
 
     def contract_w(self, w: fnp.ndarray) -> "_FactoredThird":
-        return self._replace_groups(self._contract_groups(self._groups, w))
+        return _FactoredThird(self.width, tuple(w.T @ factor for factor in self.factors))
 
     @property
     def rank(self) -> int:
-        return sum(_factor_rank(group[0]) for group in self._groups)
-
-    def keep_recent_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        remaining = rank_cap
-        groups = []
-        for group in reversed(self._groups):
-            group_rank = _factor_rank(group[0])
-            if remaining <= 0:
-                break
-            if group_rank <= remaining:
-                groups.append(group)
-                remaining -= group_rank
-            else:
-                start = group_rank - remaining
-                groups.append(tuple(_slice_factor_columns(factor, start, group_rank) for factor in group))
-                remaining = 0
-
-        out = _FactoredThird(self.width)
-        out._groups = tuple(reversed(groups))
-        return out
+        return self.factors[0].shape[1]
 
     def keep_top_rank(self, rank_cap: int) -> "_FactoredThird":
         if rank_cap <= 0:
             return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
+        if self.rank <= rank_cap:
             return self
-
-        factors = self.factors
-        scores = _ones(total_rank)
-        for factor in factors:
-            scores = scores * fnp.sum(factor * factor, axis=0)
+        a, b, c = self.factors
+        scores = (
+            fnp.sqrt(fnp.sum(a * a, axis=0))
+            * fnp.sqrt(fnp.sum(b * b, axis=0))
+            * fnp.sqrt(fnp.sum(c * c, axis=0))
+        )
         keep = fnp.argsort(scores)[-rank_cap:]
-        return _FactoredThird(self.width, tuple(factor[:, keep] for factor in factors))
-
-    def keep_top_group_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        scored_groups = []
-        for group_idx, group in enumerate(self._groups):
-            scores = _ones(_factor_rank(group[0]))
-            for factor in group:
-                scores = scores * _factor_column_norms_sq(factor)
-            scored_groups.append((fnp.sum(scores), group_idx, group))
-
-        remaining = rank_cap
-        selected = []
-        for _, group_idx, group in sorted(scored_groups, key=lambda item: float(item[0]), reverse=True):
-            group_rank = _factor_rank(group[0])
-            if group_rank <= remaining:
-                selected.append((group_idx, group))
-                remaining -= group_rank
-            if remaining <= 0:
-                break
-
-        if not selected:
-            best_group = max(scored_groups, key=lambda item: float(item[0]))[2]
-            group_rank = _factor_rank(best_group[0])
-            sliced = tuple(_slice_factor_columns(factor, 0, min(rank_cap, group_rank)) for factor in best_group)
-            return _FactoredThird(self.width, sliced)
-
-        groups = tuple(group for _, group in sorted(selected, key=lambda item: item[0]))
-        return self._replace_groups(groups)
+        return _FactoredThird(self.width, (a[:, keep], b[:, keep], c[:, keep]))
 
     def contract_wick(self, wick: fnp.ndarray, propagate_cache: bool = True) -> "_FactoredThird":
-        out = self._replace_groups(
-            self._map_unique_factors(self._groups, lambda factor: _scale_factor_rows(factor, wick))
-        )
+        out = _FactoredThird(self.width, tuple(factor * wick[:, None] for factor in self.factors))
         if propagate_cache and (2, 1) in self._dslice_cache:
             out._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] * (wick[:, None] * wick[:, None] * wick[None, :])
         if propagate_cache and (3,) in self._dslice_cache:
@@ -1127,9 +934,9 @@ class _FactoredThird:
         dslice_21_increment: fnp.ndarray | None = None,
         diag_increment: fnp.ndarray | None = None,
     ) -> "_FactoredThird":
-        if factors[0].shape[1] != 0:
-            self._groups = self._groups + (factors,)
-            self._factor_cache = None
+        self.factors = tuple(
+            fnp.concatenate((old, new), axis=1) for old, new in zip(self.factors, factors)
+        )
         if (2, 1) in self._dslice_cache and dslice_21_increment is not None:
             self._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] + dslice_21_increment
         else:
@@ -1148,8 +955,10 @@ class _FactoredThird:
     ) -> "_FactoredThird":
         if not factor_groups:
             return self
-        self._groups = self._groups + tuple(factor_groups)
-        self._factor_cache = None
+        self.factors = tuple(
+            fnp.concatenate((old, *(group[i] for group in factor_groups)), axis=1)
+            for i, old in enumerate(self.factors)
+        )
         if (2, 1) in self._dslice_cache and all(value is not None for value in dslice_21_increments):
             for value in dslice_21_increments:
                 self._dslice_cache[(2, 1)] = self._dslice_cache[(2, 1)] + value
@@ -1165,15 +974,11 @@ class _FactoredThird:
     def diag(self) -> fnp.ndarray:
         if (3,) in self._dslice_cache:
             return self._dslice_cache[(3,)]
-        if not self._groups:
+        a, b, c = self.factors
+        if a.shape[1] == 0:
             out = _zeros_vec(self.width)
         else:
-            out = 0.0
-            for a, b, c in self._groups:
-                a = _materialize_factor(a)
-                b = _materialize_factor(b)
-                c = _materialize_factor(c)
-                out = out + fnp.sum(a * b * c, axis=1)
+            out = fnp.sum(a * b * c, axis=1)
         self._dslice_cache[(3,)] = out
         return out
 
@@ -1181,39 +986,18 @@ class _FactoredThird:
         """Return the ``(2, 1)`` diagonal slice, zeroing its own diagonal."""
         if (2, 1) in self._dslice_cache:
             return self._dslice_cache[(2, 1)]
-        if not self._groups:
+        a, b, c = self.factors
+        if a.shape[1] == 0:
             out = fnp.zeros((self.width, self.width))
         else:
-            out = 0.0
-            middle_terms = {}
-            for a, b, c in self._groups:
-                same_bc = b is c
-                b_key = id(b)
-                a = _materialize_factor(a)
-                b = _materialize_factor(b)
-                c = _materialize_factor(c)
-                ab_c = (a * b) @ c.T
-                out = out + ab_c
-                if same_bc:
-                    out = out + ab_c
-                else:
-                    middle_terms.setdefault(b_key, [b, 0.0])
-                    middle_terms[b_key][1] = middle_terms[b_key][1] + a * c
-                out = out + (b * c) @ a.T
-            for b, ac_sum in middle_terms.values():
-                out = out + ac_sum @ b.T
-            out = out / 3.0
+            out = (
+                (a * b) @ c.T
+                + (a * c) @ b.T
+                + (b * c) @ a.T
+            ) / 3.0
             out = fnp.array(out)
             fnp.fill_diagonal(out, 0.0)
         self._dslice_cache[(2, 1)] = out
-        return out
-
-    def contracted_diag(self, w: fnp.ndarray) -> fnp.ndarray:
-        if not self._groups:
-            return _zeros_vec(w.shape[1])
-        out = 0.0
-        for a, b, c in self._contract_groups(self._groups, w):
-            out = out + fnp.sum(a * b * c, axis=1)
         return out
 
     def get_dslice(self, part: tuple[int, ...]) -> fnp.ndarray:
@@ -1247,18 +1031,17 @@ class _FactoredThird:
         )
 
     def __add__(self, other: "_FactoredThird") -> "_FactoredThird":
-        out = _FactoredThird(self.width)
-        out._groups = self._groups + other._groups
-        out._factor_cache = None
-        return out
+        return _FactoredThird(
+            self.width,
+            tuple(fnp.concatenate((a, b), axis=1) for a, b in zip(self.factors, other.factors)),
+        )
 
     @staticmethod
     def from_dstensor(ds: _DSTensor) -> "_FactoredThird":
         eye = _eye(ds.n)
         k3 = ds.slices.get((3,), _zeros_vec(ds.n))
         k21 = ds.slices.get((2, 1), fnp.zeros((ds.n, ds.n)))
-        diag_eye = _diag_factor(1.0, ds.n)
-        factors = ((k3[:, None] * eye + k21.T * 3.0), diag_eye, diag_eye)
+        factors = ((k3[:, None] * eye + k21.T * 3.0), eye, eye)
         return _FactoredThird(ds.n, factors)
 
 
@@ -1394,7 +1177,7 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
     diag2 = ones * 3.0
 
     fac1a = w1[:, None] * wk_11 + w2[:, None] * wk_21
-    fac2a = _DiagFactor(diag2)
+    fac2a = eye * 3.0
     fac3a = (
         w2[:, None] * w1[None, :] * wk_11
         + w3[:, None] * w1[None, :] * wk_21
@@ -1545,6 +1328,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         diag_increments.append(diag_increment)
 
     fac1 = w1[:, None] * wk_11 + w2[:, None] * wk_21
+    fac2 = eye * 3.0
     fac3 = (
         w2[:, None] * w1[None, :] * wk_11
         + w3[:, None] * w1[None, :] * wk_21
@@ -1552,7 +1336,6 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         + w3[:, None] * w2[None, :] * wk_22
     ).T
     diag2 = ones * 3.0
-    fac2 = _DiagFactor(diag2)
     queue_factors(
         (fac1, fac2, fac3),
         _dslice_21_diag_middle(fac1, diag2, fac3),
@@ -1560,7 +1343,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
     )
 
     fac1 = w1[:, None] * wk_12 + w2[:, None] * wk_22
-    fac2 = _DiagFactor(diag2)
+    fac2 = eye * 3.0
     fac3 = (
         w3[:, None] * w1[None, :] * wk_11
         + w4[:, None] * w1[None, :] * wk_21
@@ -1579,7 +1362,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         metric_diag = fnp.diag(metric)
 
         fac1 = w2[:, None] * (core * metric_diag)[:, None] * ones[None, :]
-        fac2 = _DiagFactor(w1)
+        fac2 = w1[:, None] * eye
         fac3 = w1[:, None] * metric / 2.0
         queue_factors(
             (fac1, fac2, fac3),
@@ -1588,7 +1371,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         )
 
         fac1 = w1[:, None] * metric * core
-        fac2 = _DiagFactor(w2)
+        fac2 = w2[:, None] * eye
         fac3 = w1[:, None] * metric
         queue_factors(
             (fac1, fac2, fac3),
@@ -1604,7 +1387,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
 
         fac1 = w2[:, None] * fnp.diag(core)[:, None] * ones[None, :]
         fac2 = w1[:, None] * metric_full
-        fac3 = _DiagFactor(w1 / 4.0)
+        fac3 = w1[:, None] * eye / 4.0
         queue_factors(
             (fac1, fac3, fac2),
             _dslice_21_diag_middle(fac1, w1 / 4.0, fac2),
@@ -1612,7 +1395,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         )
 
         fac1 = w1[:, None] * core
-        fac2 = _DiagFactor(w2)
+        fac2 = w2[:, None] * eye
         fac3 = w1[:, None] * metric_full
         queue_factors(
             (fac1, fac2, fac3),
@@ -1621,7 +1404,7 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         )
 
         fac1 = w1[:, None] * core
-        fac2 = _DiagFactor(w1)
+        fac2 = w1[:, None] * eye
         fac3 = w2[:, None] * metric_diag[:, None] * ones[None, :] / 4.0
         queue_factors(
             (fac1, fac2, fac3),
@@ -1758,8 +1541,8 @@ def _relu_mean_from_cumulant_diags(
     w6 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 6, 1)
     w7 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 7, 1)
     w8 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 8, 1)
-
     c0, c3, c4, c33, c34, c44 = _FINAL_RELU_MEAN_COEFFS
+
     return (
         c0 * base
         + c3 * k3_diag * w3
@@ -1775,7 +1558,11 @@ def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> 
     var = fnp.einsum("ij,ia,ja->a", tower[2].core, w, w)
 
     if 3 in tower:
-        k3_diag = tower[3].contracted_diag(w)
+        a, b, c = tower[3].factors
+        aw = w.T @ a
+        bw = w.T @ b
+        cw = w.T @ c
+        k3_diag = fnp.sum(aw * bw * cw, axis=1)
     else:
         k3_diag = 0.0
 
@@ -1789,11 +1576,25 @@ def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> 
     return _relu_mean_from_cumulant_diags(mean, var, k3_diag, k4_diag)
 
 
+def _parse_rank_schedule(value: str) -> tuple[int, ...]:
+    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
+
+
+def _rank_schedule_for_mlp(mlp: MLP) -> tuple[int, ...]:
+    explicit = os.environ.get("WHEST_R1_RANK_SCHEDULE")
+    schedule = _parse_rank_schedule(explicit) if explicit else _R1_RANK_SCHEDULE
+    n_hidden = max(mlp.depth - 1, 0)
+    if n_hidden == 0:
+        return ()
+    if len(schedule) >= n_hidden:
+        return schedule[:n_hidden]
+    return schedule + (schedule[-1],) * (n_hidden - len(schedule))
+
+
 def _factorized_k3_propagation(
     mlp: MLP,
     augment: bool | str = "r1",
     rank_schedule: tuple[int, ...] | None = None,
-    rank_compression: str = "topk",
 ) -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
@@ -1836,35 +1637,13 @@ def _factorized_k3_propagation(
             else:
                 tower = _factored_nonlin_k3(wk, augment=layer_augment)
             if rank_schedule is not None and 3 in tower and layer_idx < len(rank_schedule):
-                if rank_compression == "recent":
-                    tower[3] = tower[3].keep_recent_rank(rank_schedule[layer_idx])
-                elif rank_compression in ("group", "groups", "group_topk"):
-                    tower[3] = tower[3].keep_top_group_rank(rank_schedule[layer_idx])
-                else:
-                    tower[3] = tower[3].keep_top_rank(rank_schedule[layer_idx])
+                tower[3] = tower[3].keep_top_rank(rank_schedule[layer_idx])
             rows.append(tower[1].core)
 
         return fnp.stack(rows, axis=0)
     finally:
         if was_gc_enabled:
             gc.enable()
-
-
-def _parse_rank_schedule(value: str) -> tuple[int, ...]:
-    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
-
-
-def _r1_rank_schedule_for_mode(mode: str, mlp: MLP) -> tuple[int, ...]:
-    explicit = os.environ.get("WHEST_R1_RANK_SCHEDULE")
-    if explicit:
-        return _parse_rank_schedule(explicit)
-    if mode.startswith("r1_cap"):
-        cap = int(mode[len("r1_cap") :])
-        return (cap,) * max(mlp.depth - 1, 0)
-    cap = os.environ.get("WHEST_R1_RANK_CAP")
-    if cap:
-        return (int(cap),) * max(mlp.depth - 1, 0)
-    return (768, 1024, 1280, 1536, 1536, 1536, 1536)
 
 
 def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
@@ -1879,87 +1658,6 @@ def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator
     for w in mlp.weights:
         x = fnp.maximum(x @ w, 0.0)
         rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
-
-
-def _rademacher_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
-    """Return layer means from antithetic +/-1 input cubature samples."""
-    half = max(n_samples // 2, 1)
-    signs = rng.integers(0, 2, size=(half, mlp.width))
-    x_half = 2.0 * signs - 1.0
-    x = fnp.concatenate((x_half, -x_half), axis=0)
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
-
-
-def _axis_cubature_means(mlp: MLP) -> fnp.ndarray:
-    """Return layer means from the 2n axis points that match input covariance."""
-    width = mlp.width
-    x = fnp.sqrt(float(width)) * fnp.concatenate((fnp.eye(width), -fnp.eye(width)), axis=0)
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
-
-
-def _sample_count_for_budget(mlp: MLP, budget: int, reserve_flops: float = 0.0) -> int:
-    explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
-    if explicit:
-        return max(int(explicit), 2)
-    target_fraction = float(os.environ.get("WHEST_EXPERIMENT_BUDGET_FRACTION", "0.1"))
-    target = max(0.0, budget * target_fraction - reserve_flops)
-    rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
-    return max(2, int(target // rough_cost_per_sample))
-
-
-def _covariance_plus_sampling(mlp: MLP, budget: int) -> fnp.ndarray:
-    """Blend K=2 covariance propagation with a score-floor antithetic correction."""
-    cov_pred = _covariance_propagation(mlp)
-    rough_cov_flops = 3.05 * mlp.depth * mlp.width ** 3
-    n_samples = _sample_count_for_budget(mlp, budget, reserve_flops=rough_cov_flops)
-    sampled = _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-    blend = min(0.5, n_samples / (n_samples + 5_000.0))
-    return (1.0 - blend) * cov_pred + blend * sampled
-
-
-def _r1_sample_blend(mlp: MLP, budget: int) -> fnp.ndarray:
-    """Diagnostic blend of the default K=3 estimate with antithetic sampling."""
-    k3_pred = _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
-    n_samples = _sample_count_for_budget(mlp, budget)
-    sampled = _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-    blend = float(os.environ.get("WHEST_EXPERIMENT_BLEND", "0.05"))
-    return (1.0 - blend) * k3_pred + blend * sampled
-
-
-def _lowrank_covariance_propagation(mlp: MLP, rank: int) -> fnp.ndarray:
-    """Low-rank ensemble covariance propagation with exact marginal variances."""
-    width = mlp.width
-    rng = fnp.random.default_rng(mlp.seed)
-    mu = fnp.zeros(width)
-    factors = rng.standard_normal((width, rank)) / math.sqrt(float(rank))
-
-    rows = []
-    for w in mlp.weights:
-        mu_pre = w.T @ mu
-        factors_pre = w.T @ factors
-        var_pre = fnp.maximum(fnp.sum(factors_pre * factors_pre, axis=1), _MIN_VARIANCE)
-
-        mu_post, ez2, gain = _relu_moments(mu_pre, var_pre)
-        var_post = fnp.maximum(ez2 - mu_post * mu_post, 0.0)
-
-        factors = factors_pre * gain[:, None]
-        factor_var = fnp.maximum(fnp.sum(factors * factors, axis=1), _MIN_VARIANCE)
-        factors = factors * fnp.sqrt(var_post / factor_var)[:, None]
-
-        mu = mu_post
-        rows.append(mu)
-
     return fnp.stack(rows, axis=0)
 
 
@@ -2058,40 +1756,25 @@ class Estimator(BaseEstimator):
         Returns an array of shape ``(depth, width)``.
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
-        if mode in ("", "default", "r1"):
+        if mode in ("r1_full", "full", "uncompressed"):
             return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
-        if mode in ("r1_compressed", "r1_rank_schedule") or mode.startswith("r1_cap"):
-            schedule = _r1_rank_schedule_for_mode(mode, mlp)
-            compression = os.environ.get("WHEST_R1_COMPRESS", "topk")
+        if mode in ("", "default", "r1", "r1_compressed", "r1_rank_schedule"):
             return _factorized_k3_propagation(
                 mlp,
                 augment=_FACTOR_K3_MODE,
-                rank_schedule=schedule,
-                rank_compression=compression,
+                rank_schedule=_rank_schedule_for_mlp(mlp),
+            )
+        if mode.startswith("r1_cap"):
+            cap = int(mode[len("r1_cap") :])
+            return _factorized_k3_propagation(
+                mlp,
+                augment=_FACTOR_K3_MODE,
+                rank_schedule=(cap,) * max(mlp.depth - 1, 0),
             )
         if mode in ("none", "simple", "r1_no4", "r1_slices", "r1_slices_k211") or (
             mode.startswith("last") and mode.endswith("_r1_slices_k211")
         ):
             return _factorized_k3_propagation(mlp, augment=mode)
-        if mode == "mean":
-            return _mean_propagation(mlp)
-        if mode == "cov":
-            return _covariance_propagation(mlp)
-        if mode == "sample":
-            n_samples = _sample_count_for_budget(mlp, budget)
-            return _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-        if mode == "rademacher":
-            n_samples = _sample_count_for_budget(mlp, budget)
-            return _rademacher_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-        if mode == "axis":
-            return _axis_cubature_means(mlp)
-        if mode == "k2_sample":
-            return _covariance_plus_sampling(mlp, budget)
-        if mode == "r1_sample_blend":
-            return _r1_sample_blend(mlp, budget)
-        if mode == "lr_cov":
-            rank = int(os.environ.get("WHEST_LR_RANK", "256"))
-            return _lowrank_covariance_propagation(mlp, rank=rank)
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")
 
 
@@ -2130,7 +1813,7 @@ if __name__ == "__main__":
     mlp = build_mlp(width=args.width, depth=args.depth, seed=args.seed)
 
     print("--- Your estimator ---")
-    compare_against_monte_carlo(Estimator(), mlp, estimator_budget=68_000_000_000)
+    compare_against_monte_carlo(Estimator(), mlp)
 
     if args.baseline:
         baseline_cls = _load_baseline(args.baseline)
