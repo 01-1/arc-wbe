@@ -35,6 +35,8 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
+_DEFAULT_R1_RANK_CAP = 3584
+_DEFAULT_R1_COMPRESS = "structured"
 _FINAL_RELU_MEAN_COEFFS = (
     1.00021826,
     0.16722795,
@@ -921,6 +923,12 @@ def _slice_factor_columns(factor, start: int, stop: int):
     return factor[:, start:stop]
 
 
+def _take_factor_columns(factor, columns: fnp.ndarray):
+    if isinstance(factor, _DiagFactor):
+        return _materialize_factor(factor)[:, columns]
+    return factor[:, columns]
+
+
 def _factor_column_norms_sq(factor) -> fnp.ndarray:
     if isinstance(factor, _DiagFactor):
         return factor.diag * factor.diag
@@ -1107,6 +1115,43 @@ class _FactoredThird:
             group_rank = _factor_rank(best_group[0])
             sliced = tuple(_slice_factor_columns(factor, 0, min(rank_cap, group_rank)) for factor in best_group)
             return _FactoredThird(self.width, sliced)
+
+        groups = tuple(group for _, group in sorted(selected, key=lambda item: item[0]))
+        return self._replace_groups(groups)
+
+    def keep_top_group_boundary_rank(self, rank_cap: int) -> "_FactoredThird":
+        if rank_cap <= 0:
+            return _FactoredThird(self.width)
+        total_rank = self.rank
+        if total_rank <= rank_cap:
+            return self
+
+        scored_groups = []
+        for group_idx, group in enumerate(self._groups):
+            scores = _ones(_factor_rank(group[0]))
+            for factor in group:
+                scores = scores * _factor_column_norms_sq(factor)
+            scored_groups.append((fnp.sum(scores), group_idx, group, scores))
+
+        remaining = rank_cap
+        selected = []
+        skipped = []
+        for group_score, group_idx, group, scores in sorted(
+            scored_groups, key=lambda item: float(item[0]), reverse=True
+        ):
+            group_rank = _factor_rank(group[0])
+            if group_rank <= remaining:
+                selected.append((group_idx, group))
+                remaining -= group_rank
+            else:
+                skipped.append((group_score, group_idx, group, scores))
+            if remaining <= 0:
+                break
+
+        if remaining > 0 and skipped:
+            _, group_idx, group, scores = max(skipped, key=lambda item: float(item[0]))
+            keep = fnp.argsort(scores)[-remaining:]
+            selected.append((group_idx, tuple(_take_factor_columns(factor, keep) for factor in group)))
 
         groups = tuple(group for _, group in sorted(selected, key=lambda item: item[0]))
         return self._replace_groups(groups)
@@ -1838,6 +1883,8 @@ def _factorized_k3_propagation(
             if rank_schedule is not None and 3 in tower and layer_idx < len(rank_schedule):
                 if rank_compression == "recent":
                     tower[3] = tower[3].keep_recent_rank(rank_schedule[layer_idx])
+                elif rank_compression in ("boundary", "hybrid", "structured"):
+                    tower[3] = tower[3].keep_top_group_boundary_rank(rank_schedule[layer_idx])
                 elif rank_compression in ("group", "groups", "group_topk"):
                     tower[3] = tower[3].keep_top_group_rank(rank_schedule[layer_idx])
                 else:
@@ -2059,7 +2106,13 @@ class Estimator(BaseEstimator):
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default", "r1"):
-            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
+            schedule = (_DEFAULT_R1_RANK_CAP,) * max(mlp.depth - 1, 0)
+            return _factorized_k3_propagation(
+                mlp,
+                augment=_FACTOR_K3_MODE,
+                rank_schedule=schedule,
+                rank_compression=_DEFAULT_R1_COMPRESS,
+            )
         if mode in ("r1_compressed", "r1_rank_schedule") or mode.startswith("r1_cap"):
             schedule = _r1_rank_schedule_for_mode(mode, mlp)
             compression = os.environ.get("WHEST_R1_COMPRESS", "topk")

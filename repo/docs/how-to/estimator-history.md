@@ -408,6 +408,10 @@ estimator exposes:
   ranked by the sum of their per-column products of squared factor norms, then
   retained whole while the rank cap allows. This avoids collapsing every CP
   column into dense factor slabs, but it is coarser than column top-k.
+- `WHEST_R1_COMPRESS=structured` (also accepted as `hybrid` or `boundary`):
+  diagnostic whole-group truncation that fills leftover rank budget from the
+  best skipped boundary group. Only that boundary group is materialized into
+  selected dense columns, so fully retained structured groups stay grouped.
 
 The prior heuristic contenders that motivated this recheck were:
 
@@ -507,7 +511,7 @@ changes. Use `RESIDUAL_WALL_TIME_MULTIPLIER=1.0` only when reproducing the raw
 upstream WhestBench local score.
 
 With that calibrated multiplier on the first five baked mini MLPs, grouped
-exact `r1` stayed best among the guarded compression routes checked next:
+exact `r1` stayed best among the initially guarded compression routes:
 default grouped `r1` scored `3.17e-7` adjusted with `7.13e-7` raw final-layer
 MSE and `0.4415` mean multiplier; `r1_cap3584` scored `3.53e-7`; `r1_cap3328`
 scored `3.47e-7`; and the scheduled `r1_compressed` route scored `4.87e-7`.
@@ -515,3 +519,16 @@ The caps lowered little or no residual cost in subprocess scoring, while the
 scheduled top-k route lost too much accuracy. Keep grouped exact `r1` as the
 default unless a future compression change wins under `make mini` with the
 residual multiplier enabled.
+
+A structured-compression follow-up added `WHEST_R1_COMPRESS=structured`, which
+keeps top-scored whole factor groups and uses any leftover rank cap on the best
+skipped boundary group's top columns. This targets the documented structured
+top-k idea while preserving fully retained groups. Under the calibrated
+`RESIDUAL_WALL_TIME_MULTIPLIER=2.0` scoring path, `r1_cap3584` with structured
+compression beat the grouped exact route on the first 20 baked mini MLPs:
+`3.11e-7` adjusted score with `7.46e-7` raw final-layer MSE and `0.4167` mean
+multiplier, versus grouped exact `r1` at `3.21e-7` adjusted score with
+`7.42e-7` raw final-layer MSE and `0.4322` mean multiplier in the same local
+timing window. The default route was promoted to this structured cap because it
+is the current calibrated `make mini` best, but the gain is modest and still
+well short of the `<1e-7` adjusted-score target.
