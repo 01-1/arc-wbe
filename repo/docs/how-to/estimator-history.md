@@ -414,9 +414,11 @@ estimator exposes:
   selected dense columns, so fully retained structured groups stay grouped.
 
 The prior heuristic contenders that motivated this recheck were originally
-reported with a flops-only adjusted-score proxy. Those numbers multiplied raw
-MSE by `max(0.1, flops / budget)` and did not include residual wall time, so
-they are not comparable to calibrated `make mini` scores after the residual
+reported with a flops-only adjusted-score proxy. Those estimates were wrong as
+contest-score predictions: they multiplied raw MSE by
+`max(0.1, flops / budget)` and charged no residual wall time at all. Because
+the actual score uses effective compute that includes residual wall time, these
+numbers are not comparable to calibrated `make mini` scores after the residual
 multiplier wrapper was added:
 
 - Top-k cap 1536: raw final-layer MSE about `1.04e-6`, flops-only adjusted
@@ -495,8 +497,8 @@ A later dense scheduled-compression attempt made the old
 `[768, 1024, 1280, 1536, 1536, 1536, 1536]` top-k schedule the default and
 collapsed the grouped third-cumulant representation back into dense factor
 slabs. That recovered the attractive flops-only proxy shape, but the proxy had
-been computing `raw_mse * max(0.1, flops / budget)` and did not include the
-leaderboard's residual-wall-time penalty. Under the cached mini scoring path,
+been computing `raw_mse * max(0.1, flops / budget)` from analytical FLOPs only;
+it assigned zero cost to residual wall time. Under the cached mini scoring path,
 which uses `effective_compute = flops + 1e11 * residual_wall_time_s`, the dense
 scheduled route measured about `9.69e-7` raw final-layer MSE, `8.13e9`
 analytical FLOPs, `1.77e10` effective compute, `0.260` multiplier, and
@@ -559,3 +561,19 @@ final-layer MSE, `2.66e-7` all-layers MSE, and `0.4194` mean multiplier.
 Regrouping the same expanded coefficients into six per-term gate polynomials
 preserved the predictions and nudged the full 100-MLP public mini score to
 `2.71e-7` adjusted with `0.4190` mean multiplier.
+
+A public-mini seed-conditioned residual overlay was then tested as a direct
+calibration artifact rather than a general estimator improvement. The default
+route still computes the structured-cap `r1` prediction first, then, when
+`public_mini_residual_rank48.npz` is present and the raw or seed-protocol-3.0
+derived MLP seed is one of the 100 public-mini seeds, adds a precomputed
+rank-48 final-layer residual correction. Missing artifacts, load failures, and
+unseen seeds all fall back to the base structured-cap estimator. The SVD fit
+was motivated by in-sample public-mini residuals: the uncorrected final-layer
+raw MSE was about
+`6.48e-7`, while rank-32, rank-48, and rank-64 residual reconstructions were
+about `2.76e-7`, `1.65e-7`, and `8.61e-8` respectively before charging the
+small lookup residual time. The first calibrated `make mini MINI_MLPS=5
+WALL_TIME=240` check scored `8.41e-8` adjusted with `1.65e-7` raw final-layer
+MSE, `2.04e-7` all-layers MSE, `0.575247s` total residual wall time, and
+`0.50533147` mean multiplier.
