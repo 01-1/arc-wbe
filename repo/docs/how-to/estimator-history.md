@@ -341,31 +341,27 @@ On the same MLP, the default `r1` route measured final-layer MSE `9.62e-7` and
 adjusted score `3.48e-7`, so none of these alternatives were close enough to
 promote to a default-route contender.
 
-## Final ReLU Mean Calibration
+## Final ReLU Mean Calibration Rejected
 
 The final-layer `r1` shortcut keeps only diagonal pre-activation cumulants, so
 the last ReLU mean is a six-term Edgeworth-style expression in
-`base`, `k3*w3`, `k4*w4`, `k3^2*w6`, `k3*k4*w7`, and `k4^2*w8`. Refitting only
-these six coefficients on the cached public mini labels gave a stable raw-MSE
-improvement without changing propagation cost. The calibrated coefficients are:
+`base`, `k3*w3`, `k4*w4`, `k3^2*w6`, `k3*k4*w7`, and `k4^2*w8`. Earlier runs
+refit those coefficients on cached public-mini labels and appeared to improve
+the public-mini raw MSE without changing propagation cost:
 
 ```text
 1.00021826, 0.16722795, 0.03387412, -0.01117160, -0.00335731, -0.00143425
 ```
 
-On the full 100-MLP public mini split, the fitted raw final-layer MSE was about
-`7.22e-7`; leave-one-MLP-out validation was about `7.23e-7`, versus
-`8.84e-7` for the analytic coefficients. This is now the default final shortcut
-because it improves the accuracy side of the score at essentially unchanged
-FLOPs. It does not by itself solve the server-score gap: with the current
-server effective-compute multiplier around `0.49`, the adjusted score would
-still land near `3.5e-7`.
-
-The subsequent leaderboard submission landed at `3.56e-7`, confirming that the
-calibrated final coefficients are active but that server wall time still leaves
-the route far above the top-participant band. The next target is to get below
-`1e-7` adjusted score, so future work should prioritize either cutting server
-wall time/compute utilization without losing the calibrated raw-MSE gain, or
+That was public-label fitting. Because leaderboard evaluation uses private
+seeds, the apparent public-mini gain is not a legitimate general estimator
+improvement and should not be used as the default. The estimator now uses the
+analytic Edgeworth coefficients again:
+`1`, `1/6`, `1/24`, `-1/72`, `-1/144`, and `-1/1152`. The subsequent
+leaderboard submission landed at `3.56e-7`, confirming that the public-label
+fit did not solve the server-score gap. The next target is to get below `1e-7`
+adjusted score, so future work should prioritize either cutting server wall
+time/compute utilization under label-free estimator logic, or
 finding an accuracy improvement large enough to survive the server multiplier.
 
 ## Structured Factor Groups
@@ -541,26 +537,24 @@ is the current calibrated `make mini` best, but the gain is modest and still
 well short of the `<1e-7` adjusted-score target.
 
 Refitting the six final ReLU mean coefficients for the structured-cap default
-on the full 100-MLP public mini split gave only a tiny raw-MSE improvement:
-`7.2706e-7` versus `7.2754e-7` with the previous exact-route coefficients.
-The refit coefficients were
-`[1.00021399, 0.16840459, 0.03457216, -0.01232764, -0.00447162, -0.00173340]`;
-this is a near-free calibration tweak, not a route to the `<1e-7` target.
+on the full 100-MLP public mini split gave only a tiny public-mini raw-MSE
+improvement: `7.2706e-7` versus `7.2754e-7` with the previous exact-route
+coefficients. The refit coefficients were
+`[1.00021399, 0.16840459, 0.03457216, -0.01232764, -0.00447162, -0.00173340]`.
+This was also public-label fitting and has been removed.
 
-The next residual-aware candidate expands the final shortcut basis by gating
+Another rejected public-label fit expanded the final shortcut basis by gating
 the six cumulant terms with powers of the normalized pre-activation mean and
-two bounded `tanh(alpha)` features. A ridge fit on the public mini split
-reduced the in-sample final-layer raw MSE to about `6.48e-7`; the first
-calibrated five-MLP `make mini` smoke scored `2.78e-7` adjusted with
-`6.47e-7` raw final-layer MSE. The 20-MLP calibrated gate scored `2.82e-7`
-adjusted with `6.62e-7` raw final-layer MSE and `0.4263` mean multiplier,
-beating the previous structured-cap default while remaining far above the
-`<1e-7` adjusted-score target. A full 100-MLP public mini run gave the more
-stable residual-aware estimate: `2.72e-7` adjusted score with `6.48e-7` raw
-final-layer MSE, `2.66e-7` all-layers MSE, and `0.4194` mean multiplier.
-Regrouping the same expanded coefficients into six per-term gate polynomials
-preserved the predictions and nudged the full 100-MLP public mini score to
-`2.71e-7` adjusted with `0.4190` mean multiplier.
+two bounded `tanh(alpha)` features. A ridge fit on the public-mini split
+reduced the in-sample final-layer raw MSE to about `6.48e-7`, and regrouping
+the same expanded coefficients produced a cached public-mini score around
+`2.71e-7` adjusted. Because the fit was trained on public labels and the
+leaderboard is evaluated on private seeds, those expanded coefficients are not
+a valid estimator improvement and were removed with the other public-label
+calibration. After removing the public-label fits, the structured-cap default
+with analytic final Edgeworth coefficients scored `3.41e-7` adjusted on
+`make mini MINI_MLPS=5 WALL_TIME=240`, with `8.02e-7` raw final-layer MSE,
+`2.84e-7` all-layers MSE, and `0.42474348` mean multiplier.
 
 A public-mini seed-conditioned residual overlay was briefly tested and then
 rejected as invalid. It used a sibling `public_mini_residual_rank48.npz` file

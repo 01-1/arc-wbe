@@ -37,58 +37,6 @@ _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
 _DEFAULT_R1_RANK_CAP = 3584
 _DEFAULT_R1_COMPRESS = "structured"
-_FINAL_RELU_MEAN_COEFFS = (
-    1.00021399,
-    0.16840459,
-    0.03457216,
-    -0.01232764,
-    -0.00447162,
-    -0.00173340,
-)
-_FINAL_RELU_MEAN_EXPANDED_COEFFS = (
-    0.9952128408,
-    0.1943809738,
-    0.0071172966,
-    -0.0207245998,
-    -0.0137324986,
-    -0.0006415321,
-    -0.0136473793,
-    0.0073754617,
-    -0.0285788254,
-    -0.0223703784,
-    0.0085597746,
-    0.0012921579,
-    0.0051769726,
-    -0.0281426450,
-    0.0007035642,
-    0.0065303199,
-    0.0104535489,
-    0.0012268429,
-    -0.0008480130,
-    -0.0024994900,
-    0.0036201297,
-    0.0026544237,
-    0.0000332102,
-    0.0001191718,
-    0.0000511372,
-    0.0017033772,
-    0.0003026651,
-    0.0000754995,
-    -0.0007026584,
-    -0.0001083803,
-    0.0197744208,
-    -0.0121074053,
-    0.0318508502,
-    0.0256224337,
-    -0.0154420742,
-    -0.0022243437,
-    -0.0019983894,
-    0.0173072385,
-    -0.0003685364,
-    0.0066691903,
-    -0.0114829708,
-    0.0004122426,
-)
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1848,30 +1796,14 @@ def _relu_mean_from_cumulant_diags(
     w7 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 7, 1)
     w8 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 8, 1)
 
-    terms = (
-        base,
-        k3_diag * w3,
-        k4_diag * w4,
-        k3_diag * k3_diag * w6,
-        k3_diag * k4_diag * w7,
-        k4_diag * k4_diag * w8,
+    return (
+        base
+        + (1.0 / 6.0) * k3_diag * w3
+        + (1.0 / 24.0) * k4_diag * w4
+        - (1.0 / 72.0) * k3_diag * k3_diag * w6
+        - (1.0 / 144.0) * k3_diag * k4_diag * w7
+        - (1.0 / 1152.0) * k4_diag * k4_diag * w8
     )
-    tanh_alpha = fnp.tanh(alpha)
-    tanh_alpha_sq = tanh_alpha * tanh_alpha
-
-    out = 0.0
-    for term_idx, term in enumerate(terms):
-        c0 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx]
-        c1 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 6]
-        c2 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 12]
-        c3 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 18]
-        c4 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 24]
-        c5 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 30]
-        c6 = _FINAL_RELU_MEAN_EXPANDED_COEFFS[term_idx + 36]
-        gate = (((c4 * alpha + c3) * alpha + c2) * alpha + c1) * alpha + c0
-        gate = gate + c5 * tanh_alpha + c6 * tanh_alpha_sq
-        out = out + term * gate
-    return out
 
 
 def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> fnp.ndarray:
