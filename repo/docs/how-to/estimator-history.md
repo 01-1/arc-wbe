@@ -226,15 +226,21 @@ harmonic tracking:
   augmentation, but local residual wall time remained much higher than the
   default `r1` route. It is therefore exposed as a high-budget route, not the
   default contest-budget route.
+  One-MLP cached mini subprocess checks under the standard `6.8e10` budget gave
+  the same conclusion for smaller suffixes: `last1` matched default raw MSE
+  while adding overhead, `last2` improved raw final-layer MSE to `8.45e-7` but
+  worsened adjusted score to `6.45e-7`, `last3` improved raw MSE to `6.84e-7`
+  but scored `6.71e-7` after compute, and `last4` exceeded the budget and was
+  counted as a failure.
 - `r1_111`: add the extra degree-4-to-`111` factored feed-forward terms without
   the augmented slice projection. This did not look useful in local smokes.
 
 The Makefile cached-public-dataset targets were used for comparing these
 historical routes against the baked `mini` split without recomputing Monte
 Carlo ground truth. `make mini` runs the current default estimator on five
-fixed width-256/depth-8 MLPs with subprocess isolation. Earlier route-comparison
-targets forced K=3 harmonic modes through `WHEST_K3_MODE`; the live estimator no
-longer reads that environment variable after the router removal.
+fixed width-256/depth-8 MLPs with subprocess isolation. Route-comparison targets
+can force K=3 harmonic modes through `WHEST_K3_MODE`; newer non-cumulant
+diagnostics use `WHEST_EXPERIMENT_MODE`.
 
 On the first five baked mini MLPs, the default `r1` route measured about
 `1.96e10` FLOPs/MLP, `~0.10s` residual wall time/MLP, `8.96e-7` raw final-layer
@@ -293,3 +299,93 @@ near the desired compute band but had final-layer MSE around `2e-5` to `3e-5`,
 and hard-capping the factored third-cumulant rank by keeping only recent factor
 columns reduced nominal FLOPs but invalidated useful repeated-slice caches and
 worsened adjusted score.
+
+## Non-Cumulant Alternative Checks
+
+The estimator now exposes diagnostic routes through `WHEST_EXPERIMENT_MODE`
+and restores `WHEST_K3_MODE` forcing for K=3 variants. The default remains the
+optimized `r1` cumulant route when neither variable is set. The local
+`python estimator.py` demo now gives the estimator the standard `6.8e10` FLOP
+budget, since the K=3 default no longer fits the earlier pedagogical `1e9`
+demo budget.
+
+One-MLP cached mini checks on the first width-256/depth-8 public MLP rejected
+several non-cumulant alternatives:
+
+- `sample`: antithetic Gaussian sampling sized to the 10% score-floor region
+  used about `6.83e9` FLOPs, with final-layer MSE `2.13e-5` and adjusted score
+  `2.18e-6`.
+- `sample` with `WHEST_EXPERIMENT_SAMPLES=24576`: used about `2.59e10` FLOPs,
+  reduced final-layer MSE to `4.36e-6`, but still had adjusted score
+  `1.76e-6`.
+- `rademacher`: antithetic +/-1 cubature used about `6.82e9` FLOPs, with
+  final-layer MSE `1.55e-5` and adjusted score `1.78e-6`.
+- `axis`: the `2n` covariance-matching axis cubature used about `5.38e8`
+  FLOPs, but final-layer MSE was `1.48e-4`.
+- `k2_sample`: the old K=2 covariance plus antithetic blend used about
+  `6.83e9` FLOPs, with final-layer MSE `1.58e-5` and adjusted score
+  `1.83e-6`; increasing to `24576` samples worsened adjusted score because the
+  raw MSE improvement did not pay for the compute multiplier.
+- `r1_sample_blend`: a diagnostic blend of the default `r1` cumulant route with
+  antithetic Gaussian sampling. With the default sample budget, blend weights
+  `0.02`, `0.05`, and `0.10` improved raw final-layer MSE as far as `8.62e-7`
+  on this MLP, but the added compute raised adjusted scores to `4.36e-7` or
+  worse. With only `1024` samples, the sample estimate was too noisy and also
+  missed the default adjusted score.
+- `lr_cov`: a low-rank ensemble covariance proxy with exact marginal variance
+  repair was far off target. Rank 256 used about `2.73e8` FLOPs but had
+  final-layer MSE `4.95e-4`; rank 1024 used about `1.09e9` FLOPs and still had
+  final-layer MSE `3.52e-4`.
+
+On the same MLP, the default `r1` route measured final-layer MSE `9.62e-7` and
+adjusted score `3.48e-7`, so none of these alternatives were close enough to
+promote to a default-route contender.
+
+## Final ReLU Mean Calibration
+
+The final-layer `r1` shortcut keeps only diagonal pre-activation cumulants, so
+the last ReLU mean is a six-term Edgeworth-style expression in
+`base`, `k3*w3`, `k4*w4`, `k3^2*w6`, `k3*k4*w7`, and `k4^2*w8`. Refitting only
+these six coefficients on the cached public mini labels gave a stable raw-MSE
+improvement without changing propagation cost. The calibrated coefficients are:
+
+```text
+1.00021826, 0.16722795, 0.03387412, -0.01117160, -0.00335731, -0.00143425
+```
+
+On the full 100-MLP public mini split, the fitted raw final-layer MSE was about
+`7.22e-7`; leave-one-MLP-out validation was about `7.23e-7`, versus
+`8.84e-7` for the analytic coefficients. This is now the default final shortcut
+because it improves the accuracy side of the score at essentially unchanged
+FLOPs. It does not by itself solve the server-score gap: with the current
+server effective-compute multiplier around `0.49`, the adjusted score would
+still land near `3.5e-7`.
+
+The subsequent leaderboard submission landed at `3.56e-7`, confirming that the
+calibrated final coefficients are active but that server wall time still leaves
+the route far above the top-participant band. The next target is to get below
+`1e-7` adjusted score, so future work should prioritize either cutting server
+wall time/compute utilization without losing the calibrated raw-MSE gain, or
+finding an accuracy improvement large enough to survive the server multiplier.
+
+## Structured Factor Groups
+
+The default `r1` route now keeps `_FactoredThird` terms as factor groups instead
+of immediately concatenating every CP column into three dense slabs. This
+preserves exact math while exposing the structure created by the ReLU update:
+paired groups share their middle factor, repeated-slice conversion creates
+duplicated identity factors, and several fresh factors are diagonal (`I`,
+`3I`, or Wick-scaled diagonals). Weight contraction now contracts each unique
+dense factor once, handles diagonal factors by column scaling, and the final
+diagonal-only shortcut uses the grouped representation directly. The `(2, 1)`
+slice builder also fuses the middle-term matmul for groups with a shared middle
+factor.
+
+Roundoff checks against a forced dense-materialization implementation matched
+to about `1e-15` max absolute difference on width-64/depth-5 smokes. On a local
+width-256/depth-8 `BudgetContext` run, analytical FLOPs dropped from
+`1.63e10` to `1.25e10` for the same predictions. A five-MLP cached public mini
+subprocess smoke measured raw final-layer MSE `7.13e-7`, adjusted score
+`2.26e-7`, mean score multiplier `0.3167`, and no failures. This is a useful
+compute reduction but still not enough by itself for the `<1e-7` adjusted-score
+target.
