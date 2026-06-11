@@ -413,15 +413,20 @@ estimator exposes:
   best skipped boundary group. Only that boundary group is materialized into
   selected dense columns, so fully retained structured groups stay grouped.
 
-The prior heuristic contenders that motivated this recheck were:
+The prior heuristic contenders that motivated this recheck were originally
+reported with a flops-only adjusted-score proxy. Those numbers multiplied raw
+MSE by `max(0.1, flops / budget)` and did not include residual wall time, so
+they are not comparable to calibrated `make mini` scores after the residual
+multiplier wrapper was added:
 
-- Top-k cap 1536: raw final-layer MSE about `1.04e-6`, adjusted score about
-  `1.33e-7`.
+- Top-k cap 1536: raw final-layer MSE about `1.04e-6`, flops-only adjusted
+  proxy about `1.33e-7`.
 - Increasing rank schedule `[768, 1024, 1280, 1536, 1536, 1536, 1536]`: raw
-  final-layer MSE about `1.05e-6`, adjusted score about `1.26e-7`.
-- Richer cheap-feature distillation: best adjusted score about `1.29e-7`.
+  final-layer MSE about `1.05e-6`, flops-only adjusted proxy about `1.26e-7`.
+- Richer cheap-feature distillation: best flops-only adjusted proxy about
+  `1.29e-7`.
 - Dropped-tail final K=3 correction: improved raw MSE, but the added FLOPs
-  worsened adjusted score.
+  worsened the flops-only proxy.
 - Augmented suffixes: reached raw final-layer MSE around `3.1e-7`, but compute
   exceeded the score-efficient budget.
 
@@ -539,3 +544,13 @@ on the full 100-MLP public mini split gave only a tiny raw-MSE improvement:
 The refit coefficients were
 `[1.00021399, 0.16840459, 0.03457216, -0.01232764, -0.00447162, -0.00173340]`;
 this is a near-free calibration tweak, not a route to the `<1e-7` target.
+
+The next residual-aware candidate expands the final shortcut basis by gating
+the six cumulant terms with powers of the normalized pre-activation mean and
+two bounded `tanh(alpha)` features. A ridge fit on the public mini split
+reduced the in-sample final-layer raw MSE to about `6.48e-7`; the first
+calibrated five-MLP `make mini` smoke scored `2.78e-7` adjusted with
+`6.47e-7` raw final-layer MSE. The 20-MLP calibrated gate scored `2.82e-7`
+adjusted with `6.62e-7` raw final-layer MSE and `0.4263` mean multiplier,
+beating the previous structured-cap default while remaining far above the
+`<1e-7` adjusted-score target.

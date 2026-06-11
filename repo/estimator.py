@@ -15,7 +15,7 @@ source was replaced with this notice on 2026-08-17 so that the history records
 what happened without shipping a runnable public-label fitter. The unmodified
 history is retained privately.
 
-Original blob: 049fb8d990723fc43efb3a19ebf81426369099a1
+Original blob: fad1bda4d980118906440d355ec2611ef9ac8bf0
 """
 
 raise RuntimeError(
