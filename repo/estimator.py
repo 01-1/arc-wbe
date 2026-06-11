@@ -35,8 +35,6 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
-_DEFAULT_R1_RANK_CAP = 3584
-_DEFAULT_R1_COMPRESS = "structured"
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -2097,13 +2095,7 @@ class Estimator(BaseEstimator):
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default", "r1"):
-            schedule = (_DEFAULT_R1_RANK_CAP,) * max(mlp.depth - 1, 0)
-            return _factorized_k3_propagation(
-                mlp,
-                augment=_FACTOR_K3_MODE,
-                rank_schedule=schedule,
-                rank_compression=_DEFAULT_R1_COMPRESS,
-            )
+            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
         if mode in ("r1_compressed", "r1_rank_schedule") or mode.startswith("r1_cap"):
             schedule = _r1_rank_schedule_for_mode(mode, mlp)
             compression = os.environ.get("WHEST_R1_COMPRESS", "topk")

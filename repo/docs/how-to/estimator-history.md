@@ -532,9 +532,13 @@ compression beat the grouped exact route on the first 20 baked mini MLPs:
 `3.11e-7` adjusted score with `7.46e-7` raw final-layer MSE and `0.4167` mean
 multiplier, versus grouped exact `r1` at `3.21e-7` adjusted score with
 `7.42e-7` raw final-layer MSE and `0.4322` mean multiplier in the same local
-timing window. The default route was promoted to this structured cap because it
-is the current calibrated `make mini` best, but the gain is modest and still
-well short of the `<1e-7` adjusted-score target.
+timing window. The structured cap looked like a small local win, but a later
+submission showed it was not grader-safe: its group ordering used Python
+`float()` on flopscope remote scalars inside
+`keep_top_group_boundary_rank()`, which can fail in the remote-array grader
+path. The default route was rolled back to exact grouped `r1`; structured
+compression remains an explicit diagnostic mode until its group selection no
+longer depends on host scalar extraction.
 
 Refitting the six final ReLU mean coefficients for the structured-cap default
 on the full 100-MLP public mini split gave only a tiny public-mini raw-MSE
@@ -551,10 +555,11 @@ the same expanded coefficients produced a cached public-mini score around
 `2.71e-7` adjusted. Because the fit was trained on public labels and the
 leaderboard is evaluated on private seeds, those expanded coefficients are not
 a valid estimator improvement and were removed with the other public-label
-calibration. After removing the public-label fits, the structured-cap default
-with analytic final Edgeworth coefficients scored `3.41e-7` adjusted on
-`make mini MINI_MLPS=5 WALL_TIME=240`, with `8.02e-7` raw final-layer MSE,
-`2.84e-7` all-layers MSE, and `0.42474348` mean multiplier.
+calibration. After removing the public-label fits, the then-current
+structured-cap route with analytic final Edgeworth coefficients scored
+`3.41e-7` adjusted on `make mini MINI_MLPS=5 WALL_TIME=240`, with `8.02e-7`
+raw final-layer MSE, `2.84e-7` all-layers MSE, and `0.42474348` mean
+multiplier; the submission-safe default is exact grouped `r1`.
 
 A public-mini seed-conditioned residual overlay was briefly tested and then
 rejected as invalid. It used a sibling `public_mini_residual_rank48.npz` file
