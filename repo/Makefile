@@ -5,21 +5,23 @@ MINI_DATASET := hf://aicrowd/arc-whestbench-public-2026
 MINI_MLPS ?= 5
 BUDGET ?= 68000000000
 WALL_TIME ?= 60
+RESIDUAL_WALL_TIME_MULTIPLIER ?= 2.0
+WHEST := $(UV) run python scripts/whest_with_residual_multiplier.py --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) --
 
 mini:
-	$(UV) run whest run --estimator estimator.py \
+	$(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \
    --split mini --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
 
 mini-mode:
-	WHEST_K3_MODE=$(MODE) $(UV) run whest run --estimator estimator.py \
+	WHEST_K3_MODE=$(MODE) $(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \
    --split mini --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
 
 mini-local-mode:
-	WHEST_K3_MODE=$(MODE) $(UV) run whest run --estimator estimator.py \
+	WHEST_K3_MODE=$(MODE) $(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \
    --split mini --runner local --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
@@ -43,7 +45,7 @@ mini-mixed-local:
 	$(MAKE) mini-local-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
 
 full:
-	$(UV) run whest run --estimator estimator.py \
+	$(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \
    --split mini --runner subprocess --fail-fast
 
@@ -55,7 +57,7 @@ v:
 
 
 local:
-	$(UV) run whest run --estimator estimator.py \
+	$(WHEST) run --estimator estimator.py \
    --dataset $(MINI_DATASET) \
    --split mini --runner local
 
@@ -67,6 +69,8 @@ help:
 	@echo "  install     uv sync --group dev"
 	@echo "  test        run pytest"
 	@echo "  lint        run ruff check"
+	@echo "  mini        cached mini split with residual multiplier ($(RESIDUAL_WALL_TIME_MULTIPLIER)x)"
+	@echo "  mini-mode   cached mini split with MODE=<mode>"
 	@echo "  demo-cast   record asciinema cast for README opener"
 
 install:

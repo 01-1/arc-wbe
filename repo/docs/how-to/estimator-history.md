@@ -481,3 +481,37 @@ small number of low-scored structured groups late in the network. It remains an
 experiment mode rather than the default route because the gain is modest and
 does not change the main conclusion: compression alone is not currently enough
 to reach the leaderboard target.
+
+A later dense scheduled-compression attempt made the old
+`[768, 1024, 1280, 1536, 1536, 1536, 1536]` top-k schedule the default and
+collapsed the grouped third-cumulant representation back into dense factor
+slabs. That recovered the attractive flops-only proxy shape, but the proxy had
+been computing `raw_mse * max(0.1, flops / budget)` and did not include the
+leaderboard's residual-wall-time penalty. Under the cached mini scoring path,
+which uses `effective_compute = flops + 1e11 * residual_wall_time_s`, the dense
+scheduled route measured about `9.69e-7` raw final-layer MSE, `8.13e9`
+analytical FLOPs, `1.77e10` effective compute, `0.260` multiplier, and
+`2.52e-7` adjusted score on a one-MLP smoke. The grouped exact route remains
+the cleaner true-score baseline, while `r1_compressed`, `r1_rank_schedule`, and
+`r1_cap<N>` remain guarded experiment modes for future structured-compression
+work.
+
+Server timing then showed that local subprocess residual time was still too
+optimistic for score prediction. The grouped exact `r1` route's actual
+per-MLP effective compute was about `2.98e10`, implying roughly `173ms` of
+charged residual wall time and an adjusted score of `3.098e-7`. The Makefile
+WhestBench targets now route through `scripts/whest_with_residual_multiplier.py`
+with `RESIDUAL_WALL_TIME_MULTIPLIER=2.0` by default, so `make mini` and
+`make mini-mode MODE=<mode>` remain the preferred comparisons for estimator
+changes. Use `RESIDUAL_WALL_TIME_MULTIPLIER=1.0` only when reproducing the raw
+upstream WhestBench local score.
+
+With that calibrated multiplier on the first five baked mini MLPs, grouped
+exact `r1` stayed best among the guarded compression routes checked next:
+default grouped `r1` scored `3.17e-7` adjusted with `7.13e-7` raw final-layer
+MSE and `0.4415` mean multiplier; `r1_cap3584` scored `3.53e-7`; `r1_cap3328`
+scored `3.47e-7`; and the scheduled `r1_compressed` route scored `4.87e-7`.
+The caps lowered little or no residual cost in subprocess scoring, while the
+scheduled top-k route lost too much accuracy. Keep grouped exact `r1` as the
+default unless a future compression change wins under `make mini` with the
+residual multiplier enabled.
