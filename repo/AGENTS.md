@@ -20,11 +20,13 @@ Guidance for coding agents working in this repository:
   `UV_CACHE_DIR=/i/e/.uv-cache uv run pytest -q`.
 - Prefer the Makefile for WhestBench runs. Use `make mini` and its variants
   for cached public-mini scoring with the repo's residual-wall-time multiplier
-  applied; vary `MINI_MLPS`, `BUDGET`, `WALL_TIME`, and
-  `RESIDUAL_WALL_TIME_MULTIPLIER` as needed. Use `make mini-mode MODE=<mode>`
-  for forced K=3 route comparisons, and reserve `make mini-*-local` targets for
-  long augmentation diagnostics that time out under subprocess isolation. The
-  default residual multiplier is `2.0`, calibrated from observed server timing.
+  applied; run benchmarking/comparison jobs sequentially rather than in
+  parallel so residual-time comparisons stay meaningful. Vary `MINI_MLPS`,
+  `BUDGET`, `WALL_TIME`, and `RESIDUAL_WALL_TIME_MULTIPLIER` as needed. Use
+  `make mini-mode MODE=<mode>` for forced K=3 route comparisons, and reserve
+  `make mini-*-local` targets for long augmentation diagnostics that time out
+  under subprocess isolation. The default residual multiplier is `2.0`,
+  calibrated from observed server timing.
 - The grader budget is `6.8e10` FLOPs/MLP. The score multiplier is
   `max(0.1, C / 6.8e10)`, so the score-efficient target is just under
   `6.8e9` effective FLOPs.

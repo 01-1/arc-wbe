@@ -7,6 +7,7 @@ BUDGET ?= 68000000000
 WALL_TIME ?= 60
 RESIDUAL_WALL_TIME_MULTIPLIER ?= 2.0
 WHEST := $(UV) run python scripts/whest_with_residual_multiplier.py --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) --
+MIN_CALL_MS ?= 0
 
 mini:
 	$(WHEST) run --estimator estimator.py \
@@ -45,7 +46,10 @@ mini-mixed-local:
 	$(MAKE) mini-local-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
 
 p:
-	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py
+	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --targeted-min-call-ms $(MIN_CALL_MS)
+
+pu:
+	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --unified-call-tree --targeted-min-call-ms $(MIN_CALL_MS)
 
 full:
 	$(WHEST) run --estimator estimator.py \

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import functools
-import html
+import inspect
 import json
 import os
+import re
 import sys
 import time
+import types
 import webbrowser
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import flopscope as flops
 import flopscope._budget as flops_budget
+import flopscope._ndarray as flops_ndarray
 from whestbench import SetupContext
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +27,9 @@ if str(REPO_ROOT) not in sys.path:
 
 import estimator
 from local_engine import build_mlp
+
+COUNTED_WRAPPER_CODES = {flops_budget._WRAPPED_CO}
+_MISSING = object()
 
 
 @dataclass
@@ -43,38 +49,19 @@ class Node:
     children: dict[str, "Node"] = field(default_factory=dict)
 
 
+@dataclass
+class TimerRef:
+    nodes: tuple[Node, ...] = ()
+    val: float = 0.0
+    outer: bool = True
+
+
 def _child_node(parent: Node, name: str) -> Node:
     child = parent.children.get(name)
     if child is None:
         child = Node(name, parent=parent)
         parent.children[name] = child
     return child
-
-
-def _wrap(obj, name: str, label: str, stack: list[Node]) -> None:
-    if not hasattr(obj, name):
-        return
-    fn = getattr(obj, name)
-    if not callable(fn):
-        return
-
-    namespace = label.replace(".", "_")
-
-    @functools.wraps(fn)
-    def wrapped(*args, __fn=fn, __namespace=namespace, **kwargs):
-        parent = stack[-1]
-        node = _child_node(parent, __namespace)
-        stack.append(node)
-        start = time.perf_counter()
-        try:
-            with flops.namespace(__namespace):
-                return __fn(*args, **kwargs)
-        finally:
-            node.wall_s += time.perf_counter() - start
-            node.calls += 1
-            stack.pop()
-
-    setattr(obj, name, wrapped)
 
 
 class CallTreeProfiler:
@@ -118,7 +105,7 @@ class CallTreeProfiler:
                 bool(self.active_counted_wrappers),
                 is_counted_wrapper,
             )
-            if is_counted_wrapper and not skip:
+            if is_counted_wrapper:
                 self.active_counted_wrappers.append(node)
             return self
 
@@ -139,11 +126,12 @@ class CallTreeProfiler:
                 node.self_s += own_elapsed
             self._record_deduct_stack(frame, arg, node, skip)
             self._update_active_op_timer(frame, arg)
-            if is_counted_wrapper and not skip:
+            if is_counted_wrapper:
                 if not self.active_counted_wrappers or self.active_counted_wrappers[-1] is not node:
                     raise AssertionError(f"counted wrapper stack mismatch at {node.name}")
                 self.active_counted_wrappers.pop()
             parent_frame = frame.f_back
+            parent_child_elapsed = child_s if skip else elapsed
             if parent_frame in self.active_c_calls and self.active_c_calls[parent_frame]:
                 parent_key, _ = self.active_c_calls[parent_frame][-1]
                 (
@@ -157,7 +145,7 @@ class CallTreeProfiler:
                 self.frames[parent_key] = (
                     parent_node,
                     parent_start,
-                    parent_child_s + elapsed,
+                    parent_child_s + parent_child_elapsed,
                     parent_skip,
                     parent_started_inside,
                     parent_is_counted_wrapper,
@@ -174,7 +162,7 @@ class CallTreeProfiler:
                 self.frames[parent_frame] = (
                     parent_node,
                     parent_start,
-                    parent_child_s + elapsed,
+                    parent_child_s + parent_child_elapsed,
                     parent_skip,
                     parent_started_inside,
                     parent_is_counted_wrapper,
@@ -226,6 +214,7 @@ class CallTreeProfiler:
                 )
                 node.wall_s += elapsed
                 node.self_s += own_elapsed
+            parent_child_elapsed = child_s if skip else elapsed
             if frame in self.frames:
                 (
                     parent_node,
@@ -238,7 +227,7 @@ class CallTreeProfiler:
                 self.frames[frame] = (
                     parent_node,
                     parent_start,
-                    parent_child_s + elapsed,
+                    parent_child_s + parent_child_elapsed,
                     parent_skip,
                     parent_started_inside,
                     parent_is_counted_wrapper,
@@ -310,10 +299,12 @@ class CallTreeProfiler:
 
     @staticmethod
     def _is_counted_wrapper_frame(frame) -> bool:
-        return frame.f_code is flops_budget._WRAPPED_CO
+        return frame.f_code in COUNTED_WRAPPER_CODES
 
     def _skip_frame(self, frame) -> bool:
         filename = frame.f_code.co_filename
+        if frame.f_code in COUNTED_WRAPPER_CODES and filename == __file__:
+            return True
         if self.hide_flopscope and "/site-packages/flopscope/" in filename:
             return True
         if self.hide_numpy and "/site-packages/numpy/" in filename:
@@ -364,128 +355,6 @@ class CallTreeProfiler:
         return f"c:{name}"
 
 
-def _install_wrappers(stack: list[Node]) -> None:
-    for name in [
-        "_factorized_k3_propagation",
-        "_factored_nonlin_k3_r1_fast",
-        "_final_r1_relu_mean_from_tower",
-        "_relu_wick_from_stats",
-        "_hermite_prob",
-        "_ds_part_sum",
-        "_harmonic_dslice_general",
-        "_symmetrize",
-        "_expand",
-        "_vec_part_coef",
-        "_multigraph_coef",
-    ]:
-        _wrap(estimator, name, name, stack)
-
-    for class_name, methods in {
-        "_FactoredThird": ["contract_w", "get_dslice", "dslice_21", "diag", "contracted_diag"],
-        "_HTensor": ["contract_w", "get_dslice"],
-    }.items():
-        cls = getattr(estimator, class_name)
-        for method in methods:
-            _wrap(cls, method, f"{class_name}_{method}", stack)
-
-
-def _collect_op_costs(ctx):
-    cost_by_path = defaultdict(float)
-    ops_by_path = defaultdict(int)
-    flops_by_path = defaultdict(int)
-    for op in ctx.op_log:
-        parts = tuple((op.namespace or "").split(".")) if op.namespace else ()
-        op_time = op.flopscope_backend_duration_s + op.flopscope_overhead_duration_s
-        for index in range(1, len(parts) + 1):
-            path = parts[:index]
-            cost_by_path[path] += op_time
-            ops_by_path[path] += 1
-            flops_by_path[path] += op.flop_cost
-    return cost_by_path, ops_by_path, flops_by_path
-
-
-def _subtree_backend_cost(node: Node, path: tuple[str, ...], cost_by_path) -> float:
-    cost = cost_by_path[path]
-    for child in node.children.values():
-        cost += _subtree_backend_cost(child, (*path, child.name), cost_by_path)
-    return cost
-
-
-def _print_residual_namespace_tree(
-    node: Node,
-    path: tuple[str, ...],
-    cost_by_path,
-    ops_by_path,
-    flops_by_path,
-    total_residual_s: float,
-    depth: int = 0,
-    max_depth: int = 8,
-    min_ms: float = 0.15,
-    min_flops_pct: float = 0.0,
-    total_flops: int = 0,
-) -> float:
-    child_residuals = []
-    for child in node.children.values():
-        child_path = (*path, child.name)
-        child_residuals.append(
-            (
-                child,
-                child_path,
-                _subtree_residual(child, child_path, cost_by_path),
-            )
-        )
-
-    inclusive = _subtree_residual(node, path, cost_by_path)
-    exclusive = inclusive - sum(value for _, _, value in child_residuals)
-
-    if node.name != "<root>":
-        pct = 100.0 * inclusive / max(total_residual_s, 1e-12)
-        exclusive_pct = 100.0 * exclusive / max(total_residual_s, 1e-12)
-        print(
-            f"{'  ' * depth}{node.name} "
-            f"calls={node.calls} "
-            f"incl={inclusive * 1000.0:.2f}ms ({pct:.1f}%) "
-            f"excl={exclusive * 1000.0:.2f}ms ({exclusive_pct:.1f}%) "
-            f"wall={node.wall_s * 1000.0:.2f}ms "
-            f"ops={ops_by_path[path]} "
-            f"flops={flops_by_path[path]:,}"
-        )
-
-    if depth >= max_depth:
-        return inclusive
-
-    child_depth = depth if node.name == "<root>" else depth + 1
-    for child, child_path, child_residual in sorted(
-        child_residuals, key=lambda item: item[2], reverse=True
-    ):
-        child_flops = flops_by_path[child_path]
-        child_flops_pct = 100.0 * child_flops / max(total_flops, 1)
-        if (
-            node.name != "<root>"
-            and child_residual * 1000.0 < min_ms
-            and (min_flops_pct <= 0 or child_flops_pct < min_flops_pct)
-        ):
-            continue
-        _print_residual_namespace_tree(
-            child,
-            child_path,
-            cost_by_path,
-            ops_by_path,
-            flops_by_path,
-            total_residual_s,
-            child_depth,
-            max_depth,
-            min_ms,
-            min_flops_pct,
-            total_flops,
-        )
-    return inclusive
-
-
-def _subtree_residual(node: Node, path: tuple[str, ...], cost_by_path) -> float:
-    return node.wall_s - cost_by_path[path]
-
-
 def _op_timed_s(op) -> float:
     return float(getattr(op, "flopscope_backend_duration_s", 0.0) or 0.0) + float(
         getattr(op, "flopscope_overhead_duration_s", 0.0) or 0.0
@@ -498,7 +367,6 @@ def _print_call_tree(
     depth: int = 0,
     max_depth: int = 8,
     min_ms: float = 0.15,
-    min_flops_pct: float = 0.0,
     total_flops: int = 0,
 ) -> float:
     children = list(node["children"])
@@ -520,24 +388,60 @@ def _print_call_tree(
         return residual_s
 
     child_depth = depth if node["name"] == "<root>" else depth + 1
+    visible_children = []
+    other = _empty_call_tree_other_node()
     for child in sorted(children, key=lambda item: item["inclusive_s"], reverse=True):
-        child_flops_pct = 100.0 * int(child["flops"]) / max(total_flops, 1)
-        if (
-            node["name"] != "<root>"
-            and float(child["inclusive_s"]) * 1000.0 < min_ms
-            and (min_flops_pct <= 0 or child_flops_pct < min_flops_pct)
-        ):
+        if float(child["inclusive_s"]) * 1000.0 < min_ms:
+            _add_call_tree_other_node(other, child)
             continue
+        visible_children.append(child)
+
+    for child in visible_children:
         _print_call_tree(
             child,
             total_wall_s,
             child_depth,
             max_depth,
             min_ms,
-            min_flops_pct,
             total_flops,
         )
+    if other["calls"]:
+        _print_call_tree_other(other, total_wall_s, child_depth)
     return residual_s
+
+
+def _empty_call_tree_other_node() -> dict[str, object]:
+    return {
+        "name": "Other (< min ms)",
+        "calls": 0,
+        "inclusive_s": 0.0,
+        "exclusive_s": 0.0,
+        "timed_s": 0.0,
+        "flops": 0,
+    }
+
+
+def _add_call_tree_other_node(other: dict[str, object], node: dict[str, object]) -> None:
+    other["calls"] = int(other["calls"]) + int(node["calls"])
+    other["inclusive_s"] = float(other["inclusive_s"]) + float(node["inclusive_s"])
+    other["exclusive_s"] = float(other["exclusive_s"]) + float(node["exclusive_s"])
+    other["timed_s"] = float(other["timed_s"]) + float(node["timed_s"])
+    other["flops"] = int(other["flops"]) + int(node["flops"])
+
+
+def _print_call_tree_other(node: dict[str, object], total_wall_s: float, depth: int) -> None:
+    residual_s = float(node["inclusive_s"])
+    own_residual_s = float(node["exclusive_s"])
+    pct = 100.0 * residual_s / max(total_wall_s, 1e-12)
+    self_pct = 100.0 * own_residual_s / max(total_wall_s, 1e-12)
+    print(
+        f"{'  ' * depth}{node['name']} "
+        f"calls={node['calls']} "
+        f"resid={residual_s * 1000.0:.2f}ms ({pct:.1f}%) "
+        f"self={own_residual_s * 1000.0:.2f}ms ({self_pct:.1f}%) "
+        f"timed={float(node['timed_s']) * 1000.0:.2f}ms "
+        f"flops={int(node['flops']):,}"
+    )
 
 
 def _print_function_table(
@@ -546,7 +450,6 @@ def _print_function_table(
     *,
     max_rows: int = 80,
     min_ms: float = 0.15,
-    min_flops_pct: float = 0.0,
     total_flops: int = 0,
 ) -> None:
     rows = _function_table_data(node)["children"]
@@ -554,8 +457,7 @@ def _print_function_table(
     for row in rows:
         residual_s = float(row["inclusive_s"])
         own_residual_s = float(row["exclusive_s"])
-        flops_pct = 100.0 * int(row["flops"]) / max(total_flops, 1)
-        if residual_s * 1000.0 < min_ms and (min_flops_pct <= 0 or flops_pct < min_flops_pct):
+        if residual_s * 1000.0 < min_ms:
             continue
         pct = 100.0 * residual_s / max(total_wall_s, 1e-12)
         self_pct = 100.0 * own_residual_s / max(total_wall_s, 1e-12)
@@ -586,6 +488,422 @@ def _call_node_flops(node: Node) -> int:
     if node.flops:
         return node.flops
     return sum(_call_node_flops(child) for child in node.children.values())
+
+
+class TargetedCallProfiler:
+    def __init__(self) -> None:
+        self.root = Node("<root>")
+        self.stack: list[tuple[Node, float, float, bool]] = []
+        self.active_timer_depth = 0
+        self.timer_outer_stack: list[bool] = []
+        self.timer_refs: dict[tuple[int, ...], TimerRef] = {}
+
+    def enter_call(self, name: str) -> None:
+        parent = self.stack[-1][0] if self.stack else self.root
+        node = _child_node(parent, name)
+        node.calls += 1
+        self.stack.append((node, time.perf_counter(), 0.0, self.active_timer_depth > 0))
+
+    def exit_call(self, name: str) -> None:
+        if not self.stack:
+            raise AssertionError(f"targeted call stack underflow at {name}")
+        node, start, child_s, started_inside_timer = self.stack.pop()
+        if node.name != name:
+            raise AssertionError(f"targeted call stack mismatch: expected {node.name}, got {name}")
+        ended_inside_timer = self.active_timer_depth > 0
+        if started_inside_timer != ended_inside_timer:
+            raise AssertionError(
+                f"counted-wrapper boundary crossed by targeted call {name}: "
+                f"started_inside_timer={started_inside_timer}, ended_inside_timer={ended_inside_timer}"
+            )
+        elapsed = time.perf_counter() - start
+        node.wall_s += elapsed
+        node.self_s += max(0.0, elapsed - child_s)
+        node.completely_inside_timer = node.completely_inside_timer or started_inside_timer
+        if self.stack:
+            parent_node, parent_start, parent_child_s, parent_started_inside = self.stack[-1]
+            self.stack[-1] = (
+                parent_node,
+                parent_start,
+                parent_child_s + elapsed,
+                parent_started_inside,
+            )
+
+    def enter_timer(self) -> None:
+        self.timer_outer_stack.append(self.active_timer_depth == 0)
+        self.active_timer_depth += 1
+
+    def exit_timer(self) -> TimerRef:
+        if self.active_timer_depth <= 0:
+            raise AssertionError("targeted timer stack underflow")
+        self.active_timer_depth -= 1
+        is_outer = self.timer_outer_stack.pop()
+        if not is_outer:
+            return TimerRef(outer=False)
+        nodes = tuple(item[0] for item in self.stack)
+        key = tuple(id(node) for node in nodes)
+        ref = self.timer_refs.get(key)
+        if ref is None:
+            ref = TimerRef(nodes=nodes)
+            self.timer_refs[key] = ref
+        return ref
+
+    def apply_timer_refs(self) -> None:
+        for ref in self.timer_refs.values():
+            for node in ref.nodes:
+                node.timed_s += ref.val
+
+
+def _targeted_function_specs() -> list[tuple[object, str, str]]:
+    specs: list[tuple[object, str, str]] = []
+    seen: set[tuple[int, str]] = set()
+
+    def maybe_add(owner: object, attr_name: str, fn: object) -> None:
+        if not inspect.isfunction(fn):
+            return
+        code = getattr(fn, "__code__", None)
+        if code is None or not code.co_filename.endswith("/estimator.py"):
+            return
+        key = (id(owner), attr_name)
+        if key in seen:
+            return
+        seen.add(key)
+        specs.append((owner, attr_name, f"estimator.py:{code.co_firstlineno}:{code.co_name}"))
+
+    for attr_name, value in vars(estimator).items():
+        maybe_add(estimator, attr_name, value)
+        if not isinstance(value, type):
+            continue
+        for class_attr_name, class_value in vars(value).items():
+            maybe_add(value, class_attr_name, class_value)
+
+    return specs
+
+
+def _install_targeted_function_wrappers(
+    profiler: TargetedCallProfiler,
+    *,
+    allowed_labels: set[str] | None = None,
+) -> list[tuple[object, str, object]]:
+    replacements: list[tuple[object, str, object]] = []
+    helper_name = "__targeted_local_wrapper"
+    helper_original = getattr(estimator, helper_name, _MISSING)
+    setattr(
+        estimator,
+        helper_name,
+        functools.partial(_targeted_local_wrapper, profiler),
+    )
+    replacements.append((estimator, helper_name, helper_original))
+    _install_targeted_local_function_wrappers(
+        replacements,
+        profiler,
+        allowed_labels=allowed_labels,
+    )
+    for owner, attr_name, label in _targeted_function_specs():
+        if allowed_labels is not None and label not in allowed_labels:
+            continue
+        original = getattr(owner, attr_name)
+
+        @functools.wraps(original)
+        def wrapped(*args, __fn=original, __label=label, **kwargs):
+            profiler.enter_call(__label)
+            try:
+                return __fn(*args, **kwargs)
+            finally:
+                profiler.exit_call(__label)
+
+        setattr(owner, attr_name, wrapped)
+        replacements.append((owner, attr_name, original))
+    return replacements
+
+
+def _local_function_labels(fn: object) -> dict[tuple[int, str], str]:
+    labels: dict[tuple[int, str], str] = {}
+
+    def visit(code) -> None:
+        for const in code.co_consts:
+            if not isinstance(const, types.CodeType):
+                continue
+            if const.co_filename.endswith("/estimator.py"):
+                labels[(const.co_firstlineno, const.co_name)] = (
+                    f"estimator.py:{const.co_firstlineno}:{const.co_name}"
+                )
+            visit(const)
+
+    code = getattr(fn, "__code__", None)
+    if code is not None:
+        visit(code)
+    return labels
+
+
+def _targeted_local_wrapper(profiler: TargetedCallProfiler, label: str):
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            profiler.enter_call(label)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                profiler.exit_call(label)
+
+        return wrapped
+
+    return decorate
+
+
+def _patch_function_source_for_local_wrappers(
+    fn: object,
+    profiler: TargetedCallProfiler,
+    *,
+    allowed_labels: set[str] | None = None,
+):
+    local_labels = _local_function_labels(fn)
+    selected = {
+        key: label
+        for key, label in local_labels.items()
+        if allowed_labels is None or label in allowed_labels
+    }
+    if not selected:
+        return None
+
+    try:
+        source_lines, start_line = inspect.getsourcelines(fn)
+    except (OSError, TypeError):
+        return None
+
+    patched_lines: list[str] = []
+    decorator_re = re.compile(r"^(?P<indent>\s*)@")
+    def_re = re.compile(r"^(?P<indent>\s*)def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+    index = 0
+    while index < len(source_lines):
+        line = source_lines[index]
+        line_no = start_line + index
+        stripped = line.lstrip()
+        is_top_def = stripped.startswith("def ") and len(line) == len(stripped)
+        decorator_match = decorator_re.match(line)
+        if decorator_match and not is_top_def:
+            lookahead = index + 1
+            while lookahead < len(source_lines) and decorator_re.match(source_lines[lookahead]):
+                lookahead += 1
+            if lookahead < len(source_lines):
+                def_match = def_re.match(source_lines[lookahead])
+                if def_match:
+                    key = (start_line + lookahead, def_match.group("name"))
+                    label = selected.get(key)
+                    if label is not None:
+                        patched_lines.append(
+                            f"{decorator_match.group('indent')}@__targeted_local_wrapper({label!r})\n"
+                        )
+            while index < lookahead:
+                patched_lines.append(source_lines[index])
+                index += 1
+            continue
+        def_match = def_re.match(line)
+        if def_match and not is_top_def:
+            key = (line_no, def_match.group("name"))
+            label = selected.get(key)
+            if label is not None:
+                patched_lines.append(
+                    f"{def_match.group('indent')}@__targeted_local_wrapper({label!r})\n"
+                )
+        patched_lines.append(line)
+        index += 1
+
+    patched_source = ("\n" * (start_line - 1)) + "".join(patched_lines)
+    namespace: dict[str, object] = {}
+    exec(compile(patched_source, fn.__code__.co_filename, "exec"), fn.__globals__, namespace)
+    patched = namespace.get(fn.__name__)
+    if not inspect.isfunction(patched):
+        return None
+    return patched
+
+
+def _install_targeted_local_function_wrappers(
+    replacements: list[tuple[object, str, object]],
+    profiler: TargetedCallProfiler,
+    *,
+    allowed_labels: set[str] | None = None,
+) -> None:
+    for owner, attr_name, label in _targeted_function_specs():
+        if owner is not estimator:
+            continue
+        original = getattr(owner, attr_name)
+        patched = _patch_function_source_for_local_wrappers(
+            original,
+            profiler,
+            allowed_labels=allowed_labels,
+        )
+        if patched is None:
+            continue
+        functools.update_wrapper(patched, original)
+        setattr(owner, attr_name, patched)
+        replacements.append((owner, attr_name, original))
+
+
+def _targeted_labels_over_min_call_ms(
+    function_table: dict[str, object],
+    min_call_ms: float,
+) -> set[str]:
+    labels = set()
+    for row in function_table["children"]:
+        calls = int(row["calls"])
+        if calls <= 0:
+            continue
+        per_call_ms = 1000.0 * float(row["inclusive_s"]) / calls
+        if per_call_ms >= min_call_ms:
+            labels.add(str(row["name"]))
+    return labels
+
+
+def _install_counted_wrapper_probe(
+    targeted_profiler: TargetedCallProfiler | None = None,
+) -> tuple[list[tuple[object, str, object]], object]:
+    """Replace existing flopscope counted wrappers with an equivalent probe."""
+
+    replacements: list[tuple[object, str, object]] = []
+    seen: set[tuple[int, str]] = set()
+    original_wrapped_co = flops_budget._WRAPPED_CO
+
+    def make_profiled(original):
+        fn = original.__wrapped__
+
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            from flopscope._validation import require_budget
+
+            budget = require_budget()
+            fs_t0 = time.perf_counter()
+            backend_baseline = budget._total_flopscope_backend_time
+            overhead_baseline = budget._total_flopscope_overhead_time
+            ops_before = len(budget._op_log)
+            try:
+                if targeted_profiler is not None:
+                    targeted_profiler.enter_timer()
+                return fn(*args, **kwargs)
+            finally:
+                timer_ref = None
+                if targeted_profiler is not None:
+                    timer_ref = targeted_profiler.exit_timer()
+                wall = time.perf_counter() - fs_t0
+                if timer_ref is not None:
+                    timer_ref.val += wall
+                backend_delta = budget._total_flopscope_backend_time - backend_baseline
+                overhead_delta = budget._total_flopscope_overhead_time - overhead_baseline
+                wrapper_own_overhead = max(wall - backend_delta - overhead_delta, 0.0)
+                budget._total_flopscope_overhead_time += wrapper_own_overhead
+                ops_added = range(ops_before, len(budget._op_log))
+                ops_count = len(budget._op_log) - ops_before
+                if ops_count and wrapper_own_overhead > 0:
+                    per_op = wrapper_own_overhead / ops_count
+                    for idx in ops_added:
+                        op = budget._op_log[idx]
+                        budget._op_log[idx] = op._replace(
+                            flopscope_overhead_duration_s=(
+                                op.flopscope_overhead_duration_s or 0.0
+                            )
+                            + per_op
+                        )
+
+        COUNTED_WRAPPER_CODES.add(wrapped.__code__)
+        return wrapped
+
+    def make_export_profiled(original):
+        inner = make_profiled(original.__wrapped__)
+
+        @functools.wraps(original)
+        def wrapped(*args, **kwargs):
+            result = inner(*args, **kwargs)
+            if isinstance(result, flops_ndarray._np.ndarray):
+                return flops_ndarray._asflopscope(result)
+            if isinstance(result, tuple):
+                wrapped_elems = [
+                    flops_ndarray._asflopscope(item)
+                    if isinstance(item, flops_ndarray._np.ndarray)
+                    else item
+                    for item in result
+                ]
+                if type(result) is not tuple and hasattr(type(result), "_fields"):
+                    return type(result)(*wrapped_elems)
+                return tuple(wrapped_elems)
+            if isinstance(result, list):
+                return [
+                    flops_ndarray._asflopscope(item)
+                    if isinstance(item, flops_ndarray._np.ndarray)
+                    else item
+                    for item in result
+                ]
+            return result
+
+        return wrapped
+
+    def maybe_replace(owner: object, attr_name: str) -> None:
+        key = (id(owner), attr_name)
+        if key in seen:
+            return
+        seen.add(key)
+        try:
+            value = getattr(owner, attr_name)
+        except Exception:
+            return
+        code = getattr(value, "__code__", None)
+        wrapped_value = getattr(value, "__wrapped__", None)
+        if not hasattr(value, "__wrapped__"):
+            return
+        if code is flops_budget._WRAPPED_CO:
+            replacement = make_profiled(value)
+        elif getattr(wrapped_value, "__code__", None) is flops_budget._WRAPPED_CO:
+            replacement = make_export_profiled(value)
+        else:
+            return
+        setattr(owner, attr_name, replacement)
+        replacements.append((owner, attr_name, value))
+
+    for module in list(sys.modules.values()):
+        module_name = getattr(module, "__name__", "")
+        if not module_name.startswith("flopscope."):
+            continue
+        for attr_name, value in list(vars(module).items()):
+            maybe_replace(module, attr_name)
+            if not isinstance(value, type):
+                continue
+            for class_attr_name in list(vars(value)):
+                maybe_replace(value, class_attr_name)
+
+    if replacements:
+        flops_budget._WRAPPED_CO = replacements[0][2].__code__
+        replacement_code = getattr(getattr(replacements[0][0], replacements[0][1]), "__code__", None)
+        if replacement_code is not None:
+            flops_budget._WRAPPED_CO = replacement_code
+
+    return replacements, original_wrapped_co
+
+
+def _restore_counted_wrapper_probe(
+    state: tuple[list[tuple[object, str, object]], object],
+) -> None:
+    replacements, original_wrapped_co = state
+    for module, attr_name, original in reversed(replacements):
+        setattr(module, attr_name, original)
+    flops_budget._WRAPPED_CO = original_wrapped_co
+
+
+def _restore_targeted_function_wrappers(replacements: list[tuple[object, str, object]]) -> None:
+    for owner, attr_name, original in reversed(replacements):
+        if original is _MISSING:
+            delattr(owner, attr_name)
+        else:
+            setattr(owner, attr_name, original)
+
+
+def _targeted_call_tree_data(node: Node) -> dict[str, object]:
+    _finalize_call_tree_timed(node)
+    data = _call_tree_data(node)
+    _assert_additive_call_tree(data)
+    return data
+
+
+def _tree_display_residual_s(tree: dict[str, object]) -> float:
+    return sum(float(child["inclusive_s"]) for child in tree["children"])
 
 
 def _annotate_call_tree_op_times(profiler: CallTreeProfiler, ctx) -> None:
@@ -647,9 +965,11 @@ def _print_flops_tree(
         return
 
     child_depth = depth if node["name"] == "<root>" else depth + 1
+    other = _empty_flops_other_node()
     for child in node["children"]:
         child_flops_pct = 100.0 * int(child["flops"]) / max(total_flops, 1)
-        if node["name"] != "<root>" and child_flops_pct < min_flops_pct:
+        if child_flops_pct < min_flops_pct:
+            _add_flops_other_node(other, child)
             continue
         _print_flops_tree(
             child,
@@ -658,26 +978,36 @@ def _print_flops_tree(
             max_depth=max_depth,
             min_flops_pct=min_flops_pct,
         )
+    if other["ops"]:
+        _print_flops_other(other, total_flops, child_depth)
 
 
-def _namespace_tree_data(node: Node, path: tuple[str, ...], cost_by_path, ops_by_path, flops_by_path):
-    children = [
-        _namespace_tree_data(child, (*path, child.name), cost_by_path, ops_by_path, flops_by_path)
-        for child in node.children.values()
-    ]
-    inclusive = _subtree_residual(node, path, cost_by_path)
-    exclusive = inclusive - sum(child["inclusive_s"] for child in children)
+def _empty_flops_other_node() -> dict[str, object]:
     return {
-        "name": node.name,
-        "calls": node.calls,
-        "wall_s": node.wall_s,
-        "self_s": node.self_s,
-        "inclusive_s": inclusive,
-        "exclusive_s": exclusive,
-        "ops": ops_by_path[path],
-        "flops": flops_by_path[path],
-        "children": sorted(children, key=lambda child: child["inclusive_s"], reverse=True),
+        "name": "Other (< min flops)",
+        "calls": 0,
+        "ops": 0,
+        "flops": 0,
+        "inclusive_s": 0.0,
     }
+
+
+def _add_flops_other_node(other: dict[str, object], node: dict[str, object]) -> None:
+    other["calls"] = int(other["calls"]) + int(node["calls"])
+    other["ops"] = int(other["ops"]) + int(node["ops"])
+    other["flops"] = int(other["flops"]) + int(node["flops"])
+    other["inclusive_s"] = float(other["inclusive_s"]) + float(node["inclusive_s"])
+
+
+def _print_flops_other(node: dict[str, object], total_flops: int, depth: int) -> None:
+    flops_pct = 100.0 * int(node["flops"]) / max(total_flops, 1)
+    elapsed_s = float(node["inclusive_s"])
+    print(
+        f"{'  ' * depth}{node['name']} "
+        f"ops={node['ops']:,} "
+        f"flops={node['flops']:,} ({flops_pct:.1f}%) "
+        f"flopscope_time={elapsed_s * 1000.0:.2f}ms"
+    )
 
 
 def _call_tree_data(node: Node, residual_scale: float = 1.0, zeroed: bool = False):
@@ -807,7 +1137,52 @@ def _flops_op_label(op) -> str:
     return str(op.op_name)
 
 
-def _flops_tree_data(ctx) -> dict[str, object]:
+def _node_path(node: Node) -> tuple[str, ...]:
+    parts = []
+    cur: Node | None = node
+    while cur is not None and cur.name != "<root>":
+        parts.append(cur.name)
+        cur = cur.parent
+    return tuple(reversed(parts))
+
+
+def _flops_tree_data(profiler: CallTreeProfiler, ctx) -> dict[str, object]:
+    root = _empty_flops_tree_node("<root>")
+    budget_id = id(ctx)
+    for op_index, op in enumerate(ctx.op_log):
+        flop_cost = int(getattr(op, "flop_cost", 0) or 0)
+        backend_s = float(getattr(op, "flopscope_backend_duration_s", 0.0) or 0.0)
+        overhead_s = float(getattr(op, "flopscope_overhead_duration_s", 0.0) or 0.0)
+        owner = profiler.op_owners.get((budget_id, op_index))
+        parts = _node_path(owner) if owner is not None else ("<unowned>",)
+        path_nodes = [root]
+        node = root
+        for part in parts:
+            node = _flops_tree_child(node, part)
+            path_nodes.append(node)
+        leaf = _flops_tree_child(node, _flops_op_label(op))
+        path_nodes.append(leaf)
+        for item in path_nodes:
+            item["flops"] += flop_cost
+            item["ops"] += 1
+            item["calls"] = item["ops"]
+            item["backend_s"] += backend_s
+            item["overhead_s"] += overhead_s
+            item["inclusive_s"] = item["backend_s"] + item["overhead_s"]
+
+    def finish(node: dict[str, object]) -> dict[str, object]:
+        node["children"] = sorted(
+            [finish(child) for child in node["children"]],
+            key=lambda child: (child["flops"], child["ops"]),
+            reverse=True,
+        )
+        node.pop("_children_by_name", None)
+        return node
+
+    return finish(root)
+
+
+def _flops_tree_data_from_op_namespaces(ctx) -> dict[str, object]:
     root = _empty_flops_tree_node("<root>")
     for op in ctx.op_log:
         flop_cost = int(getattr(op, "flop_cost", 0) or 0)
@@ -842,21 +1217,76 @@ def _flops_tree_data(ctx) -> dict[str, object]:
     return finish(root)
 
 
+def _empty_tree_data() -> dict[str, object]:
+    return {
+        "name": "<root>",
+        "calls": 0,
+        "wall_s": 0.0,
+        "self_s": 0.0,
+        "timed_s": 0.0,
+        "timed_self_s": 0.0,
+        "inclusive_s": 0.0,
+        "exclusive_s": 0.0,
+        "ops": 0,
+        "flops": 0,
+        "children": [],
+    }
+
+
+def _run_targeted_profile(
+    est: estimator.Estimator,
+    mlp,
+    budget: int,
+    *,
+    allowed_labels: set[str] | None = None,
+) -> tuple[dict[str, object], dict[str, object], object, int, float]:
+    targeted_profiler = TargetedCallProfiler()
+    targeted_function_replacements = _install_targeted_function_wrappers(
+        targeted_profiler,
+        allowed_labels=allowed_labels,
+    )
+    targeted_counted_replacements = _install_counted_wrapper_probe(targeted_profiler)
+    try:
+        with flops.BudgetContext(flop_budget=budget, quiet=True) as targeted_ctx:
+            est.predict(mlp, budget)
+    finally:
+        _restore_counted_wrapper_probe(targeted_counted_replacements)
+        _restore_targeted_function_wrappers(targeted_function_replacements)
+    targeted_profiler.apply_timer_refs()
+    targeted_call_tree = _targeted_call_tree_data(targeted_profiler.root)
+    targeted_function_table = _function_table_data(targeted_call_tree)
+    targeted_tree_residual_s = _tree_display_residual_s(targeted_call_tree)
+    wrapped_count = sum(
+        1
+        for _, attr_name, original in targeted_function_replacements
+        if attr_name != "__targeted_local_wrapper" and original is not _MISSING
+    )
+    return (
+        targeted_call_tree,
+        targeted_function_table,
+        targeted_ctx,
+        wrapped_count,
+        targeted_tree_residual_s,
+    )
+
+
 def _write_html_report(
     output_path: Path,
     *,
     metadata: dict[str, object],
-    namespace_tree: dict[str, object],
     call_tree: dict[str, object],
     function_table: dict[str, object],
+    targeted_call_tree: dict[str, object],
+    targeted_function_table: dict[str, object],
     flops_tree: dict[str, object],
 ) -> None:
     payload = json.dumps(
         {
             "metadata": metadata,
-            "namespaceTree": namespace_tree,
             "callTree": call_tree,
             "functionTable": function_table,
+            "targetedCallTree": targeted_call_tree,
+            "targetedFunctionTable": targeted_function_table,
             "flopsTree": flops_tree,
         }
     )
@@ -935,6 +1365,7 @@ button, input, select {{
   padding: 7px 9px;
 }}
 input {{ min-width: 260px; }}
+input[type="checkbox"] {{ min-width: auto; }}
 .tabs {{ display: flex; gap: 8px; margin-bottom: 12px; }}
 .tab[aria-selected="true"] {{
   border-color: var(--accent);
@@ -1027,13 +1458,15 @@ code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     <input id="filter" placeholder="Filter function names">
     <label class="muted">Min ms <input id="minMs" type="number" min="0" step="0.1"></label>
     <label class="muted">Min FLOPs % <input id="minFlops" type="number" min="0" step="0.1"></label>
+    <label class="muted"><input id="hideLowOther" type="checkbox"> Hide low Other</label>
     <button id="expand">Expand All</button>
     <button id="collapse">Collapse All</button>
   </div>
   <div class="tabs">
-    <button class="tab" data-view="namespace" aria-selected="true">Residual Namespace Tree</button>
+    <button class="tab" data-view="targeted" aria-selected="true">Targeted Calls</button>
+    <button class="tab" data-view="targeted-functions" aria-selected="false">Targeted Functions</button>
     <button class="tab" data-view="call" aria-selected="false">Unified Call Tree</button>
-    <button class="tab" data-view="functions" aria-selected="false">Per-Function View</button>
+    <button class="tab" data-view="functions" aria-selected="false">Profiled Functions</button>
     <button class="tab" data-view="flops" aria-selected="false">Full FLOPs Tree</button>
   </div>
   <div class="tree" id="tree"></div>
@@ -1041,11 +1474,12 @@ code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 <script>
 const data = {payload};
 const state = {{
-  view: "namespace",
+  view: "targeted",
   collapsed: new Set(),
   filter: "",
   minMs: Number(data.metadata.min_ms || 0),
-  minFlops: Number(data.metadata.min_flops_pct || 0)
+  minFlops: Number(data.metadata.min_flops_pct || 0),
+  hideLowOther: false
 }};
 
 function fmtMs(seconds) {{ return `${{(seconds * 1000).toFixed(2)}}ms`; }}
@@ -1054,35 +1488,99 @@ function pct(value, total) {{ return total > 0 ? 100 * value / total : 0; }}
 function metric(node) {{ return node.inclusive_s || 0; }}
 function flopMetric(node) {{ return node.flops || 0; }}
 function isFlopsView() {{ return state.view === "flops"; }}
-function isFunctionView() {{ return state.view === "functions"; }}
+function isFunctionView() {{ return state.view === "functions" || state.view === "targeted-functions"; }}
+function isTargetedView() {{ return state.view === "targeted" || state.view === "targeted-functions"; }}
 function rootForView() {{
-  if (state.view === "namespace") return data.namespaceTree;
+  if (state.view === "targeted-functions") return data.targetedFunctionTable;
   if (state.view === "functions") return data.functionTable;
+  if (state.view === "targeted") return data.targetedCallTree;
   if (state.view === "flops") return data.flopsTree;
   return data.callTree;
 }}
 function totalForView() {{
+  if (isTargetedView()) return data.metadata.targeted_residual_wall_time_s;
   return isFlopsView() ? data.metadata.flops : data.metadata.residual_wall_time_s;
 }}
+function nodePassesMin(node) {{
+  if (node.name === "<root>") return true;
+  return isFlopsView()
+    ? pct(flopMetric(node), data.metadata.flops) >= state.minFlops
+    : metric(node) * 1000 >= state.minMs;
+}}
 function rowVisible(node) {{
-  const flopPct = pct(flopMetric(node), data.metadata.flops);
-  const timeOk = !isFlopsView() && metric(node) * 1000 >= state.minMs;
-  const flopsOk = state.minFlops > 0 && flopPct >= state.minFlops;
-  const minOk = node.name === "<root>" || timeOk || flopsOk;
+  const minOk = nodePassesMin(node);
   const filterOk = !state.filter || node.name.toLowerCase().includes(state.filter);
   if (minOk && filterOk) return true;
   return node.children.some(rowVisible);
 }}
+function otherNode(children, name) {{
+  const other = {{
+    name,
+    calls: 0,
+    inclusive_s: 0,
+    exclusive_s: 0,
+    timed_s: 0,
+    self_s: 0,
+    flops: 0,
+    ops: 0,
+    children: [],
+    synthetic: true
+  }};
+  for (const child of children) {{
+    other.calls += child.calls || 0;
+    other.inclusive_s += child.inclusive_s || 0;
+    other.exclusive_s += child.exclusive_s || 0;
+    other.timed_s += child.timed_s || 0;
+    other.self_s += child.self_s || 0;
+    other.flops += child.flops || 0;
+    other.ops += child.ops || 0;
+  }}
+  return other.calls ? other : null;
+}}
+function otherPassesActiveMin(node) {{
+  return isFlopsView()
+    ? pct(flopMetric(node), data.metadata.flops) >= state.minFlops
+    : metric(node) * 1000 >= state.minMs;
+}}
+function maybeOtherNode(children, name) {{
+  const other = otherNode(children, name);
+  if (!other) return null;
+  if (state.hideLowOther && !otherPassesActiveMin(other)) return null;
+  return other;
+}}
+function renderedChildren(node) {{
+  const children = node.children || [];
+  const otherName = isFlopsView() ? "Other (< min flops)" : "Other (< min ms)";
+  if (isFlopsView()) {{
+    const shown = children.filter(child => nodePassesMin(child) && rowVisible(child));
+    const hidden = children.filter(child => !nodePassesMin(child));
+    const other = (!state.filter || otherName.toLowerCase().includes(state.filter)) ? maybeOtherNode(hidden, otherName) : null;
+    return other ? [...shown, other] : shown;
+  }}
+  if (isFunctionView()) {{
+    return children.filter(child => nodePassesMin(child) && rowVisible(child));
+  }}
+  const shown = children.filter(child => nodePassesMin(child) && rowVisible(child));
+  const hidden = children.filter(child => !nodePassesMin(child));
+  const other = (!state.filter || otherName.toLowerCase().includes(state.filter)) ? maybeOtherNode(hidden, otherName) : null;
+  return other ? [...shown, other] : shown;
+}}
 function renderMeta() {{
   const meta = data.metadata;
-  document.getElementById("meta").innerHTML = [
+  const items = [
     `width=${{meta.width}} depth=${{meta.depth}} seed=${{meta.seed}} mode=${{meta.mode}}`,
     `FLOPs=${{fmtInt(meta.flops)}}`,
     `ops=${{fmtInt(meta.ops)}}`,
     `backend=${{fmtMs(meta.backend_time_s)}}`,
     `overhead=${{fmtMs(meta.overhead_time_s)}}`,
     `residual=${{fmtMs(meta.residual_wall_time_s)}}`
-  ].map(text => `<span class="pill"><code>${{text}}</code></span>`).join("");
+  ];
+  if (isTargetedView()) {{
+    items.push(`targeted ctx residual=${{fmtMs(meta.targeted_residual_wall_time_s)}}`);
+    items.push(`targeted tree residual=${{fmtMs(meta.targeted_tree_residual_s)}}`);
+    items.push(`targeted wrapped=${{fmtInt(meta.targeted_wrapped_functions)}}`);
+  }}
+  document.getElementById("meta").innerHTML = items.map(text => `<span class="pill"><code>${{text}}</code></span>`).join("");
 }}
 function render() {{
   const tree = document.getElementById("tree");
@@ -1094,7 +1592,7 @@ function render() {{
       maxVisible = Math.max(maxVisible, metric(node));
       maxVisibleFlops = Math.max(maxVisibleFlops, flopMetric(node));
     }}
-    for (const child of node.children) scan(child);
+    for (const child of renderedChildren(node)) scan(child);
   }}
   scan(root);
   const countTitle = isFlopsView() ? "Ops" : "Calls";
@@ -1105,9 +1603,10 @@ function render() {{
   </div>`];
   function walk(node, depth, path) {{
     if (node.name !== "<root>") {{
-      if (!rowVisible(node)) return;
+      if (!node.synthetic && !rowVisible(node)) return;
       const id = path.join("/");
-      const hasChildren = !isFunctionView() && node.children.some(rowVisible);
+      const children = node.synthetic ? [] : renderedChildren(node);
+      const hasChildren = !isFunctionView() && children.length > 0;
       const collapsed = !isFunctionView() && state.collapsed.has(id);
       const value = metric(node);
       const selfValue = isFlopsView() ? node.self_s : node.exclusive_s;
@@ -1128,7 +1627,8 @@ function render() {{
       </div>`);
       if (collapsed) return;
     }}
-    for (const child of node.children) walk(child, isFunctionView() || node.name === "<root>" ? depth : depth + 1, [...path, child.name]);
+    const children = node.synthetic ? [] : renderedChildren(node);
+    for (const child of children) walk(child, isFunctionView() || node.name === "<root>" ? depth : depth + 1, [...path, child.name]);
   }}
   walk(root, 0, []);
   tree.innerHTML = rows.join("");
@@ -1156,6 +1656,10 @@ document.getElementById("minFlops").addEventListener("input", event => {{
   state.minFlops = Number(event.target.value || 0);
   render();
 }});
+document.getElementById("hideLowOther").addEventListener("change", event => {{
+  state.hideLowOther = event.target.checked;
+  render();
+}});
 document.getElementById("expand").addEventListener("click", () => {{ state.collapsed.clear(); render(); }});
 document.getElementById("collapse").addEventListener("click", () => {{
   state.collapsed.clear();
@@ -1171,12 +1675,14 @@ for (const tab of document.querySelectorAll(".tab")) {{
     state.view = tab.dataset.view;
     state.collapsed.clear();
     document.querySelectorAll(".tab").forEach(item => item.setAttribute("aria-selected", String(item === tab)));
+    renderMeta();
     render();
   }});
 }}
 renderMeta();
 document.getElementById("minMs").value = state.minMs;
 document.getElementById("minFlops").value = state.minFlops;
+document.getElementById("hideLowOther").checked = state.hideLowOther;
 render();
 </script>
 </body>
@@ -1201,6 +1707,17 @@ def main() -> None:
         default=1.0,
         help="Minimum FLOP percentage of total run FLOPs for a row to be shown.",
     )
+    parser.add_argument(
+        "--targeted-min-call-ms",
+        type=float,
+        default=0.0,
+        help="Only wrap targeted functions whose profiled inclusive time per call is at least this many ms.",
+    )
+    parser.add_argument(
+        "--unified-call-tree",
+        action="store_true",
+        help="Also run the high-overhead sys.setprofile unified call tree.",
+    )
     parser.add_argument("--hide-flopscope", action="store_true")
     parser.add_argument("--hide-numpy", action="store_true")
     parser.add_argument("--output", type=Path, default=Path("profile_residual_tree.html"))
@@ -1212,10 +1729,6 @@ def main() -> None:
     else:
         os.environ.pop("WHEST_K3_MODE", None)
     os.environ.pop("WHEST_EXPERIMENT_MODE", None)
-
-    root = Node("<root>")
-    stack = [root]
-    _install_wrappers(stack)
 
     mlp = build_mlp(args.width, args.depth, args.seed)
     est = estimator.Estimator()
@@ -1232,66 +1745,103 @@ def main() -> None:
     with flops.BudgetContext(flop_budget=args.budget, quiet=True):
         est.predict(mlp, args.budget)
 
-    root.children.clear()
-    call_root = Node("<root>")
-    profiler = CallTreeProfiler(
-        call_root,
-        hide_flopscope=args.hide_flopscope,
-        hide_numpy=args.hide_numpy,
+    targeted_allowed_labels = None
+    if args.targeted_min_call_ms > 0:
+        bootstrap_call_tree, bootstrap_function_table, _, _, _ = _run_targeted_profile(
+            est,
+            mlp,
+            args.budget,
+            allowed_labels=None,
+        )
+        targeted_allowed_labels = _targeted_labels_over_min_call_ms(
+            bootstrap_function_table,
+            args.targeted_min_call_ms,
+        )
+    (
+        targeted_call_tree,
+        targeted_function_table,
+        targeted_ctx,
+        targeted_wrapped_functions,
+        targeted_tree_residual_s,
+    ) = _run_targeted_profile(
+        est,
+        mlp,
+        args.budget,
+        allowed_labels=targeted_allowed_labels,
     )
-    with flops.BudgetContext(flop_budget=args.budget, quiet=True) as ctx:
-        sys.setprofile(profiler)
-        est.predict(mlp, args.budget)
-        sys.setprofile(None)
 
-    cost_by_path, ops_by_path, flops_by_path = _collect_op_costs(ctx)
-    flops_tree = _flops_tree_data(ctx)
-    _annotate_call_tree_op_times(profiler, ctx)
-    _finalize_call_tree_timed(call_root)
-    call_tree = _call_tree_data(call_root)
-    _assert_additive_call_tree(call_tree)
+    call_tree = _empty_tree_data()
     function_table = _function_table_data(call_tree)
+    ctx = targeted_ctx
+    flops_tree = _flops_tree_data_from_op_namespaces(targeted_ctx)
+    if args.unified_call_tree:
+        call_root = Node("<root>")
+        profiler = CallTreeProfiler(
+            call_root,
+            hide_flopscope=args.hide_flopscope,
+            hide_numpy=args.hide_numpy,
+        )
+        try:
+            with flops.BudgetContext(flop_budget=args.budget, quiet=True) as unified_ctx:
+                sys.setprofile(profiler)
+                est.predict(mlp, args.budget)
+        finally:
+            sys.setprofile(None)
+
+        _annotate_call_tree_op_times(profiler, unified_ctx)
+        flops_tree = _flops_tree_data(profiler, unified_ctx)
+        _finalize_call_tree_timed(call_root)
+        call_tree = _call_tree_data(call_root)
+        _assert_additive_call_tree(call_tree)
+        function_table = _function_table_data(call_tree)
+        ctx = unified_ctx
 
     print(f"MLP width={args.width} depth={args.depth} seed={args.seed} mode={args.mode or 'default'}")
-    print(f"flops={ctx.flops_used:,} ops={len(ctx.op_log):,}")
-    print(f"backend_time_s={ctx.flopscope_backend_time:.6f}")
-    print(f"overhead_time_s={ctx.flopscope_overhead_time:.6f}")
-    print(f"residual_wall_time_s={ctx.residual_wall_time:.6f}\n")
-    print("Residual namespace tree: estimator wrappers with backend+overhead subtracted")
-    _print_residual_namespace_tree(
-        root,
-        (),
-        cost_by_path,
-        ops_by_path,
-        flops_by_path,
-        ctx.residual_wall_time,
-        max_depth=args.max_depth,
-        min_ms=args.min_ms,
-        min_flops_pct=args.min_flops,
-        total_flops=ctx.flops_used,
-    )
-    print()
-    print("Call tree: estimator and non-estimator Python/C calls in the same tree")
-    print("Note: residual time subtracts call-tree work measured inside flopscope counted wrappers.")
+    print(f"flops={targeted_ctx.flops_used:,} ops={len(targeted_ctx.op_log):,}")
+    print(f"backend_time_s={targeted_ctx.flopscope_backend_time:.6f}")
+    print(f"overhead_time_s={targeted_ctx.flopscope_overhead_time:.6f}")
+    print(f"residual_wall_time_s={targeted_ctx.residual_wall_time:.6f}\n")
+    print("Targeted calls: low-overhead wrappers around selected high per-call functions")
     _print_call_tree(
-        call_tree,
-        ctx.residual_wall_time,
+        targeted_call_tree,
+        targeted_ctx.residual_wall_time,
         max_depth=args.max_depth,
         min_ms=args.min_ms,
-        min_flops_pct=args.min_flops,
-        total_flops=ctx.flops_used,
+        total_flops=targeted_ctx.flops_used,
     )
     print()
-    print("Per-function view: flat aggregation of unified call tree rows by function name")
+    print("Targeted functions: flat aggregation of targeted call rows by function name")
     _print_function_table(
-        call_tree,
-        ctx.residual_wall_time,
+        targeted_call_tree,
+        targeted_ctx.residual_wall_time,
         min_ms=args.min_ms,
-        min_flops_pct=args.min_flops,
-        total_flops=ctx.flops_used,
+        total_flops=targeted_ctx.flops_used,
     )
     print()
-    print("FLOPs tree: exact flopscope op log by namespace and op")
+    if args.unified_call_tree:
+        print("Call tree: estimator and non-estimator Python/C calls in the same tree")
+        print("Note: residual time subtracts call-tree work measured inside flopscope counted wrappers.")
+        _print_call_tree(
+            call_tree,
+            ctx.residual_wall_time,
+            max_depth=args.max_depth,
+            min_ms=args.min_ms,
+            total_flops=ctx.flops_used,
+        )
+        print()
+        print("Profiled functions: flat aggregation of unified call tree rows by function name")
+        _print_function_table(
+            call_tree,
+            ctx.residual_wall_time,
+            min_ms=args.min_ms,
+            total_flops=ctx.flops_used,
+        )
+        print()
+    print(
+        "FLOPs tree: exact flopscope op log by counted-wrapper call path and op"
+        if args.unified_call_tree
+        else "FLOPs tree: exact flopscope op log by namespace and op"
+    )
     _print_flops_tree(
         flops_tree,
         total_flops=ctx.flops_used,
@@ -1306,17 +1856,23 @@ def main() -> None:
             "depth": args.depth,
             "seed": args.seed,
             "mode": args.mode or "default",
-            "flops": ctx.flops_used,
-            "ops": len(ctx.op_log),
-            "backend_time_s": ctx.flopscope_backend_time,
-            "overhead_time_s": ctx.flopscope_overhead_time,
-            "residual_wall_time_s": ctx.residual_wall_time,
+            "flops": targeted_ctx.flops_used,
+            "ops": len(targeted_ctx.op_log),
+            "backend_time_s": targeted_ctx.flopscope_backend_time,
+            "overhead_time_s": targeted_ctx.flopscope_overhead_time,
+            "residual_wall_time_s": targeted_ctx.residual_wall_time,
+            "targeted_residual_wall_time_s": targeted_ctx.residual_wall_time,
+            "targeted_tree_residual_s": targeted_tree_residual_s,
+            "targeted_min_call_ms": args.targeted_min_call_ms,
+            "targeted_wrapped_functions": targeted_wrapped_functions,
+            "unified_call_tree": args.unified_call_tree,
             "min_ms": args.min_ms,
             "min_flops_pct": args.min_flops,
         },
-        namespace_tree=_namespace_tree_data(root, (), cost_by_path, ops_by_path, flops_by_path),
         call_tree=call_tree,
         function_table=function_table,
+        targeted_call_tree=targeted_call_tree,
+        targeted_function_table=targeted_function_table,
         flops_tree=flops_tree,
     )
     print(f"\nWrote HTML report: {args.output.resolve()}")
