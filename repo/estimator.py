@@ -1346,6 +1346,22 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
             wick_views[key] = value
         return value
 
+    wick_term_views: dict[tuple[tuple[int, ...], tuple[int, ...], int, int], fnp.ndarray] = {}
+
+    def wick_term_view(int_part: tuple[int, ...], k_vec, dim: int, count: int):
+        key = (int_part, tuple(int(k) for k in k_vec), dim, count)
+        value = wick_term_views.get(key)
+        if value is None:
+            value = None
+            for axis, (k, p) in enumerate(zip(k_vec, int_part)):
+                view = wick_view(int(k), int(p), dim, axis)
+                if value is None:
+                    value = count * view if count != 1 else view
+                else:
+                    value = value * view
+            wick_term_views[key] = value
+        return value
+
     dslice_cache = {
         (2, (1, 1)): _zero_repeated(wk[2].core),
         (2, (2,)): fnp.diag(wk[2].core),
@@ -1389,17 +1405,13 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
 
     p_slices = {}
     for int_part, terms in _terms_iso_k3_grouped_for_mode("r1"):
-        acc = 0.0
+        acc = None
         for _, vec_part, count, k_vec, dim, coef, factors in terms:
             term = eval_term(vec_part, dim, coef, factors)
             if term is None:
                 continue
-            for axis, (k, p) in enumerate(zip(k_vec, int_part)):
-                view = wick_view(int(k), int(p), dim, axis)
-                if axis == 0 and count != 1:
-                    view = count * view
-                term = term * view
-            acc = acc + term
+            term = term * wick_term_view(int_part, k_vec, dim, count)
+            acc = term if acc is None else acc + term
         p_slices[int_part] = _symmetrize(acc, vec=int_part)
 
     w1 = wick(1, 1)
@@ -1498,6 +1510,17 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
         shape[axis] = -1
         return fnp.reshape(wick(k, p), tuple(shape))
 
+    @cache
+    def wick_term_view(int_part: tuple[int, ...], k_vec: tuple[int, ...], dim: int, count: int):
+        value = None
+        for axis, (k, p) in enumerate(zip(k_vec, int_part)):
+            view = wick_view(int(k), int(p), dim, axis)
+            if value is None:
+                value = count * view if count != 1 else view
+            else:
+                value = value * view
+        return value
+
     def dslice(degree: int, part: tuple[int, ...]):
         key = (degree, part)
         if key not in dslice_cache:
@@ -1524,19 +1547,13 @@ def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> di
 
     p_slices = {}
     for int_part, terms in _terms_iso_k3_grouped_for_mode(augment_mode):
-        acc = 0.0
+        acc = None
         for _, vec_part, count, k_vec, dim, coef, factors in terms:
             term = eval_term(vec_part, dim, coef, factors)
             if term is None:
                 continue
-            first_axis = True
-            for axis, (k, p) in enumerate(zip(k_vec, int_part)):
-                view = wick_view(int(k), int(p), dim, axis)
-                if first_axis and count != 1:
-                    view = count * view
-                term = term * view
-                first_axis = False
-            acc = acc + term
+            term = term * wick_term_view(int_part, tuple(int(k) for k in k_vec), dim, count)
+            acc = term if acc is None else acc + term
         p_slices[int_part] = _symmetrize(acc, vec=int_part)
 
     w1 = wick(1, 1)

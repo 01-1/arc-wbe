@@ -573,3 +573,15 @@ that `whest package` would not include, and would not be valid for held-out
 leaderboard MLPs. The artifact, ordinary `numpy` dependency, and default-route
 hook were removed; do not treat that result as a legitimate estimator
 improvement.
+
+A small residual-time cleanup then cached the complete Wick broadcast product
+used by each grouped K=3 term. The previous loop multiplied each cached
+diagonal-slice factor by one Wick view per tensor axis, so many dense
+`term * view` operations were repeated across terms with the same
+`(int_part, k_vec, dim, count)` metadata. The nonlinear update now builds that
+broadcast product once per metadata tuple and applies a single dense multiply
+per term; it also starts grouped accumulators from the first real term instead
+of adding to scalar zero. A one-MLP cached-mini smoke under
+`RESIDUAL_WALL_TIME_MULTIPLIER=2.0` measured about `1.25e10` raw FLOPs,
+`0.092s` residual wall time, and `3.10e10` effective compute. This was a
+mechanical equivalent rewrite, not a scoring-model change.
