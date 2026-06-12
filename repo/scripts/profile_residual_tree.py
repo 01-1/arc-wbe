@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import flopscope as flops
+import flopscope._budget as flops_budget
 from whestbench import SetupContext
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -28,13 +29,26 @@ from local_engine import build_mlp
 @dataclass
 class Node:
     name: str
+    parent: "Node | None" = field(default=None, repr=False)
     wall_s: float = 0.0
     self_s: float = 0.0
+    timed_s: float = 0.0
+    timed_self_s: float = 0.0
     flops: int = 0
     ops: int = 0
     non_residual: bool = False
+    completely_inside_timer: bool = False
+    zeroed_by_timer: bool = False
     calls: int = 0
     children: dict[str, "Node"] = field(default_factory=dict)
+
+
+def _child_node(parent: Node, name: str) -> Node:
+    child = parent.children.get(name)
+    if child is None:
+        child = Node(name, parent=parent)
+        parent.children[name] = child
+    return child
 
 
 def _wrap(obj, name: str, label: str, stack: list[Node]) -> None:
@@ -49,7 +63,7 @@ def _wrap(obj, name: str, label: str, stack: list[Node]) -> None:
     @functools.wraps(fn)
     def wrapped(*args, __fn=fn, __namespace=namespace, **kwargs):
         parent = stack[-1]
-        node = parent.children.setdefault(__namespace, Node(__namespace))
+        node = _child_node(parent, __namespace)
         stack.append(node)
         start = time.perf_counter()
         try:
@@ -68,13 +82,20 @@ class CallTreeProfiler:
         self.root = root
         self.hide_flopscope = hide_flopscope
         self.hide_numpy = hide_numpy
-        self.frames: dict[object, tuple[Node, float, float, bool]] = {}
+        self.frames: dict[object, tuple[Node, float, float, bool, bool, bool]] = {}
+        self.op_nodes: dict[tuple[int, int], list[Node]] = {}
+        self.op_owners: dict[tuple[int, int], Node] = {}
+        self.active_op_timers: list[tuple[int, int]] = []
+        self.active_counted_wrappers: list[Node] = []
+        self.active_c_calls: dict[object, list[tuple[object, Node]]] = defaultdict(list)
 
     def __call__(self, frame, event, arg):
         if event == "call":
             parent_frame = frame.f_back
-            if parent_frame in self.frames:
-                parent, _, _, _ = self.frames[parent_frame]
+            if parent_frame in self.active_c_calls and self.active_c_calls[parent_frame]:
+                _, parent = self.active_c_calls[parent_frame][-1]
+            elif parent_frame in self.frames:
+                parent, _, _, _, _, _ = self.frames[parent_frame]
             else:
                 parent = self.root
 
@@ -83,31 +104,80 @@ class CallTreeProfiler:
             if skip:
                 node = parent
             else:
-                node = parent.children.setdefault(name, Node(name))
+                node = _child_node(parent, name)
                 node.non_residual = parent.non_residual or self._non_residual_frame(frame)
                 node.calls += 1
 
             now = time.perf_counter()
-            self.frames[frame] = (node, now, 0.0, skip)
+            is_counted_wrapper = self._is_counted_wrapper_frame(frame)
+            self.frames[frame] = (
+                node,
+                now,
+                0.0,
+                skip,
+                bool(self.active_counted_wrappers),
+                is_counted_wrapper,
+            )
+            if is_counted_wrapper and not skip:
+                self.active_counted_wrappers.append(node)
             return self
 
         if event == "return":
             entry = self.frames.pop(frame, None)
             if entry is None:
                 return self
-            node, start, child_s, skip = entry
+            node, start, child_s, skip, started_inside_wrapper, is_counted_wrapper = entry
             elapsed = time.perf_counter() - start
+            own_elapsed = max(0.0, elapsed - child_s)
+            if not is_counted_wrapper:
+                self._assert_counted_wrapper_boundary(node, started_inside_wrapper)
             if not skip:
+                node.completely_inside_timer = (
+                    node.completely_inside_timer or started_inside_wrapper
+                )
                 node.wall_s += elapsed
-                node.self_s += max(0.0, elapsed - child_s)
+                node.self_s += own_elapsed
+            self._record_deduct_stack(frame, arg, node, skip)
+            self._update_active_op_timer(frame, arg)
+            if is_counted_wrapper and not skip:
+                if not self.active_counted_wrappers or self.active_counted_wrappers[-1] is not node:
+                    raise AssertionError(f"counted wrapper stack mismatch at {node.name}")
+                self.active_counted_wrappers.pop()
             parent_frame = frame.f_back
-            if parent_frame in self.frames:
-                parent_node, parent_start, parent_child_s, parent_skip = self.frames[parent_frame]
+            if parent_frame in self.active_c_calls and self.active_c_calls[parent_frame]:
+                parent_key, _ = self.active_c_calls[parent_frame][-1]
+                (
+                    parent_node,
+                    parent_start,
+                    parent_child_s,
+                    parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
+                ) = self.frames[parent_key]
+                self.frames[parent_key] = (
+                    parent_node,
+                    parent_start,
+                    parent_child_s + elapsed,
+                    parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
+                )
+            elif parent_frame in self.frames:
+                (
+                    parent_node,
+                    parent_start,
+                    parent_child_s,
+                    parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
+                ) = self.frames[parent_frame]
                 self.frames[parent_frame] = (
                     parent_node,
                     parent_start,
                     parent_child_s + elapsed,
                     parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
                 )
             return self
 
@@ -115,39 +185,132 @@ class CallTreeProfiler:
             parent_frame = frame
             if parent_frame not in self.frames:
                 return self
-            parent, _, _, _ = self.frames[parent_frame]
+            parent, _, _, _, _, _ = self.frames[parent_frame]
             name = self._c_name(arg)
             skip = self._skip_c_call(arg)
             if skip:
                 node = parent
             else:
-                node = parent.children.setdefault(name, Node(name))
+                node = _child_node(parent, name)
                 node.non_residual = parent.non_residual or self._non_residual_c_call(arg)
                 node.calls += 1
             now = time.perf_counter()
-            self.frames[(frame, arg)] = (node, now, 0.0, skip)
+            key = (frame, arg)
+            self.frames[key] = (
+                node,
+                now,
+                0.0,
+                skip,
+                bool(self.active_counted_wrappers),
+                False,
+            )
+            self.active_c_calls[frame].append((key, node))
             return self
 
         if event == "c_return" or event == "c_exception":
             entry = self.frames.pop((frame, arg), None)
             if entry is None:
                 return self
-            node, start, child_s, skip = entry
+            node, start, child_s, skip, started_inside_wrapper, _ = entry
+            active_c_calls = self.active_c_calls.get(frame)
+            if active_c_calls:
+                active_c_calls.pop()
+                if not active_c_calls:
+                    self.active_c_calls.pop(frame, None)
             elapsed = time.perf_counter() - start
+            own_elapsed = max(0.0, elapsed - child_s)
+            self._assert_counted_wrapper_boundary(node, started_inside_wrapper)
             if not skip:
+                node.completely_inside_timer = (
+                    node.completely_inside_timer or started_inside_wrapper
+                )
                 node.wall_s += elapsed
-                node.self_s += max(0.0, elapsed - child_s)
+                node.self_s += own_elapsed
             if frame in self.frames:
-                parent_node, parent_start, parent_child_s, parent_skip = self.frames[frame]
+                (
+                    parent_node,
+                    parent_start,
+                    parent_child_s,
+                    parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
+                ) = self.frames[frame]
                 self.frames[frame] = (
                     parent_node,
                     parent_start,
                     parent_child_s + elapsed,
                     parent_skip,
+                    parent_started_inside,
+                    parent_is_counted_wrapper,
                 )
             return self
 
         return self
+
+    def _record_deduct_stack(self, frame, return_value, node: Node, skip: bool) -> None:
+        if frame.f_code.co_name != "deduct":
+            return
+        if not frame.f_code.co_filename.endswith("/flopscope/_budget.py"):
+            return
+        budget = getattr(return_value, "_budget", None)
+        op_index = getattr(return_value, "_op_index", None)
+        if budget is None or op_index is None:
+            return
+        nodes = []
+        seen = set()
+        if not skip:
+            nodes.append(node)
+            seen.add(id(node))
+        for active_node, _, _, active_skip, _, _ in self.frames.values():
+            if active_skip or id(active_node) in seen:
+                continue
+            nodes.append(active_node)
+            seen.add(id(active_node))
+        self.op_nodes[(id(budget), int(op_index))] = nodes
+        if self.active_counted_wrappers:
+            self.op_owners[(id(budget), int(op_index))] = self.active_counted_wrappers[-1]
+
+    def _update_active_op_timer(self, frame, return_value) -> None:
+        if not frame.f_code.co_filename.endswith("/flopscope/_budget.py"):
+            return
+        if frame.f_code.co_name == "__enter__":
+            budget = getattr(return_value, "_budget", None)
+            op_index = getattr(return_value, "_op_index", None)
+            if budget is not None and op_index is not None:
+                self.active_op_timers.append((id(budget), int(op_index)))
+            return
+        if frame.f_code.co_name == "__exit__":
+            timer = frame.f_locals.get("self")
+            budget = getattr(timer, "_budget", None)
+            op_index = getattr(timer, "_op_index", None)
+            key = None if budget is None or op_index is None else (id(budget), int(op_index))
+            if key in self.active_op_timers:
+                self.active_op_timers.remove(key)
+            elif self.active_op_timers:
+                self.active_op_timers.pop()
+
+    def _record_timed_self(self, node: Node, elapsed_s: float) -> None:
+        if elapsed_s <= 0.0:
+            return
+        node.timed_self_s += elapsed_s
+        node.timed_s += elapsed_s
+        cur = node.parent
+        while cur is not None:
+            cur.timed_s += elapsed_s
+            cur = cur.parent
+
+    def _assert_counted_wrapper_boundary(self, node: Node, started_inside_wrapper: bool) -> None:
+        ended_inside_wrapper = bool(self.active_counted_wrappers)
+        if started_inside_wrapper != ended_inside_wrapper:
+            raise AssertionError(
+                f"counted-wrapper boundary crossed by {node.name}: "
+                f"started_inside_wrapper={started_inside_wrapper}, "
+                f"ended_inside_wrapper={ended_inside_wrapper}"
+            )
+
+    @staticmethod
+    def _is_counted_wrapper_frame(frame) -> bool:
+        return frame.f_code is flops_budget._WRAPPED_CO
 
     def _skip_frame(self, frame) -> bool:
         filename = frame.f_code.co_filename
@@ -300,7 +463,7 @@ def _print_residual_namespace_tree(
         if (
             node.name != "<root>"
             and child_residual * 1000.0 < min_ms
-            and child_flops_pct < min_flops_pct
+            and (min_flops_pct <= 0 or child_flops_pct < min_flops_pct)
         ):
             continue
         _print_residual_namespace_tree(
@@ -323,47 +486,51 @@ def _subtree_residual(node: Node, path: tuple[str, ...], cost_by_path) -> float:
     return node.wall_s - cost_by_path[path]
 
 
+def _op_timed_s(op) -> float:
+    return float(getattr(op, "flopscope_backend_duration_s", 0.0) or 0.0) + float(
+        getattr(op, "flopscope_overhead_duration_s", 0.0) or 0.0
+    )
+
+
 def _print_call_tree(
-    node: Node,
+    node: dict[str, object],
     total_wall_s: float,
-    residual_scale: float = 1.0,
     depth: int = 0,
     max_depth: int = 8,
     min_ms: float = 0.15,
     min_flops_pct: float = 0.0,
     total_flops: int = 0,
 ) -> float:
-    children = list(node.children.values())
-    child_residual_s = sum(_call_node_residual(child, residual_scale) for child in children)
-    own_residual_s = 0.0 if node.non_residual else max(0.0, node.self_s) * residual_scale
-    residual_s = own_residual_s + child_residual_s
-    if node.name != "<root>":
+    children = list(node["children"])
+    residual_s = float(node["inclusive_s"])
+    own_residual_s = float(node["exclusive_s"])
+    if node["name"] != "<root>":
         pct = 100.0 * residual_s / max(total_wall_s, 1e-12)
         self_pct = 100.0 * own_residual_s / max(total_wall_s, 1e-12)
         print(
-            f"{'  ' * depth}{node.name} "
-            f"calls={node.calls} "
+            f"{'  ' * depth}{node['name']} "
+            f"calls={node['calls']} "
             f"resid={residual_s * 1000.0:.2f}ms ({pct:.1f}%) "
             f"self={own_residual_s * 1000.0:.2f}ms ({self_pct:.1f}%) "
-            f"flops={_call_node_flops(node):,}"
+            f"timed={float(node['timed_s']) * 1000.0:.2f}ms "
+            f"flops={int(node['flops']):,}"
         )
 
     if depth >= max_depth:
         return residual_s
 
-    child_depth = depth if node.name == "<root>" else depth + 1
-    for child in sorted(children, key=lambda item: _call_node_residual(item, residual_scale), reverse=True):
-        child_flops_pct = 100.0 * _call_node_flops(child) / max(total_flops, 1)
+    child_depth = depth if node["name"] == "<root>" else depth + 1
+    for child in sorted(children, key=lambda item: item["inclusive_s"], reverse=True):
+        child_flops_pct = 100.0 * int(child["flops"]) / max(total_flops, 1)
         if (
-            node.name != "<root>"
-            and _call_node_residual(child, residual_scale) * 1000.0 < min_ms
-            and child_flops_pct < min_flops_pct
+            node["name"] != "<root>"
+            and float(child["inclusive_s"]) * 1000.0 < min_ms
+            and (min_flops_pct <= 0 or child_flops_pct < min_flops_pct)
         ):
             continue
         _print_call_tree(
             child,
             total_wall_s,
-            residual_scale,
             child_depth,
             max_depth,
             min_ms,
@@ -373,16 +540,89 @@ def _print_call_tree(
     return residual_s
 
 
-def _call_node_residual(node: Node, residual_scale: float = 1.0) -> float:
-    if node.non_residual:
+def _print_function_table(
+    node: dict[str, object],
+    total_wall_s: float,
+    *,
+    max_rows: int = 80,
+    min_ms: float = 0.15,
+    min_flops_pct: float = 0.0,
+    total_flops: int = 0,
+) -> None:
+    rows = _function_table_data(node)["children"]
+    shown = 0
+    for row in rows:
+        residual_s = float(row["inclusive_s"])
+        own_residual_s = float(row["exclusive_s"])
+        flops_pct = 100.0 * int(row["flops"]) / max(total_flops, 1)
+        if residual_s * 1000.0 < min_ms and (min_flops_pct <= 0 or flops_pct < min_flops_pct):
+            continue
+        pct = 100.0 * residual_s / max(total_wall_s, 1e-12)
+        self_pct = 100.0 * own_residual_s / max(total_wall_s, 1e-12)
+        print(
+            f"{row['name']} "
+            f"calls={row['calls']} "
+            f"resid={residual_s * 1000.0:.2f}ms ({pct:.1f}%) "
+            f"self={own_residual_s * 1000.0:.2f}ms ({self_pct:.1f}%) "
+            f"timed={float(row['timed_s']) * 1000.0:.2f}ms "
+            f"flops={int(row['flops']):,}"
+        )
+        shown += 1
+        if shown >= max_rows:
+            break
+
+
+def _zero_call_subtree(node: Node) -> bool:
+    return node.completely_inside_timer or node.zeroed_by_timer
+
+
+def _call_node_residual(node: Node, residual_scale: float = 1.0, zeroed: bool = False) -> float:
+    if zeroed or _zero_call_subtree(node):
         return 0.0
-    return (0.0 if node.non_residual else max(0.0, node.self_s) * residual_scale) + sum(
-        _call_node_residual(child, residual_scale) for child in node.children.values()
-    )
+    return (node.wall_s - node.timed_s) * residual_scale
 
 
 def _call_node_flops(node: Node) -> int:
-    return node.flops + sum(_call_node_flops(child) for child in node.children.values())
+    if node.flops:
+        return node.flops
+    return sum(_call_node_flops(child) for child in node.children.values())
+
+
+def _annotate_call_tree_op_times(profiler: CallTreeProfiler, ctx) -> None:
+    budget_id = id(ctx)
+    missing_owners = []
+    for op_index, op in enumerate(ctx.op_log):
+        nodes = profiler.op_nodes.get((budget_id, op_index))
+        if not nodes:
+            continue
+        owner = profiler.op_owners.get((budget_id, op_index))
+        if owner is None:
+            missing_owners.append((op_index, op.op_name, op.namespace))
+            continue
+        op_time_s = _op_timed_s(op)
+        owner.timed_s += op_time_s
+        flops_count = int(getattr(op, "flop_cost", 0) or 0)
+        for cur in nodes:
+            cur.flops += flops_count
+            cur.ops += 1
+    if missing_owners:
+        preview = ", ".join(
+            f"#{op_index} {op_name} namespace={namespace!r}"
+            for op_index, op_name, namespace in missing_owners[:10]
+        )
+        suffix = "" if len(missing_owners) <= 10 else f", ... {len(missing_owners)} total"
+        raise AssertionError(f"ops without counted-wrapper owner: {preview}{suffix}")
+
+
+def _finalize_call_tree_timed(node: Node) -> float:
+    child_timed_s = sum(_finalize_call_tree_timed(child) for child in node.children.values())
+    if _zero_call_subtree(node):
+        node.timed_s = node.wall_s
+        node.timed_self_s = node.self_s
+        return node.timed_s
+    node.timed_s = max(node.timed_s, child_timed_s)
+    node.timed_self_s = node.timed_s - child_timed_s
+    return node.timed_s
 
 
 def _print_flops_tree(
@@ -440,23 +680,94 @@ def _namespace_tree_data(node: Node, path: tuple[str, ...], cost_by_path, ops_by
     }
 
 
-def _call_tree_data(node: Node, residual_scale: float = 1.0):
-    children = [_call_tree_data(child, residual_scale) for child in node.children.values()]
-    child_residual_s = 0.0 if node.non_residual else sum(child["inclusive_s"] for child in children)
-    own_residual_s = 0.0 if node.non_residual else max(0.0, node.self_s) * residual_scale
-    inclusive_s = 0.0 if node.non_residual else own_residual_s + child_residual_s
+def _call_tree_data(node: Node, residual_scale: float = 1.0, zeroed: bool = False):
+    zeroed = zeroed or _zero_call_subtree(node)
+    children = [_call_tree_data(child, residual_scale, zeroed) for child in node.children.values()]
+    inclusive_s = _call_node_residual(node, residual_scale, zeroed)
+    own_residual_s = 0.0 if zeroed else (node.self_s - node.timed_self_s) * residual_scale
     return {
         "name": node.name,
         "calls": node.calls,
         "wall_s": node.wall_s,
         "self_s": node.self_s,
+        "timed_s": node.timed_s,
+        "timed_self_s": node.timed_self_s,
         "inclusive_s": inclusive_s,
         "exclusive_s": own_residual_s,
-        "ops": 0,
-        "flops": 0,
+        "ops": node.ops if node.ops else sum(child["ops"] for child in children),
+        "flops": node.flops if node.flops else sum(child["flops"] for child in children),
         "non_residual": node.non_residual,
         "children": sorted(children, key=lambda child: child["inclusive_s"], reverse=True),
     }
+
+
+def _function_table_data(call_tree: dict[str, object]) -> dict[str, object]:
+    rows: dict[str, dict[str, object]] = {}
+
+    def visit(node: dict[str, object]) -> None:
+        name = str(node["name"])
+        if name != "<root>":
+            row = rows.get(name)
+            if row is None:
+                row = {
+                    "name": name,
+                    "calls": 0,
+                    "wall_s": 0.0,
+                    "self_s": 0.0,
+                    "timed_s": 0.0,
+                    "timed_self_s": 0.0,
+                    "inclusive_s": 0.0,
+                    "exclusive_s": 0.0,
+                    "ops": 0,
+                    "flops": 0,
+                    "children": [],
+                }
+                rows[name] = row
+            row["calls"] = int(row["calls"]) + int(node["calls"])
+            row["wall_s"] = float(row["wall_s"]) + float(node["wall_s"])
+            row["self_s"] = float(row["self_s"]) + float(node["self_s"])
+            row["timed_s"] = float(row["timed_s"]) + float(node["timed_s"])
+            row["timed_self_s"] = float(row["timed_self_s"]) + float(node["timed_self_s"])
+            row["inclusive_s"] = float(row["inclusive_s"]) + float(node["inclusive_s"])
+            row["exclusive_s"] = float(row["exclusive_s"]) + float(node["exclusive_s"])
+            row["ops"] = int(row["ops"]) + int(node["ops"])
+            row["flops"] = int(row["flops"]) + int(node["flops"])
+        for child in node["children"]:
+            visit(child)
+
+    visit(call_tree)
+    return {
+        "name": "<root>",
+        "calls": sum(int(row["calls"]) for row in rows.values()),
+        "wall_s": sum(float(row["wall_s"]) for row in rows.values()),
+        "self_s": sum(float(row["self_s"]) for row in rows.values()),
+        "timed_s": sum(float(row["timed_s"]) for row in rows.values()),
+        "timed_self_s": sum(float(row["timed_self_s"]) for row in rows.values()),
+        "inclusive_s": sum(float(row["inclusive_s"]) for row in rows.values()),
+        "exclusive_s": sum(float(row["exclusive_s"]) for row in rows.values()),
+        "ops": sum(int(row["ops"]) for row in rows.values()),
+        "flops": sum(int(row["flops"]) for row in rows.values()),
+        "children": sorted(
+            rows.values(),
+            key=lambda row: (float(row["exclusive_s"]), float(row["inclusive_s"])),
+            reverse=True,
+        ),
+    }
+
+
+def _assert_additive_call_tree(node: dict[str, object], tolerance_s: float = 1e-5) -> None:
+    children = node["children"]
+    for child in children:
+        _assert_additive_call_tree(child, tolerance_s)
+    expected = float(node["exclusive_s"]) + sum(float(child["inclusive_s"]) for child in children)
+    actual = float(node["inclusive_s"])
+    if node["name"] == "<root>":
+        return
+    if abs(actual - expected) > tolerance_s:
+        raise AssertionError(
+            f"non-additive call tree at {node['name']}: "
+            f"inclusive={actual:.12f}, exclusive+children={expected:.12f}"
+        )
 
 
 def _empty_flops_tree_node(name: str) -> dict[str, object]:
@@ -537,6 +848,7 @@ def _write_html_report(
     metadata: dict[str, object],
     namespace_tree: dict[str, object],
     call_tree: dict[str, object],
+    function_table: dict[str, object],
     flops_tree: dict[str, object],
 ) -> None:
     payload = json.dumps(
@@ -544,6 +856,7 @@ def _write_html_report(
             "metadata": metadata,
             "namespaceTree": namespace_tree,
             "callTree": call_tree,
+            "functionTable": function_table,
             "flopsTree": flops_tree,
         }
     )
@@ -681,15 +994,20 @@ input {{ min-width: 260px; }}
   align-items: center;
 }}
 .bar {{
+  position: relative;
   height: 8px;
-  border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   overflow: hidden;
 }}
 .fill {{
+  position: absolute;
+  inset: 0 auto 0 0;
   display: block;
   height: 100%;
   background: var(--accent);
+}}
+.fill.exclusive {{
+  background: var(--accent-2);
 }}
 .fill.flops {{
   background: var(--accent-2);
@@ -707,21 +1025,28 @@ code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 <main>
   <div class="controls">
     <input id="filter" placeholder="Filter function names">
-    <label class="muted">Min ms <input id="minMs" type="number" min="0" step="0.1" value="0.5"></label>
-    <label class="muted">Min FLOPs % <input id="minFlops" type="number" min="0" step="0.1" value="0"></label>
+    <label class="muted">Min ms <input id="minMs" type="number" min="0" step="0.1"></label>
+    <label class="muted">Min FLOPs % <input id="minFlops" type="number" min="0" step="0.1"></label>
     <button id="expand">Expand All</button>
     <button id="collapse">Collapse All</button>
   </div>
   <div class="tabs">
     <button class="tab" data-view="namespace" aria-selected="true">Residual Namespace Tree</button>
     <button class="tab" data-view="call" aria-selected="false">Unified Call Tree</button>
+    <button class="tab" data-view="functions" aria-selected="false">Per-Function View</button>
     <button class="tab" data-view="flops" aria-selected="false">Full FLOPs Tree</button>
   </div>
   <div class="tree" id="tree"></div>
 </main>
 <script>
 const data = {payload};
-const state = {{ view: "namespace", collapsed: new Set(), filter: "", minMs: 0.5, minFlops: 0 }};
+const state = {{
+  view: "namespace",
+  collapsed: new Set(),
+  filter: "",
+  minMs: Number(data.metadata.min_ms || 0),
+  minFlops: Number(data.metadata.min_flops_pct || 0)
+}};
 
 function fmtMs(seconds) {{ return `${{(seconds * 1000).toFixed(2)}}ms`; }}
 function fmtInt(value) {{ return Math.round(value).toLocaleString(); }}
@@ -729,8 +1054,10 @@ function pct(value, total) {{ return total > 0 ? 100 * value / total : 0; }}
 function metric(node) {{ return node.inclusive_s || 0; }}
 function flopMetric(node) {{ return node.flops || 0; }}
 function isFlopsView() {{ return state.view === "flops"; }}
+function isFunctionView() {{ return state.view === "functions"; }}
 function rootForView() {{
   if (state.view === "namespace") return data.namespaceTree;
+  if (state.view === "functions") return data.functionTable;
   if (state.view === "flops") return data.flopsTree;
   return data.callTree;
 }}
@@ -740,7 +1067,7 @@ function totalForView() {{
 function rowVisible(node) {{
   const flopPct = pct(flopMetric(node), data.metadata.flops);
   const timeOk = !isFlopsView() && metric(node) * 1000 >= state.minMs;
-  const flopsOk = flopPct >= state.minFlops;
+  const flopsOk = state.minFlops > 0 && flopPct >= state.minFlops;
   const minOk = node.name === "<root>" || timeOk || flopsOk;
   const filterOk = !state.filter || node.name.toLowerCase().includes(state.filter);
   if (minOk && filterOk) return true;
@@ -772,7 +1099,7 @@ function render() {{
   scan(root);
   const countTitle = isFlopsView() ? "Ops" : "Calls";
   const firstMetricTitle = isFlopsView() ? "Scope Time" : "Residual";
-  const secondMetricTitle = state.view === "namespace" ? "Exclusive" : "Self";
+  const secondMetricTitle = isFlopsView() ? "Self" : "Exclusive";
   const rows = [`<div class="row header">
     <div>Function</div><div>${{countTitle}}</div><div>${{firstMetricTitle}}</div><div>${{secondMetricTitle}}</div><div>FLOPs</div><div>Ops</div>
   </div>`];
@@ -780,26 +1107,28 @@ function render() {{
     if (node.name !== "<root>") {{
       if (!rowVisible(node)) return;
       const id = path.join("/");
-      const hasChildren = node.children.some(rowVisible);
-      const collapsed = state.collapsed.has(id);
+      const hasChildren = !isFunctionView() && node.children.some(rowVisible);
+      const collapsed = !isFunctionView() && state.collapsed.has(id);
       const value = metric(node);
-      const selfValue = state.view === "namespace" ? node.exclusive_s : node.self_s;
+      const selfValue = isFlopsView() ? node.self_s : node.exclusive_s;
       const timeLabel = isFlopsView() && value === 0 ? "" : fmtMs(value);
       const selfLabel = isFlopsView() && selfValue === 0 ? "" : fmtMs(selfValue);
+      const residualWidth = Math.min(100, pct(value, maxVisible));
+      const exclusiveWidth = isFlopsView() ? 0 : Math.min(residualWidth, pct(Math.max(0, selfValue), maxVisible));
       rows.push(`<div class="row" data-path="${{htmlEscape(id)}}">
         <div class="name" style="padding-left:${{depth * 18}}px">
           ${{hasChildren ? `<button class="twisty" data-toggle="${{htmlEscape(id)}}">${{collapsed ? "▸" : "▾"}}</button>` : `<span class="twisty"></span>`}}
           <span class="name-text" title="${{htmlEscape(node.name)}}">${{htmlEscape(node.name)}}</span>
         </div>
         <div>${{fmtInt(node.calls)}}</div>
-        <div class="barcell"><span>${{timeLabel}}</span><span class="bar"><span class="fill" style="width:${{Math.min(100, pct(value, maxVisible))}}%"></span></span></div>
+        <div class="barcell"><span>${{timeLabel}}</span><span class="bar"><span class="fill" style="width:${{residualWidth}}%"></span>${{exclusiveWidth > 0 ? `<span class="fill exclusive" style="width:${{exclusiveWidth}}%"></span>` : ""}}</span></div>
         <div>${{selfLabel}}</div>
         <div class="barcell"><span>${{node.flops ? fmtInt(node.flops) : ""}}</span><span class="bar"><span class="fill flops" style="width:${{Math.min(100, pct(flopMetric(node), maxVisibleFlops))}}%"></span></span></div>
         <div>${{node.ops ? fmtInt(node.ops) : ""}}</div>
       </div>`);
       if (collapsed) return;
     }}
-    for (const child of node.children) walk(child, node.name === "<root>" ? depth : depth + 1, [...path, child.name]);
+    for (const child of node.children) walk(child, isFunctionView() || node.name === "<root>" ? depth : depth + 1, [...path, child.name]);
   }}
   walk(root, 0, []);
   tree.innerHTML = rows.join("");
@@ -846,6 +1175,8 @@ for (const tab of document.querySelectorAll(".tab")) {{
   }});
 }}
 renderMeta();
+document.getElementById("minMs").value = state.minMs;
+document.getElementById("minFlops").value = state.minFlops;
 render();
 </script>
 </body>
@@ -863,11 +1194,11 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=68_000_000_000)
     parser.add_argument("--mode", default="")
     parser.add_argument("--max-depth", type=int, default=8)
-    parser.add_argument("--min-ms", type=float, default=0.15)
+    parser.add_argument("--min-ms", type=float, default=5.0)
     parser.add_argument(
         "--min-flops",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Minimum FLOP percentage of total run FLOPs for a row to be shown.",
     )
     parser.add_argument("--hide-flopscope", action="store_true")
@@ -915,6 +1246,11 @@ def main() -> None:
 
     cost_by_path, ops_by_path, flops_by_path = _collect_op_costs(ctx)
     flops_tree = _flops_tree_data(ctx)
+    _annotate_call_tree_op_times(profiler, ctx)
+    _finalize_call_tree_timed(call_root)
+    call_tree = _call_tree_data(call_root)
+    _assert_additive_call_tree(call_tree)
+    function_table = _function_table_data(call_tree)
 
     print(f"MLP width={args.width} depth={args.depth} seed={args.seed} mode={args.mode or 'default'}")
     print(f"flops={ctx.flops_used:,} ops={len(ctx.op_log):,}")
@@ -936,11 +1272,20 @@ def main() -> None:
     )
     print()
     print("Call tree: estimator and non-estimator Python/C calls in the same tree")
-    print("Note: this is residual time; flopscope and NumPy subtrees are visible but have zero residual.")
+    print("Note: residual time subtracts call-tree work measured inside flopscope counted wrappers.")
     _print_call_tree(
-        call_root,
+        call_tree,
         ctx.residual_wall_time,
         max_depth=args.max_depth,
+        min_ms=args.min_ms,
+        min_flops_pct=args.min_flops,
+        total_flops=ctx.flops_used,
+    )
+    print()
+    print("Per-function view: flat aggregation of unified call tree rows by function name")
+    _print_function_table(
+        call_tree,
+        ctx.residual_wall_time,
         min_ms=args.min_ms,
         min_flops_pct=args.min_flops,
         total_flops=ctx.flops_used,
@@ -966,9 +1311,12 @@ def main() -> None:
             "backend_time_s": ctx.flopscope_backend_time,
             "overhead_time_s": ctx.flopscope_overhead_time,
             "residual_wall_time_s": ctx.residual_wall_time,
+            "min_ms": args.min_ms,
+            "min_flops_pct": args.min_flops,
         },
         namespace_tree=_namespace_tree_data(root, (), cost_by_path, ops_by_path, flops_by_path),
-        call_tree=_call_tree_data(call_root),
+        call_tree=call_tree,
+        function_table=function_table,
         flops_tree=flops_tree,
     )
     print(f"\nWrote HTML report: {args.output.resolve()}")
