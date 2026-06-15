@@ -1,11 +1,14 @@
-.PHONY: demo-cast install test lint help mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local full e v local
+.PHONY: demo-cast install test lint help mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs full e v local
 
 UV := UV_CACHE_DIR=/i/e/.uv-cache uv
 MINI_DATASET := hf://aicrowd/arc-whestbench-public-2026
 MINI_MLPS ?= 5
+PAIRS ?= 100
 BUDGET ?= 68000000000
 WALL_TIME ?= 60
 RESIDUAL_WALL_TIME_MULTIPLIER ?= 2.0
+OLD_ESTIMATOR ?= /tmp/estimator_old.py
+NEW_ESTIMATOR ?= estimator.py
 WHEST := $(UV) run python scripts/whest_with_residual_multiplier.py --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) --
 MIN_CALL_MS ?= 0
 
@@ -45,6 +48,14 @@ mini-aug-local:
 mini-mixed-local:
 	$(MAKE) mini-local-mode MODE=last4_r1_slices_k211 BUDGET=1000000000000000 MINI_MLPS=$(MINI_MLPS) WALL_TIME=240
 
+compare-residual-pairs:
+	$(UV) run python scripts/compare_residual_pairs.py \
+   --old $(OLD_ESTIMATOR) --new $(NEW_ESTIMATOR) \
+   --pairs $(PAIRS) --n-mlps $(MINI_MLPS) \
+   --dataset $(MINI_DATASET) --flop-budget $(BUDGET) \
+   --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER)
+
 p:
 	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --targeted-min-call-ms $(MIN_CALL_MS)
 
@@ -78,6 +89,7 @@ help:
 	@echo "  lint        run ruff check"
 	@echo "  mini        cached mini split with residual multiplier ($(RESIDUAL_WALL_TIME_MULTIPLIER)x)"
 	@echo "  mini-mode   cached mini split with MODE=<mode>"
+	@echo "  compare-residual-pairs  paired old/new residual benchmark"
 	@echo "  demo-cast   record asciinema cast for README opener"
 
 install:
