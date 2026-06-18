@@ -9,10 +9,10 @@ Stage 2 confirms the contract. Stage 3 runs the **real scoring pipeline** (the s
 ## 🚀 Run it
 
 ```bash
-uv run whest run --estimator estimator.py --dataset hf://aicrowd/arc-whestbench-public-2026 --split mini --runner local
+uv run whest run --estimator estimator.py --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1 --split mini --runner local
 ```
 
-`--split mini` selects the 100-MLP Mini split (it's the default split, so you can omit `--split`); `local` is the default runner, so you can omit `--runner local` too. Ground truth is precomputed at N=1e9, so there's no sampling step — after the first download (~250 MB, cached) it scores in seconds. The FLOP budget is `6.8e10` (68B) and the MLP shape is the competition size (width=256, depth=8). *(Omit `--dataset` and `whest run` instead generates a fresh random 10-MLP suite on the fly, computing ground truth with 2,560,000 Monte-Carlo samples — slower and not reproducible. Fine for a quick `pdb` poke; use the Mini split for real scoring.)*
+`--split mini` selects the 100-MLP Mini split (it's the default split, so you can omit `--split`); `local` is the default runner, so you can omit `--runner local` too. Ground truth is precomputed at N=1e9, so there's no sampling step — after the first download (~250 MB, cached) it scores in seconds. The FLOP budget is `2.72e11` (272B) and the MLP shape is the competition size (width=256, depth=32 — the `v1-warmup` round used 256×8 at a `6.8e10` budget). *(Omit `--dataset` and `whest run` instead generates a fresh random 10-MLP suite on the fly, computing ground truth with 2,560,000 Monte-Carlo samples — slower and not reproducible. Fine for a quick `pdb` poke; use the Mini split for real scoring.)*
 
 You'll see a Rich-rendered report with five panels:
 
@@ -42,13 +42,13 @@ With the zeros template, the **raw** MSE rows (`final_layer_mse` ≈ 0.83, `all_
 
 ## FLOP-budget callout: Stage 1 vs Stage 3
 
-Stage 1's `local_engine.compare_against_monte_carlo` runs your `predict()` under `estimator_budget=1e9`. Stage 3's `whest run` uses the grader default `flop_budget=6.8e10` — about **68× larger**. So Stage 1 is the *tighter* budget here: if your estimator fits in Stage 1, it has ample headroom at the grader budget, and budget exhaustion is unlikely to be why a Stage-1-good estimator scores differently in Stage 3.
+Stage 1's `local_engine.compare_against_monte_carlo` runs your `predict()` under `estimator_budget=4e9` (the `v1-warmup` round used `1e9`; scaled 4× with the deeper MLPs). Stage 3's `whest run` uses the phase-1 grader default `flop_budget=2.72e11` — about **68× larger**. So Stage 1 is the *tighter* budget here: if your estimator fits in Stage 1, it has ample headroom at the grader budget, and budget exhaustion is unlikely to be why a Stage-1-good estimator scores differently in Stage 3.
 
 ## Why a different score than Stage 1?
 
-Both stages use the same MLP shape (width=256, depth=8). The numbers still differ because:
+Both stages use the same MLP shape (width=256, depth=32). The numbers still differ because:
 
-- **Stage 1** scores your estimator against **one fixed MLP** (`build_mlp(width=256, depth=8, seed=0)`) and prints **raw MSE** as Monte-Carlo ground truth converges (10 → 100,000 samples).
+- **Stage 1** scores your estimator against **one fixed MLP** (`build_mlp(width=256, depth=32, seed=0)`) and prints **raw MSE** as Monte-Carlo ground truth converges (10 → 100,000 samples).
 - **Stage 3** scores the **100 MLPs of the public Mini split** against their baked N=1e9 ground truth, and reports the **budget-adjusted `adjusted_final_layer_score`** averaged across the suite — not raw MSE.
 
 So Stage 3's headline number is averaged over 100 MLPs *and* scaled by the compute multiplier; expect it to differ from the single-MLP raw MSE you saw in Stage 1.
@@ -67,14 +67,14 @@ def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
 
 | Estimator | Typical raw `final_layer_mse` (public Mini split, 100 MLPs) |
 |---|---|
-| Zeros template | ~0.83 (the all-zeros accuracy floor) |
-| `02_mean_propagation` | ~7.5e-04 |
-| `03_covariance_propagation` | ~3.7e-05 |
+| Zeros template | ~0.91 (the all-zeros accuracy floor) |
+| `02_mean_propagation` | ~9.5e-04 |
+| `03_covariance_propagation` | ~8.4e-05 |
 
 These are the **raw** final-layer MSEs (the accuracy signal). Your leaderboard `adjusted_final_layer_score` scales each by the compute multiplier `max(0.1, C_m / flop_budget)` — and since these all use <1% of the budget, the ranked number is exactly one-tenth of the value shown (the 0.1 floor).
 
 (Same ballpark as the Stage 1 table because the math and shape are the same
-(width=256, depth=8); they differ because Stage 3 scores the 100 fixed Mini MLPs
+(width=256, depth=32); they differ because Stage 3 scores the 100 fixed Mini MLPs
 against baked ground truth, while Stage 1 scores one fixed MLP with on-the-fly
 Monte Carlo.) Full benchmark methodology in
 [scoring-model.md](../concepts/scoring-model.md#example-estimator-benchmarks).

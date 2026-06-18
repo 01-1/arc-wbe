@@ -29,7 +29,7 @@ Run against the published evaluation dataset on HuggingFace (skips sampling — 
 ```bash
 whest run \
     --estimator estimator.py \
-    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-warmup
+    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1
 # auto-resolves to the `mini` split (100 MLPs, ~250 MB cached after first call)
 ```
 
@@ -59,8 +59,10 @@ whest run --estimator estimator.py --runner local --format json
 Package submission artifact:
 
 ```bash
-whest package --estimator estimator.py --output ./submission.tar.gz
+whest package --estimator estimator.py --output ./submission.tar.gz --yes
 ```
+
+`whest package` bundles your estimator's whole folder (minus `.whestignore` entries and built-in ignores), previews the file list and sizes, and asks for confirmation before writing the archive (pass `--yes` / `-y` to skip the prompt in CI or scripts). It enforces the 50 MiB / 50-file caps — use `.whestignore` to exclude scratch files or large artefacts you don't need on the grader. For shipping precomputed weight files, see [Ship Weights and Multi-File Submissions](./ship-weights.md).
 
 Optional files during packaging:
 
@@ -82,7 +84,7 @@ These all show up in `whest run --help` but get lost there. Reach for them when:
 | `--seed N` | Deterministic comparison between two estimator versions. Pin the seed and the same MLPs, the same per-MLP `mlp.seed` values, and the same `SetupContext.seed` are used across runs. Also accepted by `whest validate` (seeds the validation `setup(ctx)` call). With `--dataset`, the dataset supplies the per-MLP seeds and `--seed` controls `ctx.seed` only. |
 | `--n-samples N` | Ground-truth sampling samples per MLP. The contest default (in `whest run` without an explicit override) is `100 * 100 * 256 = 2,560,000`; `whest dataset bake --n-samples` defaults to `10000`. Drop to `--n-samples 5000` for a ~10x faster local sanity check; raise back up before drawing real conclusions. |
 | `--n-mlps N` | Default `10`. Drop to `3` while iterating to halve runtime; raise to `20+` when you're trying to reduce noise on a close score. |
-| `--flop-budget N` | Default `6.8e10` (the grader effective-compute budget — caps `C_m = F_m + λ·R_m`, not just analytical FLOPs). Bump to `1e11` to confirm an algorithm idea isn't budget-starved before optimizing for budget. |
+| `--flop-budget N` | Default `2.72e11` (the phase-1 grader effective-compute budget — caps `C_m = F_m + λ·R_m`, not just analytical FLOPs; the `v1-warmup` round used `6.8e10`). Bump to `1e12` to confirm an algorithm idea isn't budget-starved before optimizing for budget. |
 | `--profile` | Emits a per-namespace FLOP/time breakdown so you can see where your estimator burns the budget. |
 | `--show-diagnostic-plots` | Renders convergence and per-layer error plots inline (terminal-friendly). Pairs well with `--profile`. |
 | `--max-threads N` | Pin the BLAS thread pool size so `wall_time_s` is comparable across machines. Useful when triaging a "fast on my laptop, slow in CI" report. |
