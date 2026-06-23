@@ -81,6 +81,10 @@ configured `--residual-wall-time-limit`.
 
 flopscope raises `BudgetExhaustedError` before the over-budget operation executes. The framework catches this, zeros all your predictions for that MLP, and forces the per-MLP multiplier to **1.0** (no compute discount). You will see `budget_exhausted: true` in the per-MLP report and `adjusted_final_layer_score_m = final_layer_mse_m × 1.0` for the affected MLP. There is also a **post-hoc** combined-budget check: even if flopscope didn't fire, the scoring layer checks `C_m = F_m + λ·R_m > flop_budget` after `predict()` returns and surfaces `combined_budget_exhausted: true` (same zero/×1.0 outcome).
 
+## Is there a memory limit?
+
+Yes — the grading sandbox caps any single array at **4 GiB**, on both the arrays you build via `flopscope.numpy` and the array you return from `predict()` (at smoke and grading). It's a memory-safety guard, not a scoring rule, and it's set far above what an efficient estimator needs. If you hit `result array too large`, chunk into row/column blocks — reshapes and allocations cost 0 FLOP, so it's free against your budget. (Local `whest run` has no such cap, so this only appears on the server.)
+
 ## How do I inspect budget summaries while debugging?
 
 Use:
