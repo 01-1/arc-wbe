@@ -83,6 +83,20 @@ Verify:
 whest run --estimator estimator.py --json
 ```
 
+## Result array too large
+
+Symptom: on the **grading server** (not local runs), a per-MLP failure whose message reads `result array too large: N bytes exceeds 4294967296 byte limit` — or `array too large: …` for an input you build. It can also fail your submission at the **smoke test**, before grading starts.
+
+Why it happens: the flopscope runtime on the grading sandbox caps any single array at **4 GiB** (a memory-safety guard). It applies to both arrays you build via `flopscope.numpy` and the array you return from `predict()`. A single array that large almost always means an over-vectorized "all layers × all samples at once" buffer, or `float64` where the MLP weights are `float32`.
+
+Note: local `whest run` uses an in-process backend **without** this cap, so you won't reproduce it locally — keep your peak single-array size under 4 GiB as a rule.
+
+Fix now:
+
+- process samples/rows/columns in **blocks** and accumulate running statistics instead of materializing one giant array,
+- keep arrays `float32` (a stray `float64` buffer is 2× larger),
+- reshapes and allocations cost **0 FLOP**, so chunking is free against your FLOP budget.
+
 ## Class not found
 
 Symptom: "No estimator class found" or `ImportError`.
