@@ -4,7 +4,7 @@ UV := UV_CACHE_DIR=/i/e/.uv-cache uv
 MINI_DATASET := hf://aicrowd/arc-whestbench-public-2026
 MINI_MLPS ?= 5
 PAIRS ?= 100
-BUDGET ?= 68000000000
+BUDGET ?= 272000000000
 WALL_TIME ?= 60
 RESIDUAL_WALL_TIME_MULTIPLIER ?= 2.0
 OLD_ESTIMATOR ?= /tmp/estimator_old.py

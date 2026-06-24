@@ -35,6 +35,9 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
+_DEEP_R1_MIN_DEPTH = 16
+_DEEP_R1_RANK_CAP_PER_WIDTH = 8
+_DEFAULT_R1_COMPRESSED_SCHEDULE = (768, 1024, 1280, 1536, 1536, 1536, 1536)
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1907,17 +1910,35 @@ def _parse_rank_schedule(value: str) -> tuple[int, ...]:
     return tuple(int(part.strip()) for part in value.split(",") if part.strip())
 
 
+def _extend_rank_schedule(schedule: tuple[int, ...], mlp: MLP) -> tuple[int, ...]:
+    hidden_layers = max(mlp.depth - 1, 0)
+    if hidden_layers == 0:
+        return ()
+    if not schedule:
+        return ()
+    if len(schedule) >= hidden_layers:
+        return schedule[:hidden_layers]
+    return schedule + (schedule[-1],) * (hidden_layers - len(schedule))
+
+
 def _r1_rank_schedule_for_mode(mode: str, mlp: MLP) -> tuple[int, ...]:
     explicit = os.environ.get("WHEST_R1_RANK_SCHEDULE")
     if explicit:
-        return _parse_rank_schedule(explicit)
+        return _extend_rank_schedule(_parse_rank_schedule(explicit), mlp)
     if mode.startswith("r1_cap"):
         cap = int(mode[len("r1_cap") :])
         return (cap,) * max(mlp.depth - 1, 0)
     cap = os.environ.get("WHEST_R1_RANK_CAP")
     if cap:
         return (int(cap),) * max(mlp.depth - 1, 0)
-    return (768, 1024, 1280, 1536, 1536, 1536, 1536)
+    return _extend_rank_schedule(_DEFAULT_R1_COMPRESSED_SCHEDULE, mlp)
+
+
+def _default_r1_rank_schedule(mlp: MLP) -> tuple[int, ...] | None:
+    if mlp.depth < _DEEP_R1_MIN_DEPTH:
+        return None
+    cap = max(1, _DEEP_R1_RANK_CAP_PER_WIDTH * mlp.width)
+    return (cap,) * max(mlp.depth - 1, 0)
 
 
 def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
@@ -2111,7 +2132,17 @@ class Estimator(BaseEstimator):
         Returns an array of shape ``(depth, width)``.
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
-        if mode in ("", "default", "r1"):
+        if mode in ("", "default"):
+            schedule = _default_r1_rank_schedule(mlp)
+            if schedule is not None:
+                return _factorized_k3_propagation(
+                    mlp,
+                    augment=_FACTOR_K3_MODE,
+                    rank_schedule=schedule,
+                    rank_compression="topk",
+                )
+            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
+        if mode == "r1":
             return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
         if mode in ("r1_compressed", "r1_rank_schedule") or mode.startswith("r1_cap"):
             schedule = _r1_rank_schedule_for_mode(mode, mlp)
@@ -2174,7 +2205,7 @@ if __name__ == "__main__":
         "or 'covariance_propagation'.",
     )
     parser.add_argument("--width", type=int, default=256)
-    parser.add_argument("--depth", type=int, default=8)
+    parser.add_argument("--depth", type=int, default=32)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -2183,7 +2214,7 @@ if __name__ == "__main__":
     mlp = build_mlp(width=args.width, depth=args.depth, seed=args.seed)
 
     print("--- Your estimator ---")
-    compare_against_monte_carlo(Estimator(), mlp, estimator_budget=68_000_000_000)
+    compare_against_monte_carlo(Estimator(), mlp, estimator_budget=272_000_000_000)
 
     if args.baseline:
         baseline_cls = _load_baseline(args.baseline)

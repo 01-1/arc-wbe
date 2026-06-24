@@ -585,3 +585,30 @@ of adding to scalar zero. A one-MLP cached-mini smoke under
 `RESIDUAL_WALL_TIME_MULTIPLIER=2.0` measured about `1.25e10` raw FLOPs,
 `0.092s` residual wall time, and `3.10e10` effective compute. This was a
 mechanical equivalent rewrite, not a scoring-model change.
+
+## 32x256 Budget Retargeting
+
+The rules were retargeted from width-256/depth-8 with a `6.8e10` FLOP budget
+to width-256/depth-32 with a `2.72e11` FLOP budget. The exact grouped `r1`
+route still fits under the analytical flopscope cap on a synthetic
+width-256/depth-32 smoke, but it leaves too little room for residual wall-time
+charging: one local `BudgetContext` run used about `2.31e11` analytical FLOPs
+and about `0.67s` residual wall time, pushing effective compute above the new
+budget under the standard residual charge.
+
+The default route is now depth-aware. For MLPs with at least 16 layers,
+unforced `predict()` applies top-k rank compression to the factorized third
+cumulant after every hidden nonlinearity, with cap `8 * width` (`2048` at the
+new width 256). `WHEST_K3_MODE=r1` remains available as the exact grouped route
+for explicit comparisons, and the existing `r1_cap<N>`/`r1_compressed`
+diagnostics now extend their rank schedules across all hidden layers by
+repeating the last cap instead of silently stopping after the old seven hidden
+updates.
+
+This retargeting used only freshly generated local MLPs and Monte Carlo
+samples, not cached public labels. On one width-256/depth-32 synthetic check
+with a 50k-sample Monte Carlo reference, the `r1_cap2048` route used about
+`5.4e10` analytical FLOPs and had the best final-layer MSE among the capped
+K=3 routes tested (`~2.3e-5` final-layer MSE), while keeping a wide budget
+cushion for residual time. The root demo and Makefile default budget were also
+updated to `2.72e11`.
