@@ -1721,7 +1721,7 @@ def main() -> None:
     parser.add_argument("--hide-flopscope", action="store_true")
     parser.add_argument("--hide-numpy", action="store_true")
     parser.add_argument("--output", type=Path, default=Path("profile_residual_tree.html"))
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--browser", action="store_true")
     args = parser.parse_args()
 
     if args.mode:
@@ -1876,7 +1876,7 @@ def main() -> None:
         flops_tree=flops_tree,
     )
     print(f"\nWrote HTML report: {args.output.resolve()}")
-    if not args.no_browser:
+    if args.browser:
         webbrowser.open(args.output.resolve().as_uri())
 
 

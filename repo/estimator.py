@@ -369,6 +369,8 @@ def _symmetrize(a: fnp.ndarray, vec: tuple[int, ...] | None = None) -> fnp.ndarr
         p for p in itertools.permutations(range(a.ndim))
         if tuple(vec[i] for i in p) == vec
     ]
+    if len(perms) == 1:
+        return a
     return sum(fnp.transpose(a, p) for p in perms) / float(len(perms))
 
 
@@ -808,7 +810,7 @@ def _ds_harmonic_proj_r1(d_tensor: _DSTensor) -> _HTensor:
     for part, dslice in d_tensor.slices.items():
         core = core + coef_l1 * _lap_m_dslice_tensor(dslice, part, 1, n)
         core = core + coef_l2 * _lap_m_dslice_scalar(dslice, part, 2) * eye
-    return _HTensor(_symmetrize(core), r=1, n=n)
+    return _HTensor(core, r=1, n=n)
 
 
 def _diagslice(obj, part: tuple[int, ...], output_zero_repeated: bool = False):
@@ -1436,7 +1438,6 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
     wk_21 = wk_21_raw / 2.0
     wk_12 = wk_21.T
     wk_22 = wk_22_raw / 4.0
-    eye = _eye(width)
     ones = _ones(width)
     diag2 = ones * 3.0
 
@@ -1810,7 +1811,6 @@ def _relu_mean_from_cumulant_diags(
     w6 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 6, 1)
     w7 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 7, 1)
     w8 = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, 8, 1)
-
     return (
         base
         + (1.0 / 6.0) * k3_diag * w3
