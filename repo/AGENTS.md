@@ -27,8 +27,9 @@ Guidance for coding agents working in this repository:
   `make mini-*-local` targets for long augmentation diagnostics that time out
   under subprocess isolation. The default residual multiplier is `2.0`,
   calibrated from observed server timing.
-- The grader budget is `6.8e10` FLOPs/MLP. The score multiplier is
-  `max(0.1, C / 6.8e10)`, so the score-efficient target is just under
-  `6.8e9` effective FLOPs.
+- The current grader shape is width 256, depth 32. The grader budget is
+  `2.72e11` FLOPs/MLP. The score multiplier is
+  `max(0.1, C / 2.72e11)`, so the score-efficient target is just under
+  `2.72e10` effective FLOPs.
 - Before changing the estimator, read
   [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
