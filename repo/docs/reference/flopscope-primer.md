@@ -24,9 +24,9 @@ You don't need to create `BudgetContext` yourself — something else opens it fo
 
 | Stage | Who opens the `BudgetContext` | Where to look |
 |---|---|---|
-| 1 — `python estimator.py` | `local_engine.compare_against_monte_carlo` (default `estimator_budget=1e9`) | [local_engine.py](../../local_engine.py) |
+| 1 — `python estimator.py` | `local_engine.compare_against_monte_carlo` (default `estimator_budget=4e9`) | [local_engine.py](../../local_engine.py) |
 | 2 — `whest validate` | the validator (small probe budget on a width=4, depth=2 MLP) | the `whestbench` CLI |
-| 3 — `whest run --runner local` | the in-process harness (default `--flop-budget 6.8e10`) | the `whestbench` CLI |
+| 3 — `whest run --runner local` | the in-process harness (default `--flop-budget 2.72e11`) | the `whestbench` CLI |
 | 4 — `whest run --runner subprocess` | the subprocess worker (same default) | the `whestbench` CLI |
 | Grader (after you submit) | the harness inside the grader's sandboxed container | (runs server-side on AIcrowd) |
 
@@ -110,12 +110,11 @@ that the harness passed in.
 | `flop_budget` | `int` | Cap configured at construction time. |
 | `flops_used` | `int` | Total counted FLOPs since the context was entered. |
 | `flops_remaining` | `int` | `flop_budget - flops_used`. |
-| `flop_multiplier` | `float` | Per-context FLOP scaler (default 1.0). |
 | `wall_time_s` | `float` | Elapsed wall time since the context was entered. |
 | `wall_time_limit_s` | `float \| None` | Cap configured at construction time. |
-| `flopscope_backend_time` | `float` | Time spent inside counted flopscope calls. |
-| `flopscope_overhead_time` | `float` | Time spent inside flopscope's own dispatch (wrapper preambles, FLOP bookkeeping, namespace push/pop) — framework cost, not participant cost. |
-| `residual_wall_time` | `float` | Wall time inside the context that is neither flopscope backend execution nor flopscope's own dispatch — i.e. participant Python (loops, control flow), GC, uninstrumented numpy. |
+| `flopscope_backend_time_s` | `float` | Time spent inside counted flopscope calls. |
+| `flopscope_overhead_time_s` | `float` | Time spent inside flopscope's own dispatch (wrapper preambles, FLOP bookkeeping, namespace push/pop) — framework cost, not participant cost. |
+| `residual_wall_time_s` | `float` | Wall time inside the context that is neither flopscope backend execution nor flopscope's own dispatch — i.e. participant Python (loops, control flow) and GC. As of flopscope 0.7.0, data-movement NumPy ops (concatenate, stack, tile, repeat, take, pad, …) are counted as `flopscope_backend_time_s`, not residual; Python-callback ops bill their callback time here. |
 | `elapsed_s` | `float` | Alias of `wall_time_s` for symmetry with the report. |
 | `namespace` | `str \| None` | Namespace this context attributes ops to (set via `with flops.namespace("name")`). |
 | `op_log` | `list[OpRecord]` | Per-op record (only populated under `--profile`). |
@@ -146,7 +145,7 @@ wall_time_s = flopscope_backend_time_s + flopscope_overhead_time_s + residual_wa
 - `wall_time_s`: total elapsed time in the context
 - `flopscope_backend_time_s`: time spent inside counted flopscope numpy kernels (the participant's actual numpy compute)
 - `flopscope_overhead_time_s`: time spent inside flopscope's own dispatch (wrapper preambles, FLOP bookkeeping, namespace push/pop) — framework cost, not participant cost
-- `residual_wall_time_s`: everything else — participant Python, GC, uninstrumented numpy
+- `residual_wall_time_s`: participant Python (loops, control flow), GC, and Python-callback op time; as of flopscope 0.7.0, data-movement NumPy ops (concatenate, stack, tile, repeat, take, pad, …) count as `flopscope_backend_time_s`, not residual
 
 This decomposition lets you see whether time is going to numpy compute, framework dispatch, or your own Python.
 

@@ -33,8 +33,8 @@ Wrap your estimator logic in a `BudgetContext` to see how many FLOPs it consumes
 ```python
 import flopscope as flops
 
-with flops.BudgetContext(flop_budget=68_000_000_000) as budget:
-    result = estimator.predict(mlp, budget=68_000_000_000)
+with flops.BudgetContext(flop_budget=272_000_000_000) as budget:
+    result = estimator.predict(mlp, budget=272_000_000_000)
 
 print(f"FLOPs used: {budget.flops_used:,}")
 print(f"FLOPs remaining: {budget.flops_remaining:,}")
@@ -45,10 +45,10 @@ If you also want a wall-clock guardrail while debugging locally, set
 
 ```python
 with flops.BudgetContext(
-    flop_budget=68_000_000_000,
+    flop_budget=272_000_000_000,
     wall_time_limit_s=2.0,
 ) as budget:
-    result = estimator.predict(mlp, budget=68_000_000_000)
+    result = estimator.predict(mlp, budget=272_000_000_000)
 ```
 
 ## Get a per-operation breakdown
@@ -60,8 +60,8 @@ consume the most FLOPs:
 ```python
 import flopscope as flops
 
-with flops.BudgetContext(flop_budget=68_000_000_000) as budget:
-    result = estimator.predict(mlp, budget=68_000_000_000)
+with flops.BudgetContext(flop_budget=272_000_000_000) as budget:
+    result = estimator.predict(mlp, budget=272_000_000_000)
     print(budget.summary())
 
 flops.budget_summary()
@@ -74,7 +74,7 @@ The same summaries also show timing data:
 - `wall_time_s`: total elapsed time for the context
 - `flopscope_backend_time_s`: time spent inside counted flopscope backend calls
 - `flopscope_overhead_time_s`: time spent inside flopscope dispatch and bookkeeping
-- `residual_wall_time_s`: time spent outside flopscope backend and dispatch work
+- `residual_wall_time_s`: participant Python (loops, control flow), GC, and Python-callback op time; as of flopscope 0.7.0, data-movement NumPy ops (concatenate, stack, tile, repeat, take, pad, …) count as `flopscope_backend_time_s`, not residual
 
 In `whest run`, the CLI flags map to these concepts as follows:
 
@@ -93,30 +93,30 @@ If `budget_exhausted` is `true`, your predictions were discarded. You need to re
 
 ## Worked walkthrough: mean propagation, line by line
 
-The table below profiles [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py) on the default Stage 1 MLP (`width=256, depth=8` — same shape as the Stage-3 grader). Numbers are aggregated across all 8 layers; per-layer cost is roughly the row total divided by 8. Reproduce with `ctx.summary()` inside a `flopscope.BudgetContext` after a single `predict()` call (profiled under flopscope 0.5.0).
+The table below profiles [`examples/02_mean_propagation.py`](../../examples/02_mean_propagation.py) on the phase-1 competition shape (`width=256, depth=32`; the warmup round used 256×8). Numbers are aggregated across all 32 layers; per-layer cost is roughly the row total divided by 32. Reproduce with `ctx.summary()` inside a `flopscope.BudgetContext` after a single `predict()` call (profiled under flopscope 0.8.0).
 
 | Operation in `predict()` | Calls | FLOPs (total) | % of `predict()` total |
 |---|---:|---:|---:|
-| `mu_pre = w.T @ mu` and `var_pre = (w*w).T @ var` (`matmul`) | 16 | 2,093,056 | **77.1%** |
-| `mu_pre * Phi_alpha + sigma_pre * phi_alpha` etc. (`multiply`) | 64 | 538,624 | 19.8% |
-| `flops.stats.norm.pdf(alpha)` | 8 | 32,768 | 1.2% |
-| `flops.stats.norm.cdf(alpha)` | 8 | 32,768 | 1.2% |
-| `mu_pre * Phi_alpha + ...` etc. (`add`) | 24 | 6,144 | 0.2% |
-| `fnp.maximum(var_pre, 1e-12)` (`maximum`) | 16 | 4,096 | 0.2% |
-| `fnp.sqrt(var_pre)` | 8 | 2,048 | 0.1% |
-| `mu_pre / sigma_pre` (`true_divide`) | 8 | 2,048 | 0.1% |
-| `ez2 - mu*mu` (`subtract`) | 8 | 2,048 | 0.1% |
-| `fnp.stack(rows, axis=0)` | 1 | 2,048 | 0.1% |
-| **Total per `predict()`** | — | **2,715,648** | — |
+| `mu_pre = w.T @ mu` and `var_pre = (w*w).T @ var` (`matmul`) | 64 | 8,372,224 | **74.7%** |
+| `mu_pre * Phi_alpha + sigma_pre * phi_alpha` etc. (`multiply`) | 256 | 2,154,496 | 19.2% |
+| `flops.stats.norm.cdf(alpha)` | 32 | 393,216 | 3.5% |
+| `flops.stats.norm.pdf(alpha)` | 32 | 221,184 | 2.0% |
+| `mu_pre * Phi_alpha + ...` etc. (`add`) | 96 | 24,576 | 0.2% |
+| `fnp.maximum(var_pre, 1e-12)` (`maximum`) | 64 | 16,384 | 0.1% |
+| `fnp.sqrt(var_pre)` | 32 | 8,192 | 0.1% |
+| `mu_pre / sigma_pre` (`true_divide`) | 32 | 8,192 | 0.1% |
+| `ez2 - mu*mu` (`subtract`) | 32 | 8,192 | 0.1% |
+| `fnp.stack(rows, axis=0)` | 1 | 0 | 0.0% |
+| **Total per `predict()`** | — | **11,206,656** | — |
 
-The full ~2.7 M FLOPs spends only ~0.004% of the default 6.8e10 grader budget, so mean propagation lands well below the multiplier floor at this shape — see [Scoring Model](../concepts/scoring-model.md#example-estimator-benchmarks).
+The full ~11.2 M FLOPs spends only ~0.004% of the 2.72e11 grader budget, so mean propagation lands well below the multiplier floor at this shape — see [Scoring Model](../concepts/scoring-model.md#example-estimator-benchmarks).
 
 Two takeaways:
 
 - **`matmul` dominates.** ~77% of `predict()` cost is the two matmuls per layer (the pointwise ReLU-moment terms — `multiply` — are the visible ~20% remainder). Halving the matmul count (e.g., switching to a diagonal-only formulation, or fusing into a single `einsum` like `examples/03_covariance_propagation.py` does for the symmetric cov-update) buys you most of that back.
 - **Reductions, sqrt, and divides are free in practice.** Don't twist your code to avoid them; the cost is in the tens of FLOPs per layer.
 
-The same pattern holds for `examples/03_covariance_propagation.py`, where the `O(width³)` symmetry-aware `einsum` lands at ~404 M FLOPs per `predict()` (~0.6% of the grader budget) — ~150× more expensive than mean propagation (its full covariance is genuinely heavier than mean propagation's diagonal variance), but still leaving plenty of headroom.
+The same pattern holds for `examples/03_covariance_propagation.py`, where the `O(width³)` symmetry-aware `einsum` lands at ~1.6 B FLOPs per `predict()` (~0.6% of the grader budget) — ~150× more expensive than mean propagation (its full covariance is genuinely heavier than mean propagation's diagonal variance), but still leaving plenty of headroom.
 
 ## Optimization tips
 

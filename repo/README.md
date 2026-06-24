@@ -1,10 +1,22 @@
 <div align="center">
-  <img src="assets/logo/logo.png" alt="ARC Whitebox Estimation Challenge logo" style="height: 120px;">
+  <img src="assets/logo/logo.png" alt="ARC WhiteBox Estimation Challenge 2026 logo" style="height: 120px;">
 </div>
 
-# Whitebox Estimation — Starter Kit
+# ARC WhiteBox Estimation Challenge 2026 - Starter Kit
 
-[![CI](https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml/badge.svg)](https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml)
+<div align="center">
+
+<a href="https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026"><img alt="Challenge" src="https://img.shields.io/badge/AIcrowd-Challenge_Page-f0524d?style=for-the-badge"></a>
+<a href="https://github.com/AIcrowd/whestbench"><img alt="whestbench" src="https://img.shields.io/badge/GitHub-AIcrowd%2Fwhestbench-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+<a href="https://github.com/AIcrowd/whest-starterkit"><img alt="Starter Kit" src="https://img.shields.io/badge/Starter_Kit-whest--starterkit-f57c00?style=for-the-badge&logo=github&logoColor=white"></a>
+<a href="https://aicrowd.github.io/whestbench-explorer/"><img alt="MLP Explorer" src="https://img.shields.io/badge/MLP_Explorer-Interactive-7e57c2?style=for-the-badge"></a>
+<a href="https://github.com/AIcrowd/flopscope"><img alt="flopscope" src="https://img.shields.io/badge/FLOP_Tracking-flopscope-009688?style=for-the-badge&logo=github&logoColor=white"></a>
+<a href="https://huggingface.co/datasets/aicrowd/arc-whestbench-public-2026/tree/v1-phase1"><img alt="Hugging Face" src="https://img.shields.io/badge/%F0%9F%A4%97-View_on_HF_Hub-ffd54f?style=for-the-badge"></a>
+<a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge"></a>
+<br>
+<a href="https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/AIcrowd/whest-starterkit/actions/workflows/ci.yml/badge.svg"></a>
+
+</div>
 
 <div align="center">
   <img src="assets/demo.gif" alt="whest-starterkit first 5 minutes" width="720">
@@ -46,19 +58,53 @@ uv run python estimator.py --baseline mean_propagation
 ```bash-test
 uv run python examples/02_mean_propagation.py
 uv run python examples/03_covariance_propagation.py
+uv run python examples/04_shipped_weights.py
 ```
 
 See [examples/README.md](examples/README.md) for the curriculum table.
 
 ## 🪜 Climb the Ladder (Stages 2-5)
 
-| Stage | Command | What it adds |
-|---|---|---|
-| [1: Iterate locally](docs/getting-started/stage-1-standalone.md) | `uv run python estimator.py` | The math. Estimator vs Monte Carlo. |
-| [2: Validate the contract](docs/getting-started/stage-2-validate.md) | `uv run whest validate --estimator estimator.py` | Contract correctness (shapes, types). |
-| [3: Run on the public set](docs/getting-started/stage-3-run-local.md) | `uv run whest run --estimator estimator.py --dataset hf://aicrowd/arc-whestbench-public-2026 --split mini --runner local` | Real scoring against the public Mini split (100 MLPs), in-process, debuggable with `pdb`. |
-| [4: Subprocess runner](docs/getting-started/stage-4-run-subprocess.md) | `uv run whest run --estimator estimator.py --dataset hf://aicrowd/arc-whestbench-public-2026 --split mini --runner subprocess` | Isolation; closer to grader environment. |
-| [5: Package your submission](docs/getting-started/stage-5-package.md) | `uv run whest package --estimator estimator.py --output submission.tar.gz` | Submission artifact. |
+Each rung adds one more layer of harness rigor — climb when you're ready. Per-stage walkthroughs live in the [Tutorial](docs/getting-started/).
+
+**Stage 1 — [Iterate locally](docs/getting-started/stage-1-standalone.md)** · the math: estimator vs Monte Carlo.
+
+```bash
+uv run python estimator.py
+```
+
+**Stage 2 — [Validate the contract](docs/getting-started/stage-2-validate.md)** · contract correctness (shapes, types).
+
+```bash
+uv run whest validate --estimator estimator.py
+```
+
+**Stage 3 — [Run on the public set](docs/getting-started/stage-3-run-local.md)** · real scoring against the public Mini split (100 MLPs), in-process, debuggable with `pdb`.
+
+```bash
+uv run whest run --estimator estimator.py \
+    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1 \
+    --split mini \
+    --runner local
+```
+
+**Stage 4 — [Subprocess runner](docs/getting-started/stage-4-run-subprocess.md)** · isolation; closer to the grader environment.
+
+```bash
+uv run whest run --estimator estimator.py \
+    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1 \
+    --split mini \
+    --runner subprocess
+```
+
+**Stage 5 — [Package and Submit](docs/getting-started/stage-5-package.md)** · build the submission artifact, then ship it (run `whest login` once first — see [Submit to AIcrowd](#-submit-to-aicrowd) below).
+
+```bash
+uv run whest package --estimator estimator.py   # build & inspect the tarball
+uv run whest submit  --estimator estimator.py   # ship it (also packages, in one step)
+```
+
+> These ship **only `estimator.py`** — the common case. Embedding weights or splitting across modules? Point `--estimator` at a folder instead: see [Stage 5 → Embedding weights or multiple modules](docs/getting-started/stage-5-package.md#-embedding-weights-or-multiple-modules-power-users).
 
 ## 🏁 Submit to AIcrowd
 
@@ -100,7 +146,7 @@ Past Stage 1, the documentation is organized into six sections — pick whicheve
 - [Stage 2: Validate the contract](docs/getting-started/stage-2-validate.md) — Class resolves, `setup()` runs, shape, finite values.
 - [Stage 3: Run locally](docs/getting-started/stage-3-run-local.md) — Real scoring against the grader's MLP suite, in-process.
 - [Stage 4: Subprocess runner](docs/getting-started/stage-4-run-subprocess.md) — Catches state-bleed, RNG re-use, dirty imports.
-- [Stage 5: Package your submission](docs/getting-started/stage-5-package.md) — Build the AIcrowd submission tarball.
+- [Stage 5: Package and Submit](docs/getting-started/stage-5-package.md) — Build the AIcrowd submission tarball and ship it.
 
 </details>
 
@@ -179,4 +225,4 @@ Past Stage 1, the documentation is organized into six sections — pick whicheve
 
 ## ⚖️ License & Contributing
 
-See [LICENSE](LICENSE) and [docs/RELEASING.md](docs/RELEASING.md).
+Released under the [MIT License](LICENSE). See [docs/RELEASING.md](docs/RELEASING.md) for the release process.

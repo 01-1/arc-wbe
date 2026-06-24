@@ -1,4 +1,4 @@
-.PHONY: demo-cast install test lint help mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs full e v local
 
 UV := UV_CACHE_DIR=/i/e/.uv-cache uv
 MINI_DATASET := hf://aicrowd/arc-whestbench-public-2026
@@ -84,13 +84,14 @@ s:
 
 help:
 	@echo "Targets:"
-	@echo "  install     uv sync --group dev"
-	@echo "  test        run pytest"
-	@echo "  lint        run ruff check"
-	@echo "  mini        cached mini split with residual multiplier ($(RESIDUAL_WALL_TIME_MULTIPLIER)x)"
-	@echo "  mini-mode   cached mini split with MODE=<mode>"
+	@echo "  install                 uv sync --group dev"
+	@echo "  test                    run pytest"
+	@echo "  lint                    run ruff check"
+	@echo "  mini                    cached mini split with residual multiplier ($(RESIDUAL_WALL_TIME_MULTIPLIER)x)"
+	@echo "  mini-mode               cached mini split with MODE=<mode>"
 	@echo "  compare-residual-pairs  paired old/new residual benchmark"
-	@echo "  demo-cast   record asciinema cast for README opener"
+	@echo "  demo-cast               record asciinema cast for README opener (needs a TTY)"
+	@echo "  demo-cast-headless      build the cast without a TTY (CI / agent sandboxes)"
 
 install:
 	$(UV) sync --group dev
@@ -108,6 +109,9 @@ lint:
 demo-cast:
 	@command -v asciinema >/dev/null || (echo "Install asciinema first: brew install asciinema"; exit 1)
 	@command -v agg >/dev/null || (echo "Install agg first: brew install agg"; exit 1)
+	@python3 -c "import os; os.close(os.openpty()[0])" 2>/dev/null || ( \
+	  echo "No PTY available (CI / agent sandbox) — 'asciinema rec' needs a terminal."; \
+	  echo "Run 'make demo-cast-headless' instead."; exit 1)
 	@DEMO_DIR=$$(mktemp -d) && \
 	  cp scripts/record-demo.sh "$$DEMO_DIR/demo.sh" && \
 	  chmod +x "$$DEMO_DIR/demo.sh" && \
@@ -118,3 +122,11 @@ demo-cast:
 	  rm -rf "$$DEMO_DIR"
 	agg --theme monokai --font-size 14 --last-frame-duration 5 \
 	  --cols 90 --rows 36 assets/demo.cast assets/demo.gif
+
+# Headless fallback for environments without a PTY (CI / agent sandboxes), where
+# 'asciinema rec' can't run. Runs the same sequence, captures real output, strips
+# transient spinner frames, assembles assets/demo.cast + renders assets/demo.gif.
+# Requires: agg. Keep the sequence in sync with scripts/record-demo.sh.
+demo-cast-headless:
+	@command -v agg >/dev/null || (echo "Install agg first: brew install agg"; exit 1)
+	python3 scripts/record-demo-headless.py

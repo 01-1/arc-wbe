@@ -69,7 +69,7 @@ The simplest approach is **Monte Carlo sampling**:
 
 This is unbiased and converges as `k → ∞`, but the error decreases slowly (`≈ 1/√k`). The challenge asks: can you reach the same accuracy more efficiently by exploiting the network's structure?
 
-To estimate a width-256, depth-8 MLP to 1% accuracy, sampling needs roughly 10,000 forward passes at ~1M FLOPs each — about 10 billion FLOPs total. Mean propagation reaches similar accuracy for ~1M FLOPs (one O(depth × width²) propagation, no sampling at all). That is a ~10,000x improvement.
+To estimate a width-256, depth-32 MLP to 1% accuracy, sampling needs roughly 10,000 forward passes at ~4M FLOPs each — about 40 billion FLOPs total. Mean propagation reaches similar accuracy for ~11M FLOPs (one O(depth × width²) propagation, no sampling at all). That is a ~3,600x improvement.
 
 ## What the estimator receives
 
@@ -84,7 +84,7 @@ Row `i` is your estimate of expected neuron values after layer `i`.
 
 ## Computational model
 
-FLOP usage is tracked analytically by flopscope. Your estimator imports flopscope (`import flopscope as flops` and `import flopscope.numpy as fnp`) and uses its primitives, which report exact FLOP counts. The leaderboard ranks on **effective compute** `C_m = F_m + λ·R_m`, where `F_m` is analytical FLOPs and `R_m` is the residual wall-time bucket (Python-side work not inside a flopscope kernel) at `λ = 1e11` FLOPs/sec. If `C_m > flop_budget` (or wall-time / residual-wall-time caps trip), the affected MLP's predictions are zeroed and the budget multiplier is forced to 1.0. See [Scoring Model](./scoring-model.md) for the full formula.
+FLOP usage is tracked analytically by flopscope. Your estimator imports flopscope (`import flopscope as flops` and `import flopscope.numpy as fnp`) and uses its primitives, which report exact FLOP counts. The leaderboard ranks on **effective compute** `C_m = F_m + λ·R_m`, where `F_m` is analytical FLOPs and `R_m` is the residual wall-time bucket (Python-side work not inside a flopscope kernel) at λ (the configured residual-penalty rate, default `1e11` FLOPs/sec). If `C_m > flop_budget` (or wall-time / residual-wall-time caps trip), the affected MLP's predictions are zeroed and the budget multiplier is forced to 1.0. See [Scoring Model](./scoring-model.md) for the full formula.
 
 ## Ground truth
 

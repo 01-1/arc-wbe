@@ -29,8 +29,8 @@ Run against the published evaluation dataset on HuggingFace (skips sampling — 
 ```bash
 whest run \
     --estimator estimator.py \
-    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-warmup
-# auto-resolves to the `mini` split (100 MLPs, ~250 MB cached after first call)
+    --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1
+# auto-resolves to the `mini` split (100 MLPs, ~850 MB cached after first call)
 ```
 
 Or bake a custom local dataset once and reuse it:
@@ -56,22 +56,15 @@ whest run --estimator estimator.py --runner local --format json
 
 `--json` still works as an alias, but `--format rich|plain|json` is the canonical output selector across the CLI.
 
-Package submission artifact:
+Package submission artifact (single file — the common case):
 
 ```bash
 whest package --estimator estimator.py --output ./submission.tar.gz
 ```
 
-Optional files during packaging:
+A **file** argument ships **only that file**; a **folder** argument (`--estimator .`) ships every file in that folder. Either way `whest package` previews exactly what will be submitted and (in folder mode) asks for confirmation before writing — pass `--yes` / `-y` to skip the prompt in CI or scripts. Credential files (`.env`, `*.pem`, keys, …) are never included. The 50 MiB / 50-file caps apply; use `.whestignore` to exclude scratch or large artefacts.
 
-```bash
-whest package \
-  --estimator estimator.py \
-  --requirements requirements.txt \
-  --submission-metadata submission.yaml \
-  --approach APPROACH.md \
-  --output ./submission.tar.gz
-```
+Shipping helper modules or precomputed weights? Keep them in the folder and package the folder — they ship by being present, no extra flags. (Third-party PyPI packages can't be shipped — the grader installs nothing beyond `flopscope` and the `whestbench` API, so do that work offline and ship the result as data.) See [Ship Weights and Multi-File Submissions](./ship-weights.md).
 
 ## Useful `whest run` flags
 
@@ -82,13 +75,13 @@ These all show up in `whest run --help` but get lost there. Reach for them when:
 | `--seed N` | Deterministic comparison between two estimator versions. Pin the seed and the same MLPs, the same per-MLP `mlp.seed` values, and the same `SetupContext.seed` are used across runs. Also accepted by `whest validate` (seeds the validation `setup(ctx)` call). With `--dataset`, the dataset supplies the per-MLP seeds and `--seed` controls `ctx.seed` only. |
 | `--n-samples N` | Ground-truth sampling samples per MLP. The contest default (in `whest run` without an explicit override) is `100 * 100 * 256 = 2,560,000`; `whest dataset bake --n-samples` defaults to `10000`. Drop to `--n-samples 5000` for a ~10x faster local sanity check; raise back up before drawing real conclusions. |
 | `--n-mlps N` | Default `10`. Drop to `3` while iterating to halve runtime; raise to `20+` when you're trying to reduce noise on a close score. |
-| `--flop-budget N` | Default `6.8e10` (the grader effective-compute budget — caps `C_m = F_m + λ·R_m`, not just analytical FLOPs). Bump to `1e11` to confirm an algorithm idea isn't budget-starved before optimizing for budget. |
+| `--flop-budget N` | Default `2.72e11` (the phase-1 grader effective-compute budget — caps `C_m = F_m + λ·R_m`, not just analytical FLOPs; the `v1-warmup` round used `6.8e10`). Bump to `1e12` to confirm an algorithm idea isn't budget-starved before optimizing for budget. |
 | `--profile` | Emits a per-namespace FLOP/time breakdown so you can see where your estimator burns the budget. |
 | `--show-diagnostic-plots` | Renders convergence and per-layer error plots inline (terminal-friendly). Pairs well with `--profile`. |
 | `--max-threads N` | Pin the BLAS thread pool size so `wall_time_s` is comparable across machines. Useful when triaging a "fast on my laptop, slow in CI" report. |
 | `--detail {raw,full}` | `raw` strips Rich formatting (handy for `tee`-ing logs); `full` adds the per-MLP raw arrays. |
 | `--wall-time-limit S` | Cap each `predict()` call's wall time. Useful when local debugging hangs on a numerical edge case. |
-| `--residual-wall-time-limit S` | Cap time spent outside flopscope ops (Python plumbing, scipy calls). Surfaces "looks fast in FLOPs but Python is the bottleneck" issues. |
+| `--residual-wall-time-limit S` | Cap time spent outside flopscope ops (Python plumbing, loops, control flow). Surfaces "looks fast in FLOPs but Python is the bottleneck" issues. |
 | `--debug` + `--fail-fast` | First exception → halt + raw traceback. Combine for the fastest "what broke?" loop. |
 
 ## ✅ Expected outcome

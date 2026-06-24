@@ -6,6 +6,7 @@ This excludes blocks like `git clone`, `gh release`, etc. that can't run in CI.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -24,6 +25,10 @@ def _readme_test_blocks() -> list[str]:
     return [block.strip() for block in FENCE_RE.findall(text)]
 
 
+def _subprocess_env() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if not key.startswith("BASH_FUNC_")}
+
+
 @pytest.mark.parametrize("block", _readme_test_blocks())
 def test_readme_bash_test_block_runs_cleanly(block: str):
     """Run each ```bash-test fenced block as a shell script. Non-zero exit = test fails."""
@@ -31,6 +36,7 @@ def test_readme_bash_test_block_runs_cleanly(block: str):
         ["bash", "-euo", "pipefail", "-c", block],
         cwd=REPO_ROOT,
         capture_output=True,
+        env=_subprocess_env(),
         text=True,
     )
     assert result.returncode == 0, (

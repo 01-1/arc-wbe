@@ -71,7 +71,7 @@ Each estimator call is given a `flop_budget` — a cap on the floating-point ope
 For the configured FLOP budget `B`:
 
 1. **Your estimator runs.** Your `predict(mlp, budget)` is called. flopscope counts every floating-point operation analytically (`F_m`); the harness also measures the residual wall-time bucket (`R_m`) — Python-side work that runs outside a flopscope kernel.
-2. **Effective compute is formed.** `C_m = F_m + λ·R_m`, where `λ = 1e11` FLOPs/sec converts residual wall-time into FLOP-equivalents.
+2. **Effective compute is formed.** `C_m = F_m + λ·R_m`, where λ (the residual-penalty rate, default `1e11` FLOPs/sec — the grader uses the configured contest rate) converts residual wall-time into FLOP-equivalents. Locally you can experiment with a different rate via `whest run --lambda-flops-per-second`; the leaderboard always uses the contest-configured value.
 3. **Budget is checked.** If `C_m > B` (or flopscope trips mid-run, or a wall-time limit fires), all predictions for this MLP are replaced with zero vectors and the compute multiplier is forced to `1.0`.
 4. **Raw accuracy is measured.** The final-layer mean squared error (MSE) between your predictions and Monte Carlo ground truth is computed — this is `final_layer_mse`, a diagnostic.
 5. **Score is the budget-adjusted MSE.** The per-MLP score is `final_layer_mse × max(0.1, C_m / B)` — accuracy scaled by the share of budget you used, with the discount capped at 10×.
@@ -95,7 +95,7 @@ final_layer_mse_m  = ─── ∑  ( pred_m[d-1, i] − truth_m[d-1, i] )²
                         └──────── final-layer cells only ────────┘
 
   C_m = F_m + λ·R_m   effective compute: analytical FLOPs F_m plus residual
-                      wall-time R_m converted at λ = 1e11 FLOPs/sec
+                      wall-time R_m converted at λ (default 1e11 FLOPs/sec)
   B   = flop_budget
   max(0.1, C_m / B)   compute multiplier — caps the discount at 10× (the 0.1
                       floor); forced to 1.0 for any MLP whose budget was exceeded
@@ -181,22 +181,22 @@ The leaderboard `adjusted_final_layer_score` is the **mean of these per-MLP `adj
 
 ## Example estimator benchmarks
 
-The table below shows the **raw-MSE diagnostics** from the bundled example estimators run against the **public release dataset** — [`arc-whestbench-public-2026`](https://huggingface.co/datasets/aicrowd/arc-whestbench-public-2026), `mini` split (100 MLPs, width 256 / depth 8, N=1e9 baked ground truth) — at the 6.8e10 FLOP budget. These are the unscaled `final_layer_mse` / `all_layers_mse` values; the leaderboard `adjusted_final_layer_score` multiplies `final_layer_mse` by `max(0.1, C_m / budget)` (≤ 1.0). Every bundled example spends well under 1% of the budget, so each one bottoms out at the **0.1 floor** — its ranked score is exactly `final_layer_mse ÷ 10`. Use these as calibration points for your own estimator.
+The table below shows the **raw-MSE diagnostics** from the bundled example estimators run against the **public release dataset** — [`arc-whestbench-public-2026`](https://huggingface.co/datasets/aicrowd/arc-whestbench-public-2026), `mini` split (100 MLPs, 256×32, N=1e9 baked ground truth) — at the 2.72e11 FLOP budget. These are the unscaled `final_layer_mse` / `all_layers_mse` values; the leaderboard `adjusted_final_layer_score` multiplies `final_layer_mse` by `max(0.1, C_m / budget)` (≤ 1.0). Every bundled example spends well under 1% of the budget, so each one bottoms out at the **0.1 floor** — its ranked score is exactly `final_layer_mse ÷ 10`. Use these as calibration points for your own estimator.
 
 | Estimator | `final_layer_mse` | `all_layers_mse` | Approach |
 |-----------|-----------|---------------|----------|
-| `random_estimator` | ~0.60 | ~0.42 | Returns random values — the interface walkthrough. The bundled [`estimator.py`](../../estimator.py) at the repo root is the true (all-zeros) baseline (~0.83); running `uv run whest init <dir>` in a fresh directory produces the same template. |
-| `mean_propagation` | ~7.5e-04 | ~4.4e-04 | Diagonal variance, O(depth x width^2), ~2.7M FLOPs. ~1000x better than the zeros baseline. |
-| `covariance_propagation` | ~3.7e-05 | ~1.7e-05 | Full covariance, O(depth x width^3), ~404M FLOPs. ~20x better again than mean propagation. |
+| `random_estimator` | ~0.75 | ~0.62 | Returns random values — the interface walkthrough. The bundled [`estimator.py`](../../estimator.py) at the repo root is the true (all-zeros) baseline (~0.91); running `uv run whest init <dir>` in a fresh directory produces the same template. |
+| `mean_propagation` | ~9.5e-04 | ~8.2e-04 | Diagonal variance, O(depth x width^2), ~11M FLOPs. ~1000x better than the zeros baseline. |
+| `covariance_propagation` | ~8.4e-05 | ~5.6e-05 | Full covariance, O(depth x width^3), ~1.6B FLOPs. ~11x better again than mean propagation. |
 
 **How to read these numbers:**
 
-- The **zeros baseline** (`estimator.py`, ~0.83) and the **random estimator** (~0.60) give you the "doing nothing" scale — their MSE reflects the natural magnitude of the ground-truth activations.
-- **Mean propagation** is ~1000x more accurate than zeros — a huge improvement from a simple analytical formula at ~2.7M FLOPs (well under 1% of budget).
-- **Covariance propagation** is another ~20x better, but costs O(width^3) per layer (~404M FLOPs at width=256, still <1% of budget). The cubic cost grows fast — by around width≈1400 it would consume the whole 6.8e10 budget.
+- The **zeros baseline** (`estimator.py`, ~0.91) and the **random estimator** (~0.75) give you the "doing nothing" scale — their MSE reflects the natural magnitude of the ground-truth activations.
+- **Mean propagation** is ~1000x more accurate than zeros — a huge improvement from a simple analytical formula at ~11M FLOPs (well under 1% of budget).
+- **Covariance propagation** is another ~11x better, but costs O(width^3) per layer (~1.6B FLOPs at width=256/depth=32, still <1% of budget). The cubic cost grows fast — by around width≈1400 it would consume the whole 2.72e11 budget.
 - The **leaderboard score** (`adjusted_final_layer_score`) is not shown directly: it scales each estimator's `final_layer_mse` by `max(0.1, C_m / budget)`. Every bundled example spends <1% of the budget, so all of them bottom out at the **0.1 floor** — each one's ranked score is exactly its `final_layer_mse ÷ 10`.
 
-To reproduce: `uv run whest run --estimator examples/<NN>_<name>.py --dataset hf://aicrowd/arc-whestbench-public-2026@v1-warmup` (e.g. `examples/02_mean_propagation.py`)
+To reproduce: `uv run whest run --estimator examples/<NN>_<name>.py --dataset hf://aicrowd/arc-whestbench-public-2026@v1-phase1` (e.g. `examples/02_mean_propagation.py`)
 
 These numbers are reproducible: the `mini` split fixes the 100 MLPs and bakes ground truth at N=1e9, so re-running yields the same values (the `random_estimator` row uses `--seed 42`).
 
