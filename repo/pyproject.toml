@@ -13,8 +13,12 @@ dependencies = [
     "whestbench>=0.12.0rc2,<0.13.0",
 ]
 
+[tool.uv.sources]
+flopscope = { git = "https://github.com/01-1/flopscope.git", branch = "codex/gpu-execution" }
+
 [dependency-groups]
 dev = [
+    "cupy-cuda12x>=14.1.1",
     "gprof2dot>=2025.4.14",
     "pyinstrument>=5.1.2",
     "pytest>=8.2.0",

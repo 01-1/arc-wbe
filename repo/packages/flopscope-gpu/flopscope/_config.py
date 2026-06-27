@@ -1,0 +1,145 @@
+"""Global configuration for flopscope."""
+
+from __future__ import annotations
+
+_SETTINGS: dict[str, object] = {
+    "callback_warnings": True,
+    "check_nan_inf": False,
+    "dimino_budget": 50_000,
+    "einsum_path_cache_size": 4096,
+    "partition_budget": 100_000,
+    "symmetry_warnings": True,
+}
+
+# Validators for settings that require range/type checks.
+# Each validator receives the proposed value and raises ValueError/TypeError
+# if the value is invalid.
+_VALIDATORS: dict[str, object] = {
+    "dimino_budget": lambda v: _require_non_negative_int("dimino_budget", v),
+    "partition_budget": lambda v: _require_non_negative_int("partition_budget", v),
+}
+
+
+def _require_non_negative_int(name: str, value: object) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(
+            f"Setting {name!r} requires a non-negative int; got {type(value).__name__!r}"
+        )
+    if value < 0:
+        raise ValueError(f"Setting {name!r} requires a non-negative int; got {value!r}")
+
+
+def configure(**kwargs: object) -> None:
+    """Update flopscope global settings.
+
+    Parameters
+    ----------
+    callback_warnings : bool
+        If ``False``, suppress
+        :class:`~flopscope.errors.RemoteCallbackWarning` warnings emitted when a
+        callback-taking op (``apply_along_axis`` etc.) is called in-process.
+        Default ``True``.
+    check_nan_inf : bool
+        If ``True``, scan every counted op's output for NaN/Inf values and
+        emit a :class:`~flopscope.errors.FlopscopeWarning` if any are found.
+        The scan is two full O(n) sweeps over the result and is attributed
+        to ``flopscope_overhead_time_s``, so it is off by default for
+        production scoring.  Opt in when debugging an estimator that
+        produces NaN/Inf to identify the introducing op.  Default ``False``.
+    dimino_budget : int
+        Maximum number of group elements during whole-expression G_pt closure.
+        Pathological declared-symmetry cases that exceed this budget fall back
+        to dense cost with a CostFallbackWarning.  Default ``50_000`` — accepts
+        groups up to ``|S_8| = 40_320`` with a small margin; rejects ``|S_9|``
+        and larger.  Tune via ``flops.configure(dimino_budget=...)``;
+        ``benchmarks/_perm_group_calibration.py`` recommends a value for the
+        host machine.
+    einsum_path_cache_size : int
+        Maximum number of entries in the einsum path cache.
+        Changing this rebuilds the cache (old entries are discarded).
+        Default ``4096``.
+    partition_budget : int
+        Maximum number of typed partitions a single component may have before
+        the partitionCount regime refuses.  Components exceeding this budget
+        fall back to the dense cost with a CostFallbackWarning.  Default
+        ``100_000`` (covers Bell(9)=21_147; Bell(10)=115_975 forces fallback).
+        Set to ``0`` to force fallback for any non-trivial component.
+    symmetry_warnings : bool
+        If ``False``, suppress :class:`~flopscope.errors.SymmetryLossWarning`
+        warnings.  Default ``True``.
+
+    Returns
+    -------
+    None
+        Updates the in-process global configuration immediately.
+
+    Examples
+    --------
+    >>> import flopscope as flops
+    >>> flops.configure(einsum_path_cache_size=8192)
+    >>> flops.configure(symmetry_warnings=False)
+    >>> flops.configure(check_nan_inf=True)
+    >>> flops.configure(partition_budget=50_000)
+    >>> flops.configure(dimino_budget=1_000_000)
+    """
+    for key, value in kwargs.items():
+        if key not in _SETTINGS:
+            raise ValueError(f"Unknown setting: {key!r}")
+        validator = _VALIDATORS.get(key)
+        if validator is not None:
+            validator(value)  # type: ignore[call-arg]
+        _SETTINGS[key] = value
+
+    if kwargs:
+        import warnings
+
+        from flopscope.errors import ConfigureNoOpWarning
+
+        warnings.warn(
+            "flops.configure() configures the in-process flopscope backend only; "
+            "it is a no-op on flopscope-client and the evaluation servers, so "
+            "these settings will not affect a graded submission.",
+            ConfigureNoOpWarning,
+            stacklevel=2,
+        )
+
+    if "einsum_path_cache_size" in kwargs:
+        # The lightweight client ships this module verbatim (see
+        # scripts/sync_client.py) but has no ``flopscope._einsum`` — einsum-path
+        # caching is a server-side concern. Guard the import so a client-side
+        # ``configure(einsum_path_cache_size=...)`` records the setting without
+        # crashing; there is simply no local cache to rebuild.
+        try:
+            from flopscope._einsum import _rebuild_einsum_cache
+        except ModuleNotFoundError:
+            pass
+        else:
+            _rebuild_einsum_cache()
+
+
+def get_setting(key: str) -> object:
+    """Return the current value of a global setting."""
+    return _SETTINGS[key]
+
+
+def set_setting(key: str, value: object) -> None:
+    """Set a single global setting by name.
+
+    Equivalent to ``configure(**{key: value})``.  Provided for call-sites
+    that hold the setting name in a variable.
+
+    Parameters
+    ----------
+    key : str
+        The setting name.
+    value : object
+        The new value.  Subject to the same validation as :func:`configure`.
+
+    Raises
+    ------
+    ValueError
+        If *key* is unknown or the value fails range validation.
+    TypeError
+        If the value fails type validation.
+    """
+    configure(**{key: value})

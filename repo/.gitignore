@@ -8,6 +8,7 @@ __pycache__/
 
 # uv
 # (uv.lock IS committed)
+.cache/
 
 # Build / packaging artifacts
 *.tar.gz

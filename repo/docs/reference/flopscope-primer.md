@@ -6,6 +6,40 @@ Flopscope is a numpy-compatible array library that tracks FLOPs analytically rat
 
 Source: [github.com/AIcrowd/flopscope](https://github.com/AIcrowd/flopscope)
 
+## Local GPU Fork
+
+This workspace uses a local editable fork at
+[`packages/flopscope-gpu`](../../packages/flopscope-gpu). It preserves
+flopscope's public CPU array contract and analytical FLOP accounting, but can
+optionally route selected backend calls such as `matmul`, `dot`, `einsum`,
+`sum`, and common pointwise operations through CuPy.
+
+GPU execution is off by default. Enable it locally with:
+
+```python
+import flopscope as flops
+
+flops.configure_gpu(enabled=True)
+print(flops.gpu_status())
+```
+
+or set `FLOPSCOPE_GPU=1` before running a script. If CuPy is not installed, the
+fork falls back to the normal CPU path. Results are copied back to CPU
+`flopscope.numpy.ndarray` objects before they leave a counted operation, so code
+written against `flopscope.numpy` keeps the same type behavior.
+
+Because each offloaded operation crosses the CPU/GPU boundary, the local fork
+keeps tiny kernels on CPU by default using a counted-FLOP floor. The default is
+`FLOPSCOPE_GPU_MIN_FLOPS=5000000`. A low FLOPs-per-byte guard,
+`FLOPSCOPE_GPU_MIN_FLOPS_PER_BYTE=0.05`, also rejects unusually
+transfer-heavy edge cases. The transfer-size gate is available for explicit
+experiments through `FLOPSCOPE_GPU_MIN_TRANSFER_BYTES`, but defaults to
+disabled.
+
+Treat this as a local experimentation aid only. The challenge grader may not
+provide GPU libraries, and estimators should not rely on GPU availability during
+evaluation.
+
 ## BudgetContext
 
 All estimator predictions run inside a `BudgetContext`. When the budget is exhausted, a `BudgetExhaustedError` is raised and your predictions are zeroed out.
