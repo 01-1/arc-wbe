@@ -133,7 +133,8 @@ Dependency freshness is a backstop, not higher priority than real queue or estim
 
 Everything is allowed by default within the owner-named repository or portfolio scope unless the owner explicitly narrows scope, forbids an action, withholds credentials, or the action is destructive/irreversible without a recoverable path.
 
-- Queue analysis, monitoring, delegation, parallel-worker creation, implementation, verification, CI reruns, CI fixes, branch/PR updates, issue comments, merges, closes, dependency updates, and version-control housekeeping are all authorized by default when they are normal maintainer actions for this repository.
+- Queue analysis, monitoring, delegation, parallel-worker creation, implementation, verification, CI reruns, CI fixes, local commits, branch/PR updates, issue comments, merges, closes, dependency updates, and version-control housekeeping are all authorized by default when they are normal maintainer actions for this repository.
+- Commit liberally: make local commits at coherent checkpoints whenever a scoped change is complete enough to preserve useful progress. Prefer several small, reviewable commits over one oversized end-of-thread commit when the work naturally separates.
 - Push, merge, close, and repository mutations remain subject to the proof, ARC challenge-rule, CI, and repository-policy gates in this skill, but do not require a separate permission grant unless the owner has narrowed the scope.
 - Treat credentials, paid resources, destructive data changes, security/privacy choices, unavailable proof waivers, and unclear product decisions as owner-decision boundaries.
 - When in doubt, prefer reversible maintainer action with clear proof over stopping for permission. Ask only for the exact missing credential, access, waiver, or genuinely irreversible decision.
@@ -163,6 +164,7 @@ Every delegated implementation thread, within its scope, must:
 - add regression coverage when appropriate;
 - run focused and full tests, then the closest real proof against the affected boundary before landing;
 - run autoreview until no accepted/actionable findings remain;
+- commit coherent local checkpoints liberally, splitting unrelated or independently useful changes into separate commits;
 - push scoped changes;
 - rerun required CI checks and repair failures until green;
 - merge or close the queue item with an exact proof comment;
@@ -174,7 +176,9 @@ Prefer repairing contributor PRs. Preserve contributor credit and follow reposit
 
 - Write commit messages, PR descriptions, and merge/close comments with a medium-length description of the actual changes and proof. Avoid vague one-line messages for non-trivial work, but do not write long essays.
 - Prefer a concise imperative subject plus a short body that names the main behavior, filesystems/services affected, important verification, and any intentional tradeoffs or known follow-ups.
-- When committing multiple independent changes, split them when that improves reviewability; each commit message should explain the coherent change it lands.
+- Commit promptly once a change is coherent and locally validated enough to be useful, even if broader work continues afterward. Do not wait for a whole queue item to be complete when an intermediate commit would make review, rollback, or handoff easier.
+- When committing multiple independent changes, split them by intent whenever that improves reviewability; each commit message should explain the coherent change it lands.
+- Do not mix unrelated owner or worker changes into a liberal checkpoint commit. Leave unrelated dirty files unstaged unless they are explicitly part of the current scope.
 - Preserve repository conventions for commit prefixes, trailers, co-authors, issue references, and history-document wording.
 
 ## Proof Gate
