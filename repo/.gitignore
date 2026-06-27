@@ -28,3 +28,7 @@ Thumbs.db
 
 # Internal process docs (specs, plans, scratch) — not for participant repo.
 .aicrowd/
+
+
+# Env file
+.env
