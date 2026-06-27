@@ -35,8 +35,8 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _FACTOR_K3_MODE = "r1"
 _AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
-_DEEP_R1_MIN_DEPTH = 16
-_DEEP_R1_RANK_CAP_PER_WIDTH = 8
+_DEEP_HADAMARD_MIN_DEPTH = 16
+_DEEP_HADAMARD_BLOCKS = 12
 _DEFAULT_R1_COMPRESSED_SCHEDULE = (768, 1024, 1280, 1536, 1536, 1536, 1536)
 
 
@@ -350,6 +350,16 @@ def _empty_factor(width: int) -> fnp.ndarray:
 @cache
 def _idx(width: int) -> fnp.ndarray:
     return fnp.arange(width)
+
+
+@cache
+def _hadamard(width: int) -> fnp.ndarray:
+    if width < 1 or width & (width - 1):
+        raise ValueError(f"Hadamard cubature requires power-of-two width; got {width}")
+    rows = [[1.0]]
+    while len(rows) < width:
+        rows = [row + row for row in rows] + [row + [-value for value in row] for row in rows]
+    return fnp.array(rows)
 
 
 def _zero_repeated(a: fnp.ndarray) -> fnp.ndarray:
@@ -1934,13 +1944,6 @@ def _r1_rank_schedule_for_mode(mode: str, mlp: MLP) -> tuple[int, ...]:
     return _extend_rank_schedule(_DEFAULT_R1_COMPRESSED_SCHEDULE, mlp)
 
 
-def _default_r1_rank_schedule(mlp: MLP) -> tuple[int, ...] | None:
-    if mlp.depth < _DEEP_R1_MIN_DEPTH:
-        return None
-    cap = max(1, _DEEP_R1_RANK_CAP_PER_WIDTH * mlp.width)
-    return (cap,) * max(mlp.depth - 1, 0)
-
-
 def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
     """Return batched Monte-Carlo layer means with paired x and -x inputs."""
     half = max(n_samples // 2, 1)
@@ -1970,6 +1973,76 @@ def _rademacher_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator
     return fnp.stack(rows, axis=0)
 
 
+def _hadamard_rademacher_samples(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
+    """Return randomized antithetic Hadamard sign blocks for the input layer."""
+    width = mlp.width
+    rows_per_block = 2 * width
+    n_blocks = max(n_samples // rows_per_block, 1)
+    base = _hadamard(width)
+    blocks = []
+    for _ in range(n_blocks):
+        flips = 2.0 * rng.integers(0, 2, size=width) - 1.0
+        x_half = base * flips[None, :]
+        blocks.append(x_half)
+        blocks.append(-x_half)
+    return fnp.concatenate(tuple(blocks), axis=0)
+
+
+def _hadamard_rademacher_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
+    """Return layer means from randomized antithetic Hadamard sign blocks."""
+    x = _hadamard_rademacher_samples(mlp, n_samples, rng)
+
+    rows = []
+    for w in mlp.weights:
+        x = fnp.maximum(x @ w, 0.0)
+        rows.append(fnp.mean(x, axis=0))
+    return fnp.stack(rows, axis=0)
+
+
+def _zero_mean_relu_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray]:
+    """Exact mean/covariance of ReLU(Z) for zero-mean Gaussian ``Z``."""
+    var = fnp.maximum(fnp.diag(cov_pre), _MIN_VARIANCE)
+    std = fnp.sqrt(var)
+    denom = std[:, None] * std[None, :]
+    rho = cov_pre / denom
+    rho = fnp.maximum(fnp.minimum(rho, 1.0), -1.0)
+    second = denom * (
+        fnp.sqrt(fnp.maximum(1.0 - rho * rho, 0.0))
+        + (math.pi - fnp.arccos(rho)) * rho
+    ) / (2.0 * math.pi)
+    mean = std / math.sqrt(2.0 * math.pi)
+    cov = second - fnp.outer(mean, mean)
+    return mean, cov
+
+
+def _hadamard_first_cov_recolored_means(
+    mlp: MLP,
+    n_samples: int,
+    rng: fnp.random.Generator,
+) -> fnp.ndarray:
+    """Hadamard ensemble recolored to the exact first ReLU covariance."""
+    x = _hadamard_rademacher_samples(mlp, n_samples, rng)
+    w0 = mlp.weights[0]
+    y = fnp.maximum(x @ w0, 0.0)
+
+    target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
+    sample_mean = fnp.mean(y, axis=0)
+    centered = y - sample_mean[None, :]
+    sample_cov = (centered.T @ centered) / float(centered.shape[0])
+    jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
+    eye = _eye(mlp.width)
+    sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
+    target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
+    recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+    x = centered @ recolor + target_mean[None, :]
+
+    rows = [target_mean]
+    for w in mlp.weights[1:]:
+        x = fnp.maximum(x @ w, 0.0)
+        rows.append(fnp.mean(x, axis=0))
+    return fnp.stack(rows, axis=0)
+
+
 def _axis_cubature_means(mlp: MLP) -> fnp.ndarray:
     """Return layer means from the 2n axis points that match input covariance."""
     width = mlp.width
@@ -1990,6 +2063,17 @@ def _sample_count_for_budget(mlp: MLP, budget: int, reserve_flops: float = 0.0) 
     target = max(0.0, budget * target_fraction - reserve_flops)
     rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
     return max(2, int(target // rough_cost_per_sample))
+
+
+def _hadamard_sample_count_for_budget(mlp: MLP, budget: int) -> int:
+    explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
+    if explicit:
+        return max(int(explicit), 2)
+    blocks = max(int(os.environ.get("WHEST_HADAMARD_BLOCKS", str(_DEEP_HADAMARD_BLOCKS))), 1)
+    rows = blocks * 2 * mlp.width
+    rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
+    max_rows = max(2, int((0.2 * budget) // rough_cost_per_sample))
+    return min(rows, max_rows)
 
 
 def _covariance_plus_sampling(mlp: MLP, budget: int) -> fnp.ndarray:
@@ -2125,6 +2209,8 @@ class Estimator(BaseEstimator):
             _zeros_vec(width)
             _empty_factor(width)
             _idx(width)
+            if width & (width - 1) == 0:
+                _hadamard(width)
 
     def predict(self, mlp: MLP, budget: int) -> fnp.ndarray:
         """Predict per-layer mean activations.
@@ -2133,14 +2219,9 @@ class Estimator(BaseEstimator):
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default"):
-            schedule = _default_r1_rank_schedule(mlp)
-            if schedule is not None:
-                return _factorized_k3_propagation(
-                    mlp,
-                    augment=_FACTOR_K3_MODE,
-                    rank_schedule=schedule,
-                    rank_compression="topk",
-                )
+            if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
+                n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+                return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
             return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
         if mode == "r1":
             return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
@@ -2167,6 +2248,12 @@ class Estimator(BaseEstimator):
         if mode == "rademacher":
             n_samples = _sample_count_for_budget(mlp, budget)
             return _rademacher_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+        if mode == "hadamard":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_rademacher_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+        if mode == "hadamard_first_cov":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
         if mode == "axis":
             return _axis_cubature_means(mlp)
         if mode == "k2_sample":

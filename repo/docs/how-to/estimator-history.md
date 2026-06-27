@@ -8,14 +8,12 @@ engineering log so future changes do not repeat known dead ends.
 
 ## Current Estimator
 
-The root estimator now runs the optimized factorized K=3 path directly. It
-tracks the symmetric third cumulant plus the `r=1` degree-4 harmonic state and
-uses a diagonal-only final-layer mean specialization for the primary score
-path. The previous budget router was removed so `predict()` no longer switches
-between augmented K=3 variants, covariance-plus-sampling, or mean propagation.
-The shared `_symmetrize` helper sums transposed views with `fnp.sum` over a
-stacked permutation axis so flopscope records the reduction directly instead
-of attributing residual time to Python's built-in `sum`.
+The root estimator is now depth-aware. For the current contest shape
+width-256/depth-32, unforced `predict()` uses randomized antithetic
+Walsh-Hadamard sign cubature with 12 blocks, then recolors the first hidden
+activation ensemble so its mean and covariance match the exact zero-mean
+Gaussian ReLU moments for the first layer. Shallower MLPs still use the
+optimized factorized K=3 `r=1` path.
 
 Historical router experiments remain documented below because they are useful
 for interpreting benchmark results and avoiding repeated dead ends.
@@ -612,3 +610,49 @@ with a 50k-sample Monte Carlo reference, the `r1_cap2048` route used about
 K=3 routes tested (`~2.3e-5` final-layer MSE), while keeping a wide budget
 cushion for residual time. The root demo and Makefile default budget were also
 updated to `2.72e11`.
+
+The compressed K=3 route was then superseded for depth-32 by randomized
+Hadamard cubature. A single Hadamard sign block contains all 256 rows of a
+Sylvester Walsh-Hadamard matrix and their antithetic negations, randomly
+flipped by an independent Rademacher diagonal. Each block therefore has exact
+zero input mean and identity input covariance, while using ordinary sample
+propagation through the nonlinear network. On cached mini smokes with the
+standard `RESIDUAL_WALL_TIME_MULTIPLIER=2.0`, fixed 16-block Hadamard was far
+better than the compressed K=3 retargeting but paid too much multiplier on
+larger runs. Twelve blocks stayed near the 10% multiplier floor.
+
+A first-layer covariance recoloring improved the default three-MLP target
+without using labels. The first pre-activation vector is exactly zero-mean
+Gaussian with covariance `W0.T @ W0`, so the post-ReLU mean and covariance are
+available from the closed-form zero-mean bivariate ReLU kernel. The estimator
+now linearly whitens/recolors the 12-block Hadamard first hidden ensemble to
+match those exact moments, then continues ordinary sample propagation. This
+uses only the passed MLP weights.
+
+Cached-mini comparisons:
+
+- Previous compressed K=3 depth route, one MLP: adjusted score about
+  `9.23e-6`, raw final-layer MSE about `2.42e-5`.
+- Plain 12-block Hadamard, five MLPs: adjusted score about `2.86e-7`, raw
+  final-layer MSE about `2.86e-6`, with the multiplier at the 0.1 floor in one
+  JSON detail run.
+- First-cov 12-block Hadamard, three MLPs: adjusted score about `1.95e-7`,
+  raw final-layer MSE about `1.84e-6`, mean multiplier about `0.105`.
+- First-cov 12-block Hadamard, five MLPs: adjusted score about `2.7e-7` to
+  `2.9e-7` across repeated local subprocess timings, raw final-layer MSE about
+  `2.63e-6`.
+- First-cov 16-block Hadamard, five MLPs: raw final-layer MSE improved to
+  about `2.02e-6`, but the multiplier rose to about `0.140`, giving a worse
+  adjusted score around `2.83e-7`.
+
+Rejected follow-ups in the same pass:
+
+- Full per-layer Gaussian marginal moment correction destroyed joint geometry;
+  one-MLP adjusted scores ranged from about `4.9e-6` to `6.6e-5`.
+- `H D H` rotated sign blocks, permuted/sign variants, spherical radial
+  scaling, fourth-moment axis mixes, Halton/Gaussian bridge samples, and
+  ordinary Rademacher samples were all worse than fixed Hadamard in smokes.
+- Half-strength first-cov blending, block-trimmed means, blockwise empirical
+  shrinkage, whitened Gaussian particles, and final-layer-only Gaussian
+  marginal correction did not beat plain 12-block Hadamard or the full
+  first-cov route on the five-MLP cached split.
