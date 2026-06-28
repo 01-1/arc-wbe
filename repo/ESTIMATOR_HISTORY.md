@@ -160,7 +160,13 @@ after losing or becoming irrelevant to the current scorer frontier.
   Retrying final-only Gaussian marginal mean correction after the `1.5x`
   first-successor variance update as a 50% output blend also lost:
   `3.700e-7` adjusted / `3.262e-6` MSE / `3.085e10` effective compute over
-  79 returned MLPs, with one failed worker. Final-layer sample-cumulant
+  79 returned MLPs, with one failed worker. Smaller final-only Gaussian
+  control-variate pulls were not robust either: a 10% blend initially scored
+  `3.193e-7` adjusted / `2.818e-6` MSE / `3.083e10` effective compute with one
+  failed worker, but a clean replicate bounced to `3.481e-7` adjusted /
+  `3.067e-6` MSE / `3.090e10` effective compute, and a 20% blend lost at
+  `3.595e-7` adjusted / `3.170e-6` MSE / `3.084e10` effective compute.
+  Final-layer sample-cumulant
   Edgeworth blends were also not robust: 50% scored `3.504e-7` adjusted /
   `3.082e-6` MSE, 20% initially scored `3.263e-7` adjusted / `2.870e-6` MSE,
   10% bounced to `3.409e-7` adjusted / `2.999e-6` MSE, and a full-100 check
