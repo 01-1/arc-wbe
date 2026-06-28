@@ -23,15 +23,10 @@ Guidance for coding agents working in this repository:
   [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
 - Run tests with a workspace-local uv cache:
   `UV_CACHE_DIR=/i/e/.uv-cache uv run pytest -q`.
-- Use `make mini` for quick local estimator smoke checks; it uses the local
-  runner for speed. Do not change the
-  number of MLPs: 1 MLP is still slow enough to be a poor tradeoff, and more
-  than 3 is not worth it because `make fly` gives a broader check quickly. Use
-  the Fly runner whenever comprehensive testing is useful.
 - Use the Fly fast runner by default for estimator iteration:
   `make fly` uploads the current `estimator.py`, launches 100 one-MLP EWR Fly
   Machines, and prints one averaged WhestBench text summary from the first 80
-  returned results.
+  returned results. Recent timing is about 20 seconds.
 - The current grader shape is width 256, depth 32. The grader budget is
   `2.72e11` FLOPs/MLP. The score multiplier is
   `max(0.1, C / 2.72e11)`, so the score-efficient target is just under
