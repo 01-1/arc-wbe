@@ -27,6 +27,7 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 13
+_DEEP_VARIANCE_MATCH_STRENGTH = 1.5
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1343,6 +1344,7 @@ def _hadamard_first_cov_recolored_means(
     n_samples: int,
     rng: fnp.random.Generator,
     variance_match_layers: int = 0,
+    variance_match_strength: float = 1.0,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
     x = _hadamard_rademacher_samples(mlp, n_samples, rng)
@@ -1371,7 +1373,8 @@ def _hadamard_first_cov_recolored_means(
             sample_mean = fnp.mean(x, axis=0)
             centered_layer = x - sample_mean[None, :]
             sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
-            x = centered_layer * fnp.sqrt(target_var / sample_var)[None, :] + sample_mean[None, :]
+            scale = 1.0 + variance_match_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
+            x = centered_layer * scale[None, :] + sample_mean[None, :]
         rows.append(fnp.mean(x, axis=0))
     return fnp.stack(rows, axis=0)
 
@@ -1419,6 +1422,7 @@ class Estimator(BaseEstimator):
                     n_samples,
                     fnp.random.default_rng(mlp.seed),
                     variance_match_layers=1,
+                    variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
                 )
             return _factorized_k3_propagation(mlp)
         if mode == "r1":
@@ -1433,6 +1437,15 @@ class Estimator(BaseEstimator):
                 n_samples,
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
+            )
+        if mode.startswith("hadamard_var1_s"):
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+                variance_match_strength=int(mode[len("hadamard_var1_s") :]) / 100.0,
             )
         if mode == "hadamard_var2":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)

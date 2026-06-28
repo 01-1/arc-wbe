@@ -15,9 +15,10 @@ Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
 the estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. It then propagates the recolored ensemble through the remaining
-layers, variance-matching only the first subsequent ReLU ensemble to its
-Gaussian marginal variance while preserving their sample means. This route uses
-only the passed MLP object and label-free moment identities.
+layers, applying a `1.5x` variance-scale update to only the first subsequent
+ReLU ensemble using its Gaussian marginal variance target while preserving its
+sample mean. This route uses only the passed MLP object and label-free moment
+identities.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -28,10 +29,10 @@ runs.
 The submission estimator now keeps only the live default route and direct
 comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
 old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
-variance-matching variants. Older experimental modes for compressed K=3,
-K=1/K=2 diagnostics, low-rank covariance, axis cubature, and sample blends were
-removed from `estimator.py` after losing or becoming irrelevant to the current
-scorer frontier.
+variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
+Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
+covariance, axis cubature, and sample blends were removed from `estimator.py`
+after losing or becoming irrelevant to the current scorer frontier.
 
 ## Winning Checkpoints
 
@@ -67,17 +68,17 @@ scorer frontier.
   | 14 | `3.458e-6` | `4.150e-7` | `3.267e10` |
   | 16 | `3.230e-6` | `4.423e-7` | `3.724e10` |
 
-- **First-successor variance-matched Hadamard.** Preserving the first-covariance
+- **First-successor variance-scaled Hadamard.** Preserving the first-covariance
   ensemble means while rescaling only the first subsequent post-ReLU marginal
-  variance to a Gaussian ReLU moment target improved returned-set Fly
-  comparisons without the instability of broader marginal correction. The best
-  default `make fly` returned-set proof scored `3.205e-7` adjusted /
-  `2.831e-6` final-layer MSE / `3.082e10` effective compute over 79 returned
-  MLPs, with one clipped worker failure. A retry returned `3.464e-7` adjusted /
-  `3.059e-6` MSE / `3.083e10` effective compute over 79 returned MLPs, again
-  with one clipped worker failure. An earlier equivalent `hadamard_var_layers1`
-  mode run returned `3.234e-7` adjusted / `2.850e-6` MSE / `3.087e10`
-  effective compute over 80 returned MLPs despite launch-capacity failures.
+  variance toward a Gaussian ReLU moment target improved returned-set Fly
+  comparisons without the instability of broader marginal correction. Exact
+  variance matching produced the strongest noisy sample at `3.205e-7`
+  adjusted / `2.831e-6` final-layer MSE / `3.082e10` effective compute over 79
+  returned MLPs, but retries varied. A `1.5x` scale update gave the best clean
+  mode sweep at `3.151e-7` adjusted / `2.783e-6` MSE / `3.080e10` effective
+  compute, and the promoted default `make fly` proof scored `3.353e-7`
+  adjusted / `2.962e-6` MSE / `3.082e10` effective compute with 80 returned and
+  no failures.
 
 ## Rejected Or Guarded Ideas
 
@@ -120,7 +121,9 @@ scorer frontier.
   layer alone lost at `3.696e-7`, adding the second successor to the first was
   positive but weaker/noisier (`3.660e-7` clean default proof, `3.676e-7`
   full-100 returned-set comparison), and a third variance-only layer lost at
-  `4.643e-7`. A full first-successor covariance recolor using zero-mean ReLU
+  `4.643e-7`. For the first-successor strength sweep, `0.75x` lost at
+  `3.646e-7`, `1.25x` was not enough at `3.400e-7`, and `1.75x` fell back to
+  `3.496e-7`. A full first-successor covariance recolor using zero-mean ReLU
   covariance correlations with nonzero marginal variances also lost badly:
   `5.749e-7` adjusted / `4.666e-6` MSE / `3.352e10` effective compute.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
