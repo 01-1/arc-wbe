@@ -1,4 +1,4 @@
-.PHONY: demo-cast demo-cast-headless install test lint help random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-large fly-large-build fly-large-fast fly-large-dry full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry full e v local
 
 HF_HOME ?= /i/e/.cache/huggingface
 HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
@@ -167,6 +167,10 @@ fly-large-fast:
 
 fly: fly-large-fast
 
+fly-mode:
+	@test -n "$(MODE)" || (echo "Set MODE=<mode>"; exit 1)
+	$(MAKE) fly-large-fast FLY_RUN_FLAGS="$(FLY_RUN_FLAGS) --mode $(MODE)"
+
 fly-large-dry:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
@@ -219,6 +223,7 @@ help:
 	@echo "  fly-large               build image and run Fly.io EWR Machines using existing object-store archives"
 	@echo "  fly-large-build         upload archives and prebuild/push the small Fly code image"
 	@echo "  fly                     short alias for fly-large-fast"
+	@echo "  fly-mode                run Fly with MODE=<mode> through the fast path"
 	@echo "  fly-large-fast          run Fly Machines from the prebuilt image and existing object-store archives"
 	@echo "  fly-large-dry           print Fly commands without running them"
 	@echo "  demo-cast               record asciinema cast for README opener (needs a TTY)"
