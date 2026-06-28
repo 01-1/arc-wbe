@@ -125,13 +125,16 @@ after losing or becoming irrelevant to the current scorer frontier.
   marginal skew correction, clipping recolored activations back to nonnegative
   support, half-strength first-cov blending, blockwise shrinkage, symmetric
   Gaussian optimal-transport covariance recoloring, blockwise independent
-  first-covariance recoloring, and final-only Gaussian marginal correction did
-  not beat full first-covariance recoloring. The OT covariance map raised Fly
-  EWR adjusted score to `3.956e-7` with final-layer MSE `3.471e-6` and
-  effective compute `3.103e10`. Recoloring each Hadamard block independently
-  scored `4.446e-7` adjusted / `3.864e-6` MSE / `3.130e10` effective compute
-  for one-block groups, while a coarse 7+6 block split still lost at
-  `3.806e-7` adjusted / `3.400e-6` MSE / `3.046e10` effective compute.
+  first-covariance recoloring, covariance-ridge regularization, and final-only
+  Gaussian marginal correction did not beat full first-covariance recoloring.
+  The OT covariance map raised Fly EWR adjusted score to `3.956e-7` with
+  final-layer MSE `3.471e-6` and effective compute `3.103e10`. Recoloring each
+  Hadamard block independently scored `4.446e-7` adjusted / `3.864e-6` MSE /
+  `3.130e10` effective compute for one-block groups, while a coarse 7+6 block
+  split still lost at `3.806e-7` adjusted / `3.400e-6` MSE / `3.046e10`
+  effective compute. Increasing the Cholesky covariance ridge from `1e-6` to
+  `1e-4` and `1e-3` of the target average variance also lost at `3.497e-7` and
+  `3.714e-7` adjusted, respectively.
   Retrying final-only Gaussian marginal mean correction after the `1.5x`
   first-successor variance update as a 50% output blend also lost:
   `3.700e-7` adjusted / `3.262e-6` MSE / `3.085e10` effective compute over
