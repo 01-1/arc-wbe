@@ -143,6 +143,10 @@ after losing or becoming irrelevant to the current scorer frontier.
   Trimming the highest and lowest final-layer Hadamard block mean per coordinate
   was neutral and stayed inside Fly noise at `3.343e-7` adjusted / `2.952e-6`
   MSE / `3.083e10` effective compute with no failures, so it was not promoted.
+  Final-row inverse-variance weighting across Hadamard block means also lost:
+  a 50% blend scored `3.508e-7` adjusted / `3.089e-6` MSE / `3.088e10`
+  effective compute, and a 20% blend scored `3.427e-7` adjusted / `3.024e-6`
+  MSE / `3.085e10` effective compute.
 - **First-layer moment variants.** Diagonal-only mean/variance matching,
   marginal skew correction, clipping recolored activations back to nonnegative
   support, half-strength first-cov blending, blockwise shrinkage, symmetric
