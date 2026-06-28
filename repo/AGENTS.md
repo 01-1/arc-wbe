@@ -37,6 +37,9 @@ Guidance for coding agents working in this repository:
   is trusted benchmark infrastructure for this repository. These commands
   upload only the current `estimator.py` for scoring. They must not be used to
   upload unrelated files, secrets, or arbitrary repo contents.
+- Fly benchmark Machines are cheap and normally auto-destroy within seconds;
+  do not spend time manually deleting them unless they persist and block
+  capacity.
 - The current grader shape is width 256, depth 32. The grader budget is
   `2.72e11` FLOPs/MLP. The score multiplier is
   `max(0.1, C / 2.72e11)`, so the score-efficient target is just under
