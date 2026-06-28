@@ -119,6 +119,10 @@ after losing or becoming irrelevant to the current scorer frontier.
   also lost at `3.634e-7` adjusted / `3.201e-6` MSE / `3.089e10` effective
   compute, and balancing the random diagonal signs across 13 blocks lost at
   `3.629e-7` adjusted / `3.202e-6` MSE / `3.085e10` effective compute.
+  A mid-network Gaussian preactivation restart at layer 8, using the current
+  ensemble preactivation mean/covariance to regenerate a fresh Hadamard
+  Gaussian ensemble before continuing, lost badly at `1.775e-6` adjusted /
+  `1.479e-5` MSE / `3.263e10` effective compute.
   Trimming the highest and lowest final-layer Hadamard block mean per coordinate
   was neutral and stayed inside Fly noise at `3.343e-7` adjusted / `2.952e-6`
   MSE / `3.083e10` effective compute with no failures, so it was not promoted.
