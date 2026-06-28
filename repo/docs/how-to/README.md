@@ -12,6 +12,7 @@ Task-oriented guides. Each one answers "I want to do X — give me the steps and
 | [inspect-mlp-structure.md](inspect-mlp-structure.md) | Traversing the `MLP` object: fields, weights, shapes. |
 | [validate-run-package.md](validate-run-package.md) | The standard local loop: `validate` → `run` → `package`. Includes a "Useful flags" table covering `--seed`, `--n-samples`, `--profile`, `--max-threads`, etc. |
 | [use-evaluation-datasets.md](use-evaluation-datasets.md) | Pre-creating an evaluation dataset for fast, reproducible iteration. |
+| [run-cloud-runners.md](run-cloud-runners.md) | Running HF-derived baked datasets on Modal and Fly.io without remote HF downloads or Monte Carlo rebakes. |
 
 ## Optimizing
 

@@ -1,4 +1,4 @@
-.PHONY: demo-cast demo-cast-headless install test lint help random-mini-dataset mini mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-large fly-large-build fly-large-fast fly-large-dry full e v local
 
 HF_HOME ?= /i/e/.cache/huggingface
 HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
@@ -9,16 +9,51 @@ MINI_SOURCE_SPLIT ?= mini
 MINI_RANDOM_SEED ?= 20260624
 MINI_MLPS ?= 3
 RANDOM_MINI_DATASET ?= .cache/whestbench/random-mini-n$(MINI_MLPS)-seed$(MINI_RANDOM_SEED)
+RANDOM_MINI_METADATA := $(RANDOM_MINI_DATASET)/metadata.json
 PAIRS ?= 100
 BUDGET ?= 272000000000
 WALL_TIME ?= 60
 RESIDUAL_WALL_TIME_MULTIPLIER ?= 2.0
+MINI_RESIDUAL_WALL_TIME_MULTIPLIER ?= 0.232
 OLD_ESTIMATOR ?= /tmp/estimator_old.py
 NEW_ESTIMATOR ?= estimator.py
 WHEST := FLOPSCOPE_GPU=$(FLOPSCOPE_GPU) $(UV) run python scripts/whest_with_residual_multiplier.py --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) --
+MINI_WHEST := FLOPSCOPE_GPU=$(FLOPSCOPE_GPU) $(UV) run python scripts/whest_with_residual_multiplier.py --residual-wall-time-multiplier $(MINI_RESIDUAL_WALL_TIME_MULTIPLIER) --
 MIN_CALL_MS ?= 0
+MODAL_MLPS ?= 3
+MODAL_CORES ?= 32
+MODAL_MEMORY ?= 65536
+MODAL_REGION ?= us-east-1
+FLY_APP ?= whest-timing-20260627
+FLY_MLPS ?= 100
+FLY_REGION ?= ewr
+FLY_VM_SIZE ?= shared-cpu-8x
+FLY_LAUNCH_CONCURRENCY ?= 100
+FLY_MIN_RESULTS ?= 80
+FLY_MAX_RESULT_SECONDS ?= 45
+FLY_FAST_TIMEOUT ?= 70s
+FLY_AWS_PROFILE ?= whest-tigris
+FLY_OBJECT_BUCKET ?= whest-fly-runner-20260628
+FLY_OBJECT_PREFIX ?= whest/fly-mlps
+FLY_DATASET_FINGERPRINT ?= 50c6efdca4059f0e
+FLY_DATASET_URL_CACHE ?= .cache/whestbench/fly-dataset-urls-$(FLY_OBJECT_BUCKET)-$(FLY_DATASET_FINGERPRINT)-n$(FLY_MLPS).json
+FLY_DATASET_FLAGS ?= --dataset-fingerprint $(FLY_DATASET_FINGERPRINT) --dataset-url-cache $(FLY_DATASET_URL_CACHE)
+FLY_OBJECT_ENDPOINT_URL ?=
+FLY_OBJECT_FLAGS ?= --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev
+FLY_ESTIMATOR ?= estimator.py
+FLY_ESTIMATOR_OBJECT_FLAGS ?= --estimator-object-bucket whest-fly-runner-20260628 --estimator-object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev
+FLY_ESTIMATOR_URL_CACHE ?= .cache/whestbench/fly-estimator-url-$(FLY_OBJECT_BUCKET).json
+FLY_ESTIMATOR_FLAGS ?= --estimator-url-cache $(FLY_ESTIMATOR_URL_CACHE)
+FLY_IMAGE_LABEL ?= whest-runner-local-20260628
+FLY_BUILD_FLAGS ?=
+FLY_WORKER_RUNNER ?= local
+FLY_RESIDUAL_COMPUTE_SCALE ?= 0.2601
+FLY_RUN_FLAGS ?= --launch-method api --detach-launch --ignore-destroy-time --summary-only --quiet-commands --no-timing-summary --format json --worker-runner $(FLY_WORKER_RUNNER) --presign-urls --presign-expires-in 604800 --linger-after-result 0 --min-results $(FLY_MIN_RESULTS) --max-result-seconds $(FLY_MAX_RESULT_SECONDS) --residual-compute-scale $(FLY_RESIDUAL_COMPUTE_SCALE)
+FLY_UPLOAD_FLAGS ?=
 
-random-mini-dataset:
+random-mini-dataset: $(RANDOM_MINI_METADATA)
+
+$(RANDOM_MINI_METADATA):
 	$(UV) run python scripts/randomize_whest_dataset.py \
    --dataset $(MINI_SOURCE_DATASET) --split $(MINI_SOURCE_SPLIT) \
    --n-mlps $(MINI_MLPS) --seed $(MINI_RANDOM_SEED) \
@@ -35,19 +70,25 @@ random-mini-dataset:
    --wall-time-limit $(WALL_TIME)
 
 mini: random-mini-dataset
-	$(WHEST) run --estimator estimator.py \
+	$(MINI_WHEST) run --estimator estimator.py \
+   --dataset $(RANDOM_MINI_DATASET) \
+   --split $(MINI_SOURCE_SPLIT) --runner local --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
+   --wall-time-limit $(WALL_TIME)
+
+mini-subprocess: random-mini-dataset
+	$(MINI_WHEST) run --estimator estimator.py \
    --dataset $(RANDOM_MINI_DATASET) \
    --split $(MINI_SOURCE_SPLIT) --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
 
 mini-mode: random-mini-dataset
-	WHEST_K3_MODE=$(MODE) $(WHEST) run --estimator estimator.py \
+	WHEST_K3_MODE=$(MODE) $(MINI_WHEST) run --estimator estimator.py \
    --dataset $(RANDOM_MINI_DATASET) \
    --split $(MINI_SOURCE_SPLIT) --runner subprocess --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
 
 mini-local-mode: random-mini-dataset
-	WHEST_K3_MODE=$(MODE) $(WHEST) run --estimator estimator.py \
+	WHEST_K3_MODE=$(MODE) $(MINI_WHEST) run --estimator estimator.py \
    --dataset $(RANDOM_MINI_DATASET) \
    --split $(MINI_SOURCE_SPLIT) --runner local --fail-fast --n-mlps=$(MINI_MLPS) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME)
@@ -77,6 +118,67 @@ compare-residual-pairs: random-mini-dataset
    --dataset $(RANDOM_MINI_DATASET) --flop-budget $(BUDGET) \
    --wall-time-limit $(WALL_TIME) \
    --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER)
+
+modal-small:
+	modal run cloud/modal_runner.py \
+   --n-mlps $(MODAL_MLPS) --seed $(MINI_RANDOM_SEED) \
+   --cores $(MODAL_CORES) --memory $(MODAL_MEMORY) --region $(MODAL_REGION) \
+   --flop-budget $(BUDGET) --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER)
+
+fly-large:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
+   --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_ESTIMATOR_OBJECT_FLAGS) $(FLY_ESTIMATOR_FLAGS) \
+   --flop-budget $(BUDGET) --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) \
+   $(FLY_BUILD_FLAGS) $(FLY_RUN_FLAGS)
+
+fly-large-build:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_OBJECT_FLAGS) \
+   --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_ESTIMATOR_OBJECT_FLAGS) $(FLY_ESTIMATOR_FLAGS) \
+   --flop-budget $(BUDGET) --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) \
+   --build-only $(FLY_UPLOAD_FLAGS) $(FLY_BUILD_FLAGS)
+
+fly-large-fast:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	@timeout --foreground $(FLY_FAST_TIMEOUT) env PYTHONUNBUFFERED=1 AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
+   --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_ESTIMATOR_OBJECT_FLAGS) $(FLY_ESTIMATOR_FLAGS) \
+   --flop-budget $(BUDGET) --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) \
+   --skip-build $(FLY_RUN_FLAGS)
+
+fly: fly-large-fast
+
+fly-large-dry:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
+   --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_ESTIMATOR_OBJECT_FLAGS) $(FLY_ESTIMATOR_FLAGS) \
+   --flop-budget $(BUDGET) --wall-time-limit $(WALL_TIME) \
+   --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) \
+   --dry-run
 
 p:
 	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --targeted-min-call-ms $(MIN_CALL_MS)
@@ -109,9 +211,16 @@ help:
 	@echo "  install                 uv sync --group dev"
 	@echo "  test                    run pytest"
 	@echo "  lint                    run ruff check"
-	@echo "  mini                    cached mini split with residual multiplier ($(RESIDUAL_WALL_TIME_MULTIPLIER)x)"
+	@echo "  mini                    fast local 3-MLP smoke check"
+	@echo "  mini-subprocess         isolated 3-MLP subprocess check"
 	@echo "  mini-mode               cached mini split with MODE=<mode>"
 	@echo "  compare-residual-pairs  paired old/new residual benchmark"
+	@echo "  modal-small             run small HF-derived batches on Modal with many CPU cores"
+	@echo "  fly-large               build image and run Fly.io EWR Machines using existing object-store archives"
+	@echo "  fly-large-build         upload archives and prebuild/push the small Fly code image"
+	@echo "  fly                     short alias for fly-large-fast"
+	@echo "  fly-large-fast          run Fly Machines from the prebuilt image and existing object-store archives"
+	@echo "  fly-large-dry           print Fly commands without running them"
 	@echo "  demo-cast               record asciinema cast for README opener (needs a TTY)"
 	@echo "  demo-cast-headless      build the cast without a TTY (CI / agent sandboxes)"
 
