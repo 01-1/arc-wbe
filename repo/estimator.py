@@ -1,28 +1,20 @@
-"""Optimized cumulant-propagation estimator for ReLU MLPs.
+"""ARC WhestBench estimator for ReLU MLPs.
 
 Submission for https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026.
 
-Implements the low-order cumulant propagation family from Wu et al.,
-"Estimating the expected output of wide random MLPs more efficiently than
-sampling" (arXiv:2605.05179), specialized to the WhestBench setting.
-
-The estimator uses the optimized factorized K=3 path with r=1 degree-4
-harmonic tracking. It avoids materializing dense order-3/order-4 tensors by
-carrying factored third-cumulant terms, cached diagonal slices, harmonic
-projections, and a diagonal-only final-layer mean specialization.
+Depth-32 contest MLPs use randomized antithetic Hadamard cubature with exact
+first-layer ReLU mean/covariance recoloring. Shallower MLPs use the optimized
+factorized K=3 r=1 cumulant route.
 """
 
 from __future__ import annotations
 
-import argparse
 import gc
-import importlib.util
 import itertools
 import math
 import os
 from collections import defaultdict
 from functools import cache
-from pathlib import Path
 
 import flopscope as flops
 import flopscope.numpy as fnp
@@ -33,11 +25,8 @@ if hasattr(flops, "configure"):
     flops.configure(symmetry_warnings=False)
 
 _MIN_VARIANCE = 1e-30
-_FACTOR_K3_MODE = "r1"
-_AUGMENTED_FACTOR_K3_MODE = "r1_slices_k211"
 _DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 13
-_DEFAULT_R1_COMPRESSED_SCHEDULE = (768, 1024, 1280, 1536, 1536, 1536, 1536)
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -89,47 +78,6 @@ def _relu_wick_from_stats(
         return (-1.0) ** (k - 2) * sigma ** (-(k - 1)) * _hermite_prob(k - 2, alpha) * phi
 
     raise ValueError(f"unsupported ReLU Wick coefficient p={p}")
-
-
-def _relu_wick(mean: fnp.ndarray, var: fnp.ndarray, k: int, p: int = 1) -> fnp.ndarray:
-    """Return ``E[d^k ReLU(Z)^p / dZ^k]`` for ``Z ~ N(mean, var)``.
-
-    This is the ReLU Wick-coefficient helper used by the factorized algorithm.
-    Only the orders needed by the K=3 factorized propagation are implemented.
-    """
-    sigma = fnp.sqrt(fnp.maximum(var, _MIN_VARIANCE))
-    alpha = mean / sigma
-    phi = flops.stats.norm.pdf(alpha)
-    Phi = flops.stats.norm.cdf(alpha)
-
-    return _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
-
-def _relu_moments(mu: fnp.ndarray, var: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
-    """Return (mean, second_moment, gain) of ReLU(N(mu, var)).
-
-    Uses the standard rectified-Gaussian formulas:
-
-        alpha   = mu / sigma
-        phi     = pdf(alpha)
-        Phi     = cdf(alpha)
-        E[z]    = mu * Phi + sigma * phi
-        E[z²]   = (mu² + var) * Phi + mu * sigma * phi
-        gain    = Phi(alpha)          # first Hermite coefficient b̃_1
-
-    The ``gain`` is the c_i factor from the paper's Algorithm 2 (covariance
-    propagation) and is used to approximate off-diagonal post-ReLU covariances.
-    """
-    sigma = fnp.sqrt(fnp.maximum(var, _MIN_VARIANCE))
-    alpha = mu / sigma
-
-    phi = flops.stats.norm.pdf(alpha)
-    Phi = flops.stats.norm.cdf(alpha)
-
-    mean = mu * Phi + sigma * phi
-    ez2 = (mu * mu + var) * Phi + mu * sigma * phi
-    gain = Phi
-
-    return mean, ez2, gain
 
 
 def _prod(values):
@@ -278,15 +226,12 @@ def _all_terms_iso_k3():
 
 
 @cache
-def _terms_iso_k3_for_mode(augment_mode: str):
-    include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
-    skip_degree4 = augment_mode == "r1_no4"
+def _terms_iso_k3():
     terms = []
     for int_part, vec_part, count in _all_terms_iso_k3():
         if (
             len(int_part) > 3
-            or (skip_degree4 and sum(int_part) > 3)
-            or (not include_aug_slices and int_part in ((3, 1), (2, 1, 1)))
+            or int_part in ((3, 1), (2, 1, 1))
             or int_part == (1, 1, 1)
             or (int_part, set(vec_part)) == ((2, 1, 1), {(1, 1, 1)})
         ):
@@ -295,8 +240,6 @@ def _terms_iso_k3_for_mode(augment_mode: str):
         for vec in vec_part:
             nonzero = tuple(i for i, value in enumerate(vec) if value > 0)
             factors.append((sum(vec), vec, nonzero, tuple(vec[i] for i in nonzero)))
-        if skip_degree4 and any(degree > 3 for degree, *_ in factors):
-            continue
         terms.append((
             int_part,
             vec_part,
@@ -310,9 +253,9 @@ def _terms_iso_k3_for_mode(augment_mode: str):
 
 
 @cache
-def _terms_iso_k3_grouped_for_mode(augment_mode: str):
+def _terms_iso_k3_grouped():
     grouped = defaultdict(list)
-    for term in _terms_iso_k3_for_mode(augment_mode):
+    for term in _terms_iso_k3():
         grouped[term[0]].append(term)
     return tuple((int_part, tuple(terms)) for int_part, terms in grouped.items())
 
@@ -450,27 +393,6 @@ def _multigraph_coef(graph, arities: tuple[int, ...], lap_coef: bool = True) -> 
     return out
 
 
-def _harmonic_dslice_r2_scalar(core: fnp.ndarray, metric: fnp.ndarray, part: tuple[int, ...]) -> fnp.ndarray:
-    n = metric.shape[0]
-    out = fnp.zeros((n,) * len(part))
-    for graph in _multigraphs(len(part), 2):
-        coef = _multigraph_coef(graph, part, lap_coef=False)
-        if coef == 0.0:
-            continue
-        factors = []
-        labels = []
-        out_labels = list("abcd"[: len(part)])
-        for (a, b), mult in graph:
-            for _ in range(mult):
-                factors.append(metric)
-                labels.append(f"{out_labels[a]} {out_labels[b]}")
-        if not factors:
-            continue
-        expr = ", ".join(labels) + " -> " + " ".join(out_labels)
-        out = out + coef * fnp.einsum(expr, *factors)
-    return _zero_repeated(out * core)
-
-
 def _harmonic_dslice_general(core: fnp.ndarray, metric: fnp.ndarray, r: int, part: tuple[int, ...]) -> fnp.ndarray:
     n = metric.shape[0]
     s = core.ndim if hasattr(core, "ndim") else 0
@@ -551,8 +473,6 @@ class _HTensor:
             return self._dslice_cache[cache_key]
         if self.r == 0:
             out = _tensor_dslice(self.core, part)
-        elif self.r == 2 and (not hasattr(self.core, "ndim") or self.core.ndim == 0):
-            out = _harmonic_dslice_r2_scalar(self.core, self.metric, part)
         elif self.r == 1 and hasattr(self.core, "ndim") and self.core.ndim == 2:
             out = _harmonic_dslice_general(self.core, self.metric, self.r, part)
         else:
@@ -678,21 +598,6 @@ class _DSTower(dict):
     def get_slice(self, part: tuple[int, ...], strict: bool = True):
         return self[sum(part)].get_slice(part, strict=strict)
 
-    def is_downward_closed(self) -> bool:
-        all_parts = {part for tensor in self.values() for part in tensor.slices}
-        for part in all_parts:
-            if sum(part) <= 1:
-                continue
-            for i in range(len(part)):
-                p = list(part)
-                p[i] -= 1
-                if p[i] == 0:
-                    p.pop(i)
-                if tuple(sorted(p, reverse=True)) not in all_parts:
-                    return False
-        return True
-
-
 def _ds_part_sum(tower: _DSTower, coef_fn, strict: bool = True) -> _DSTower:
     block_cache = {}
 
@@ -803,15 +708,6 @@ def _lap_m_dslice_tensor(dslice: fnp.ndarray, part: tuple[int, ...], m: int, n: 
     return acc * _int_partition_coef(part)
 
 
-def _ds_harmonic_proj_r2(d_tensor: _DSTensor) -> _HTensor:
-    n = d_tensor.n
-    coef = _proj_coef(n, 4, 2)[2]
-    core = 0.0
-    for part, dslice in d_tensor.slices.items():
-        core = core + coef * _lap_m_dslice_scalar(dslice, part, 2)
-    return _HTensor(core, r=2, n=n)
-
-
 def _ds_harmonic_proj_r1(d_tensor: _DSTensor) -> _HTensor:
     n = d_tensor.n
     p1 = _proj_coef(n, 4, 1)
@@ -841,28 +737,6 @@ def _expand_dslice(obj, vec: tuple[int, ...], output_zero_repeated: bool = True)
     part = tuple(vec[i] for i in nonzero)
     dslice = _diagslice(obj, part, output_zero_repeated=output_zero_repeated)
     return _expand(dslice, nonzero, len(vec))
-
-
-def _eval_part(tower: dict[int, object], vec_part, dim: int, output_zero_repeated: bool = True):
-    n = tower[1].n
-    if any(sum(vec) not in tower for vec in vec_part):
-        return None
-    if not vec_part:
-        return fnp.ones((n,) * dim)
-    factors = [
-        _expand_dslice(tower[sum(vec)], vec, output_zero_repeated=output_zero_repeated)
-        for vec in vec_part
-    ]
-    return _vec_part_coef(vec_part, divide_fac=True) * _prod(factors)
-
-
-def _multiply_wicks(value, k_vec, p_vec, wick_lookup):
-    for axis, (k, p) in enumerate(zip(k_vec, p_vec)):
-        wick = wick_lookup(int(k), int(p))
-        shape = [1] * len(k_vec)
-        shape[axis] = -1
-        value = value * fnp.reshape(wick, tuple(shape))
-    return value
 
 
 def _dslice_21_diag_middle(a: fnp.ndarray, diag_b: fnp.ndarray, c: fnp.ndarray) -> fnp.ndarray:
@@ -900,12 +774,6 @@ def _materialize_factor(factor):
     return factor
 
 
-def _copy_factor(factor):
-    if isinstance(factor, _DiagFactor):
-        return _DiagFactor(fnp.array(factor.diag))
-    return fnp.array(factor)
-
-
 def _scale_factor_rows(factor, scale: fnp.ndarray):
     if isinstance(factor, _DiagFactor):
         return _DiagFactor(factor.diag * scale)
@@ -916,28 +784,6 @@ def _contract_factor_w(factor, w: fnp.ndarray):
     if isinstance(factor, _DiagFactor):
         return w.T * factor.diag[None, :]
     return w.T @ factor
-
-
-def _factor_rank(factor) -> int:
-    return len(factor.diag) if isinstance(factor, _DiagFactor) else factor.shape[1]
-
-
-def _slice_factor_columns(factor, start: int, stop: int):
-    if isinstance(factor, _DiagFactor):
-        return _materialize_factor(factor)[:, start:stop]
-    return factor[:, start:stop]
-
-
-def _take_factor_columns(factor, columns: fnp.ndarray):
-    if isinstance(factor, _DiagFactor):
-        return _materialize_factor(factor)[:, columns]
-    return factor[:, columns]
-
-
-def _factor_column_norms_sq(factor) -> fnp.ndarray:
-    if isinstance(factor, _DiagFactor):
-        return factor.diag * factor.diag
-    return fnp.sum(factor * factor, axis=0)
 
 
 class _FactoredThird:
@@ -1036,130 +882,8 @@ class _FactoredThird:
             mapped[key] = _contract_factor_w(factor, w)
         return tuple(tuple(mapped[id(factor)] for factor in group) for group in groups)
 
-    def clone(self) -> "_FactoredThird":
-        out = _FactoredThird(self.width)
-        out._groups = tuple(
-            tuple(_copy_factor(factor) for factor in group)
-            for group in self._groups
-        )
-        out._factor_cache = None
-        return out
-
     def contract_w(self, w: fnp.ndarray) -> "_FactoredThird":
         return self._replace_groups(self._contract_groups(self._groups, w))
-
-    @property
-    def rank(self) -> int:
-        return sum(_factor_rank(group[0]) for group in self._groups)
-
-    def keep_recent_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        remaining = rank_cap
-        groups = []
-        for group in reversed(self._groups):
-            group_rank = _factor_rank(group[0])
-            if remaining <= 0:
-                break
-            if group_rank <= remaining:
-                groups.append(group)
-                remaining -= group_rank
-            else:
-                start = group_rank - remaining
-                groups.append(tuple(_slice_factor_columns(factor, start, group_rank) for factor in group))
-                remaining = 0
-
-        out = _FactoredThird(self.width)
-        out._groups = tuple(reversed(groups))
-        return out
-
-    def keep_top_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        factors = self.factors
-        scores = _ones(total_rank)
-        for factor in factors:
-            scores = scores * fnp.sum(factor * factor, axis=0)
-        keep = fnp.argsort(scores)[-rank_cap:]
-        return _FactoredThird(self.width, tuple(factor[:, keep] for factor in factors))
-
-    def keep_top_group_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        scored_groups = []
-        for group_idx, group in enumerate(self._groups):
-            scores = _ones(_factor_rank(group[0]))
-            for factor in group:
-                scores = scores * _factor_column_norms_sq(factor)
-            scored_groups.append((fnp.sum(scores), group_idx, group))
-
-        remaining = rank_cap
-        selected = []
-        for _, group_idx, group in sorted(scored_groups, key=lambda item: float(item[0]), reverse=True):
-            group_rank = _factor_rank(group[0])
-            if group_rank <= remaining:
-                selected.append((group_idx, group))
-                remaining -= group_rank
-            if remaining <= 0:
-                break
-
-        if not selected:
-            best_group = max(scored_groups, key=lambda item: float(item[0]))[2]
-            group_rank = _factor_rank(best_group[0])
-            sliced = tuple(_slice_factor_columns(factor, 0, min(rank_cap, group_rank)) for factor in best_group)
-            return _FactoredThird(self.width, sliced)
-
-        groups = tuple(group for _, group in sorted(selected, key=lambda item: item[0]))
-        return self._replace_groups(groups)
-
-    def keep_top_group_boundary_rank(self, rank_cap: int) -> "_FactoredThird":
-        if rank_cap <= 0:
-            return _FactoredThird(self.width)
-        total_rank = self.rank
-        if total_rank <= rank_cap:
-            return self
-
-        scored_groups = []
-        for group_idx, group in enumerate(self._groups):
-            scores = _ones(_factor_rank(group[0]))
-            for factor in group:
-                scores = scores * _factor_column_norms_sq(factor)
-            scored_groups.append((fnp.sum(scores), group_idx, group, scores))
-
-        remaining = rank_cap
-        selected = []
-        skipped = []
-        for group_score, group_idx, group, scores in sorted(
-            scored_groups, key=lambda item: float(item[0]), reverse=True
-        ):
-            group_rank = _factor_rank(group[0])
-            if group_rank <= remaining:
-                selected.append((group_idx, group))
-                remaining -= group_rank
-            else:
-                skipped.append((group_score, group_idx, group, scores))
-            if remaining <= 0:
-                break
-
-        if remaining > 0 and skipped:
-            _, group_idx, group, scores = max(skipped, key=lambda item: float(item[0]))
-            keep = fnp.argsort(scores)[-remaining:]
-            selected.append((group_idx, tuple(_take_factor_columns(factor, keep) for factor in group)))
-
-        groups = tuple(group for _, group in sorted(selected, key=lambda item: item[0]))
-        return self._replace_groups(groups)
 
     def contract_wick(self, wick: fnp.ndarray, propagate_cache: bool = True) -> "_FactoredThird":
         out = self._replace_groups(
@@ -1419,7 +1143,7 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
         return value
 
     p_slices = {}
-    for int_part, terms in _terms_iso_k3_grouped_for_mode("r1"):
+    for int_part, terms in _terms_iso_k3_grouped():
         acc = None
         for _, vec_part, count, k_vec, dim, coef, factors in terms:
             term = eval_term(vec_part, dim, coef, factors)
@@ -1490,322 +1214,6 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
         4: _ds_harmonic_proj_r1(k_ds[4]),
     }
 
-def _factored_nonlin_k3(wk: dict[int, object], augment: bool | str = "r1") -> dict[int, object]:
-    if augment is True:
-        augment_mode = "full"
-    elif augment is False:
-        augment_mode = "none"
-    else:
-        augment_mode = augment
-    project_r1 = augment_mode in {"r1", "r1_no4", "r1_111", "r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
-    include_aug_slices = augment_mode in {"r1_slices", "r1_slices_111", "r1_slices_k211_only", "r1_slices_k211", "full"}
-    include_aug_111 = augment_mode in {"r1_111", "r1_slices_111", "r1_slices_k211", "full"}
-    include_k211 = augment_mode in {"r1_slices_k211_only", "r1_slices_k211", "full"}
-
-    width = wk[1].n
-    mean = wk[1].core
-    var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
-    sigma = fnp.sqrt(var)
-    alpha = mean / sigma
-    phi = flops.stats.norm.pdf(alpha)
-    Phi = flops.stats.norm.cdf(alpha)
-    eval_cache = {}
-    dslice_cache = {}
-
-    @cache
-    def wick(k: int, p: int):
-        if p > 1 and k >= p:
-            return math.factorial(p) * wick(k - p + 1, 1)
-        return _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
-
-    @cache
-    def wick_view(k: int, p: int, dim: int, axis: int):
-        shape = [1] * dim
-        shape[axis] = -1
-        return fnp.reshape(wick(k, p), tuple(shape))
-
-    @cache
-    def wick_term_view(int_part: tuple[int, ...], k_vec: tuple[int, ...], dim: int, count: int):
-        value = None
-        for axis, (k, p) in enumerate(zip(k_vec, int_part)):
-            view = wick_view(int(k), int(p), dim, axis)
-            if value is None:
-                value = count * view if count != 1 else view
-            else:
-                value = value * view
-        return value
-
-    def dslice(degree: int, part: tuple[int, ...]):
-        key = (degree, part)
-        if key not in dslice_cache:
-            dslice_cache[key] = _diagslice(wk[degree], part, output_zero_repeated=True)
-        return dslice_cache[key]
-
-    def eval_term(vec_part, dim: int, coef: float, factors):
-        key = (vec_part, dim)
-        if key not in eval_cache:
-            if any(degree not in wk for degree, _, _, _ in factors):
-                eval_cache[key] = None
-            elif not factors:
-                eval_cache[key] = fnp.ones((width,) * dim)
-            else:
-                product = None
-                for degree, _, nonzero, part in factors:
-                    factor = _expand(dslice(degree, part), nonzero, dim)
-                    if product is None:
-                        product = coef * factor if coef != 1.0 else factor
-                    else:
-                        product = product * factor
-                eval_cache[key] = product
-        return eval_cache[key]
-
-    p_slices = {}
-    for int_part, terms in _terms_iso_k3_grouped_for_mode(augment_mode):
-        acc = None
-        for _, vec_part, count, k_vec, dim, coef, factors in terms:
-            term = eval_term(vec_part, dim, coef, factors)
-            if term is None:
-                continue
-            term = term * wick_term_view(int_part, tuple(int(k) for k in k_vec), dim, count)
-            acc = term if acc is None else acc + term
-        p_slices[int_part] = _symmetrize(acc, vec=int_part)
-
-    w1 = wick(1, 1)
-    w2 = wick(2, 1)
-    w3 = wick(3, 1)
-    w4 = wick(4, 1)
-
-    wk_11 = _zero_repeated(wk[2].core)
-    if 3 in wk:
-        wk_21 = dslice(3, (2, 1))
-        wk_3 = dslice(3, (3,))
-        p111 = wk[3].contract_wick(w1, propagate_cache=False)
-        p111._dslice_cache[(2, 1)] = wk_21 * (w1[:, None] * w1[:, None] * w1[None, :])
-        p111._dslice_cache[(3,)] = wk_3 * w1 * w1 * w1
-    else:
-        p111 = _FactoredThird(width)
-        p111._dslice_cache[(2, 1)] = fnp.zeros_like(wk_11)
-        p111._dslice_cache[(3,)] = _zeros_vec(width)
-        wk_21 = fnp.zeros_like(wk_11)
-    if 4 in wk:
-        wk_22 = dslice(4, (2, 2))
-    else:
-        wk_22 = fnp.zeros_like(wk_11)
-
-    wk_21 = wk_21 / 2.0
-    wk_12 = wk_21.T
-    wk_22 = wk_22 / 4.0
-    eye = _eye(width)
-    ones = _ones(width)
-    factor_groups: list[tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]] = []
-    dslice_21_increments: list[fnp.ndarray | None] = []
-    diag_increments: list[fnp.ndarray | None] = []
-
-    def queue_factors(
-        factors: tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray],
-        dslice_21_increment: fnp.ndarray | None,
-        diag_increment: fnp.ndarray | None,
-    ) -> None:
-        factor_groups.append(factors)
-        dslice_21_increments.append(dslice_21_increment)
-        diag_increments.append(diag_increment)
-
-    fac1 = w1[:, None] * wk_11 + w2[:, None] * wk_21
-    fac3 = (
-        w2[:, None] * w1[None, :] * wk_11
-        + w3[:, None] * w1[None, :] * wk_21
-        + w2[:, None] * w2[None, :] * wk_12
-        + w3[:, None] * w2[None, :] * wk_22
-    ).T
-    diag2 = ones * 3.0
-    fac2 = _DiagFactor(diag2)
-    queue_factors(
-        (fac1, fac2, fac3),
-        _dslice_21_diag_middle(fac1, diag2, fac3),
-        _diag_diag_middle(fac1, diag2, fac3),
-    )
-
-    fac1 = w1[:, None] * wk_12 + w2[:, None] * wk_22
-    fac2 = _DiagFactor(diag2)
-    fac3 = (
-        w3[:, None] * w1[None, :] * wk_11
-        + w4[:, None] * w1[None, :] * wk_21
-        + w3[:, None] * w2[None, :] * wk_12
-        + w4[:, None] * w2[None, :] * wk_22
-    ).T
-    queue_factors(
-        (fac1, fac2, fac3),
-        _dslice_21_diag_middle(fac1, diag2, fac3),
-        _diag_diag_middle(fac1, diag2, fac3),
-    )
-
-    if not project_r1 and 4 in wk and wk[4].r == 2 and wk[4].metric.ndim == 2:
-        core = wk[4].core
-        metric = wk[4].metric
-        metric_diag = fnp.diag(metric)
-
-        fac1 = w2[:, None] * (core * metric_diag)[:, None] * ones[None, :]
-        fac2 = _DiagFactor(w1)
-        fac3 = w1[:, None] * metric / 2.0
-        queue_factors(
-            (fac1, fac2, fac3),
-            _dslice_21_diag_middle(fac1, w1, fac3),
-            _diag_diag_middle(fac1, w1, fac3),
-        )
-
-        fac1 = w1[:, None] * metric * core
-        fac2 = _DiagFactor(w2)
-        fac3 = w1[:, None] * metric
-        queue_factors(
-            (fac1, fac2, fac3),
-            _dslice_21_diag_middle(fac1, w2, fac3),
-            _diag_diag_middle(fac1, w2, fac3),
-        )
-
-    if include_aug_111 and 4 in wk:
-        core = wk[4].core
-        metric = wk[4].metric
-        metric_diag = fnp.diag(metric)
-        metric_full = metric
-
-        fac1 = w2[:, None] * fnp.diag(core)[:, None] * ones[None, :]
-        fac2 = w1[:, None] * metric_full
-        fac3 = _DiagFactor(w1 / 4.0)
-        queue_factors(
-            (fac1, fac3, fac2),
-            _dslice_21_diag_middle(fac1, w1 / 4.0, fac2),
-            _diag_diag_middle(fac1, w1 / 4.0, fac2),
-        )
-
-        fac1 = w1[:, None] * core
-        fac2 = _DiagFactor(w2)
-        fac3 = w1[:, None] * metric_full
-        queue_factors(
-            (fac1, fac2, fac3),
-            _dslice_21_diag_middle(fac1, w2, fac3),
-            _diag_diag_middle(fac1, w2, fac3),
-        )
-
-        fac1 = w1[:, None] * core
-        fac2 = _DiagFactor(w1)
-        fac3 = w2[:, None] * metric_diag[:, None] * ones[None, :] / 4.0
-        queue_factors(
-            (fac1, fac2, fac3),
-            _dslice_21_diag_middle(fac1, w1, fac3),
-            _diag_diag_middle(fac1, w1, fac3),
-        )
-
-    p111.add_factor_groups(factor_groups, dslice_21_increments, diag_increments)
-
-    p_ds = _DSTower.from_slices(p_slices, autozero=True)
-    k_ds = _ds_pk_to_k(p_ds, strict=not include_aug_slices)
-    if 3 in k_ds:
-        k_ds[3] = _dst_sub(k_ds[3], p111.get_repeated())
-
-    k211_contrib = None
-    if include_k211:
-        rep = _FactoredThird.from_dstensor(p111.get_repeated())
-        a = fnp.concatenate((p111.factors[0], -rep.factors[0]), axis=1)
-        b = fnp.concatenate((p111.factors[1], rep.factors[1]), axis=1)
-        c = fnp.concatenate((p111.factors[2], rep.factors[2]), axis=1)
-        pk1 = p_ds[1].slices[(1,)]
-        p111_k211 = _symmetrize(
-            (fnp.sum(pk1[:, None] * a, axis=0) * b) @ c.T
-            + (fnp.sum(pk1[:, None] * b, axis=0) * c) @ a.T
-            + (fnp.sum(pk1[:, None] * c, axis=0) * a) @ b.T
-        ) / 3.0
-        k211_contrib = p111_k211 * (-2.0 * 6.0 * 2.0 / (2.0 * width + 8.0))
-
-        if 3 in wk:
-            rep = _FactoredThird.from_dstensor(wk[3].get_repeated())
-            a = fnp.concatenate((wk[3].factors[0], -rep.factors[0]), axis=1)
-            b = fnp.concatenate((wk[3].factors[1], rep.factors[1]), axis=1)
-            c = fnp.concatenate((wk[3].factors[2], rep.factors[2]), axis=1)
-            w12 = wick(1, 2)
-            p211_k211 = _symmetrize(
-                (fnp.sum(w12[:, None] * a, axis=0) * w1[:, None] * b) @ (w1[:, None] * c).T
-                + (fnp.sum(w12[:, None] * b, axis=0) * w1[:, None] * c) @ (w1[:, None] * a).T
-                + (fnp.sum(w12[:, None] * c, axis=0) * w1[:, None] * a) @ (w1[:, None] * b).T
-            ) / 3.0
-            k211_contrib = k211_contrib + p211_k211 * (6.0 * 2.0 / (2.0 * width + 8.0))
-
-    out: dict[int, object] = {
-        1: _HTensor(k_ds[1].to_tensor(), r=0),
-        2: _HTensor(k_ds[2].to_tensor(), r=0),
-        3: p111 + _FactoredThird.from_dstensor(k_ds[3]),
-    }
-    if 4 in k_ds:
-        if project_r1:
-            out[4] = _ds_harmonic_proj_r1(k_ds[4])
-            if k211_contrib is not None:
-                out[4].core = out[4].core + k211_contrib
-                out[4]._dslice_cache = {}
-        else:
-            out[4] = _ds_harmonic_proj_r2(k_ds[4])
-    return out
-
-
-def _factored_relu_mean_from_pre(wk: dict[int, object], augment: bool | str = "r1") -> fnp.ndarray:
-    """Return only the post-ReLU mean from a pre-activation K=3 tower."""
-    if augment is True:
-        augment_mode = "full"
-    elif augment is False:
-        augment_mode = "none"
-    else:
-        augment_mode = augment
-
-    width = wk[1].n
-    mean = wk[1].core
-    var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
-    sigma = fnp.sqrt(var)
-    alpha = mean / sigma
-    phi = flops.stats.norm.pdf(alpha)
-    Phi = flops.stats.norm.cdf(alpha)
-
-    wick_values: dict[tuple[int, int], fnp.ndarray] = {}
-
-    def wick(k: int, p: int):
-        key = (k, p)
-        value = wick_values.get(key)
-        if value is None:
-            if p > 1 and k >= p:
-                value = math.factorial(p) * wick(k - p + 1, 1)
-            else:
-                value = _relu_wick_from_stats(mean, var, sigma, alpha, phi, Phi, k, p)
-            wick_values[key] = value
-        return value
-
-    dslice_cache = {}
-
-    def dslice(degree: int, part: tuple[int, ...]):
-        key = (degree, part)
-        if key not in dslice_cache:
-            dslice_cache[key] = _diagslice(wk[degree], part, output_zero_repeated=True)
-        return dslice_cache[key]
-
-    acc = 0.0
-    for int_part, vec_part, count, k_vec, dim, coef, factors in _terms_iso_k3_for_mode(augment_mode):
-        if int_part != (1,):
-            continue
-        if any(degree not in wk for degree, _, _, _ in factors):
-            continue
-        if not factors:
-            term = fnp.ones(width)
-        else:
-            term = None
-            for degree, _, _, part in factors:
-                factor = dslice(degree, part)
-                if term is None:
-                    term = coef * factor if coef != 1.0 else factor
-                else:
-                    term = term * factor
-        value = term * wick(int(k_vec[0]), 1)
-        if count != 1:
-            value = count * value
-        acc = acc + value
-    return acc
-
-
 def _relu_mean_from_cumulant_diags(
     mean: fnp.ndarray,
     var: fnp.ndarray,
@@ -1853,12 +1261,7 @@ def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> 
     return _relu_mean_from_cumulant_diags(mean, var, k3_diag, k4_diag)
 
 
-def _factorized_k3_propagation(
-    mlp: MLP,
-    augment: bool | str = "r1",
-    rank_schedule: tuple[int, ...] | None = None,
-    rank_compression: str = "topk",
-) -> fnp.ndarray:
+def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
     This ports the upstream factorized K=3 path into the narrower whestbench
@@ -1876,101 +1279,20 @@ def _factorized_k3_propagation(
         }
 
         rows = []
-        mixed_suffix = "_r1_slices_k211"
-        switch_at = None
-        if isinstance(augment, str) and augment.startswith("last") and augment.endswith(mixed_suffix):
-            n_aug_layers = int(augment[len("last") : -len(mixed_suffix)])
-            switch_at = max(0, mlp.depth - n_aug_layers)
-
         for layer_idx, w_mat in enumerate(mlp.weights):
-            layer_augment = _AUGMENTED_FACTOR_K3_MODE if switch_at is not None and layer_idx >= switch_at else augment
-            if switch_at is not None and layer_idx < switch_at:
-                layer_augment = _FACTOR_K3_MODE
-            if layer_idx == mlp.depth - 1 and layer_augment == "r1":
+            if layer_idx == mlp.depth - 1:
                 rows.append(_final_r1_relu_mean_from_tower(tower, w_mat))
                 break
             wk = {}
             for degree, value in tower.items():
                 wk[degree] = value.contract_w(w_mat)
-            if layer_idx == mlp.depth - 1:
-                rows.append(_factored_relu_mean_from_pre(wk, augment=layer_augment))
-                break
-            if layer_augment == "r1":
-                tower = _factored_nonlin_k3_r1_fast(wk)
-            else:
-                tower = _factored_nonlin_k3(wk, augment=layer_augment)
-            if rank_schedule is not None and 3 in tower and layer_idx < len(rank_schedule):
-                if rank_compression == "recent":
-                    tower[3] = tower[3].keep_recent_rank(rank_schedule[layer_idx])
-                elif rank_compression in ("boundary", "hybrid", "structured"):
-                    tower[3] = tower[3].keep_top_group_boundary_rank(rank_schedule[layer_idx])
-                elif rank_compression in ("group", "groups", "group_topk"):
-                    tower[3] = tower[3].keep_top_group_rank(rank_schedule[layer_idx])
-                else:
-                    tower[3] = tower[3].keep_top_rank(rank_schedule[layer_idx])
+            tower = _factored_nonlin_k3_r1_fast(wk)
             rows.append(tower[1].core)
 
         return fnp.stack(rows, axis=0)
     finally:
         if was_gc_enabled:
             gc.enable()
-
-
-def _parse_rank_schedule(value: str) -> tuple[int, ...]:
-    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
-
-
-def _extend_rank_schedule(schedule: tuple[int, ...], mlp: MLP) -> tuple[int, ...]:
-    hidden_layers = max(mlp.depth - 1, 0)
-    if hidden_layers == 0:
-        return ()
-    if not schedule:
-        return ()
-    if len(schedule) >= hidden_layers:
-        return schedule[:hidden_layers]
-    return schedule + (schedule[-1],) * (hidden_layers - len(schedule))
-
-
-def _r1_rank_schedule_for_mode(mode: str, mlp: MLP) -> tuple[int, ...]:
-    explicit = os.environ.get("WHEST_R1_RANK_SCHEDULE")
-    if explicit:
-        return _extend_rank_schedule(_parse_rank_schedule(explicit), mlp)
-    if mode.startswith("r1_cap"):
-        cap = int(mode[len("r1_cap") :])
-        return (cap,) * max(mlp.depth - 1, 0)
-    cap = os.environ.get("WHEST_R1_RANK_CAP")
-    if cap:
-        return (int(cap),) * max(mlp.depth - 1, 0)
-    return _extend_rank_schedule(_DEFAULT_R1_COMPRESSED_SCHEDULE, mlp)
-
-
-def _antithetic_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
-    """Return batched Monte-Carlo layer means with paired x and -x inputs."""
-    half = max(n_samples // 2, 1)
-    x_half = rng.standard_normal((half, mlp.width))
-    x = fnp.concatenate((x_half, -x_half), axis=0)
-    x_std = fnp.sqrt(fnp.maximum(fnp.mean(x * x, axis=0), _MIN_VARIANCE))
-    x = x / x_std
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
-
-
-def _rademacher_sample_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
-    """Return layer means from antithetic +/-1 input cubature samples."""
-    half = max(n_samples // 2, 1)
-    signs = rng.integers(0, 2, size=(half, mlp.width))
-    x_half = 2.0 * signs - 1.0
-    x = fnp.concatenate((x_half, -x_half), axis=0)
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
 
 
 def _hadamard_rademacher_samples(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
@@ -1986,17 +1308,6 @@ def _hadamard_rademacher_samples(mlp: MLP, n_samples: int, rng: fnp.random.Gener
         blocks.append(x_half)
         blocks.append(-x_half)
     return fnp.concatenate(tuple(blocks), axis=0)
-
-
-def _hadamard_rademacher_means(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
-    """Return layer means from randomized antithetic Hadamard sign blocks."""
-    x = _hadamard_rademacher_samples(mlp, n_samples, rng)
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
 
 
 def _zero_mean_relu_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray]:
@@ -2043,28 +1354,6 @@ def _hadamard_first_cov_recolored_means(
     return fnp.stack(rows, axis=0)
 
 
-def _axis_cubature_means(mlp: MLP) -> fnp.ndarray:
-    """Return layer means from the 2n axis points that match input covariance."""
-    width = mlp.width
-    x = fnp.sqrt(float(width)) * fnp.concatenate((fnp.eye(width), -fnp.eye(width)), axis=0)
-
-    rows = []
-    for w in mlp.weights:
-        x = fnp.maximum(x @ w, 0.0)
-        rows.append(fnp.mean(x, axis=0))
-    return fnp.stack(rows, axis=0)
-
-
-def _sample_count_for_budget(mlp: MLP, budget: int, reserve_flops: float = 0.0) -> int:
-    explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
-    if explicit:
-        return max(int(explicit), 2)
-    target_fraction = float(os.environ.get("WHEST_EXPERIMENT_BUDGET_FRACTION", "0.1"))
-    target = max(0.0, budget * target_fraction - reserve_flops)
-    rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
-    return max(2, int(target // rough_cost_per_sample))
-
-
 def _hadamard_sample_count_for_budget(mlp: MLP, budget: int) -> int:
     explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
     if explicit:
@@ -2076,131 +1365,13 @@ def _hadamard_sample_count_for_budget(mlp: MLP, budget: int) -> int:
     return min(rows, max_rows)
 
 
-def _covariance_plus_sampling(mlp: MLP, budget: int) -> fnp.ndarray:
-    """Blend K=2 covariance propagation with a score-floor antithetic correction."""
-    cov_pred = _covariance_propagation(mlp)
-    rough_cov_flops = 3.05 * mlp.depth * mlp.width ** 3
-    n_samples = _sample_count_for_budget(mlp, budget, reserve_flops=rough_cov_flops)
-    sampled = _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-    blend = min(0.5, n_samples / (n_samples + 5_000.0))
-    return (1.0 - blend) * cov_pred + blend * sampled
-
-
-def _r1_sample_blend(mlp: MLP, budget: int) -> fnp.ndarray:
-    """Diagnostic blend of the default K=3 estimate with antithetic sampling."""
-    k3_pred = _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
-    n_samples = _sample_count_for_budget(mlp, budget)
-    sampled = _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-    blend = float(os.environ.get("WHEST_EXPERIMENT_BLEND", "0.05"))
-    return (1.0 - blend) * k3_pred + blend * sampled
-
-
-def _lowrank_covariance_propagation(mlp: MLP, rank: int) -> fnp.ndarray:
-    """Low-rank ensemble covariance propagation with exact marginal variances."""
-    width = mlp.width
-    rng = fnp.random.default_rng(mlp.seed)
-    mu = fnp.zeros(width)
-    factors = rng.standard_normal((width, rank)) / math.sqrt(float(rank))
-
-    rows = []
-    for w in mlp.weights:
-        mu_pre = w.T @ mu
-        factors_pre = w.T @ factors
-        var_pre = fnp.maximum(fnp.sum(factors_pre * factors_pre, axis=1), _MIN_VARIANCE)
-
-        mu_post, ez2, gain = _relu_moments(mu_pre, var_pre)
-        var_post = fnp.maximum(ez2 - mu_post * mu_post, 0.0)
-
-        factors = factors_pre * gain[:, None]
-        factor_var = fnp.maximum(fnp.sum(factors * factors, axis=1), _MIN_VARIANCE)
-        factors = factors * fnp.sqrt(var_post / factor_var)[:, None]
-
-        mu = mu_post
-        rows.append(mu)
-
-    return fnp.stack(rows, axis=0)
-
-
-def _mean_propagation(mlp: MLP) -> fnp.ndarray:
-    """K=1 mean propagation (Algorithm 1 from the paper).
-
-    Tracks the mean vector and a scalar average variance (trace of covariance)
-    through each layer.  In practice we keep the full diagonal variance because
-    it has the same asymptotic cost and strictly lower error than tracking only
-    the trace.
-    """
-    width = mlp.width
-    mu = fnp.zeros(width)
-    var = fnp.ones(width)
-
-    rows = []
-    for w in mlp.weights:
-        # Linear layer
-        mu_pre = w.T @ mu
-        var_pre = (w * w).T @ var
-
-        # ReLU
-        mu, ez2, _ = _relu_moments(mu_pre, var_pre)
-        var = fnp.maximum(ez2 - mu * mu, 0.0)
-
-        rows.append(mu)
-
-    return fnp.stack(rows, axis=0)
-
-
-def _covariance_propagation(mlp: MLP) -> fnp.ndarray:
-    """K=2 covariance propagation (Algorithm 2 from the paper).
-
-    Tracks the full mean vector and covariance matrix through each layer.
-    The post-ReLU covariance is approximated with the leading-order Hermite
-    term (gain method) while the diagonal is replaced by the exact marginal
-    variance computed from power cumulants.
-    """
-    width = mlp.width
-    mu = fnp.zeros(width)
-    cov = fnp.eye(width)
-
-    rows = []
-    for w in mlp.weights:
-        # Linear layer
-        mu_pre = w.T @ mu
-        # Use einsum so flopscope sees the symmetry of the two w operands.
-        cov_pre = fnp.einsum("ij,ia,jb->ab", cov, w, w)
-
-        # Extract marginal variances
-        var_pre = fnp.maximum(fnp.diag(cov_pre), 1e-30)
-
-        # ReLU moments
-        mu_post, ez2, gain = _relu_moments(mu_pre, var_pre)
-        var_post = fnp.maximum(ez2 - mu_post * mu_post, 0.0)
-
-        # Off-diagonal approximation: cov_post[i,j] ≈ gain[i]*gain[j]*cov_pre[i,j]
-        cov = fnp.multiply(fnp.outer(gain, gain), cov_pre)
-        fnp.fill_diagonal(cov, var_post)
-
-        mu = mu_post
-        rows.append(mu)
-
-    return fnp.stack(rows, axis=0)
-
-
 class Estimator(BaseEstimator):
-    """Factorized K=3 cumulant-propagation estimator."""
-
-    def __init__(self) -> None:
-        self._setup_rng = None
+    """Depth-aware WhestBench estimator."""
 
     def setup(self, ctx: SetupContext) -> None:
-        self._setup_rng = fnp.random.default_rng(ctx.seed)
         _all_terms_iso_k3()
-        _terms_iso_k3_for_mode("none")
-        _terms_iso_k3_grouped_for_mode("none")
-        _terms_iso_k3_for_mode(_FACTOR_K3_MODE)
-        _terms_iso_k3_grouped_for_mode(_FACTOR_K3_MODE)
-        _terms_iso_k3_for_mode("r1_slices_k211")
-        _terms_iso_k3_grouped_for_mode("r1_slices_k211")
-        _terms_iso_k3_for_mode("r1_slices")
-        _terms_iso_k3_grouped_for_mode("r1_slices")
+        _terms_iso_k3()
+        _terms_iso_k3_grouped()
         for vertices in range(1, 5):
             _multigraphs(vertices, 2)
         for width in (16, 32, 64, 128, 256):
@@ -2222,88 +1393,10 @@ class Estimator(BaseEstimator):
             if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
                 n_samples = _hadamard_sample_count_for_budget(mlp, budget)
                 return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
+            return _factorized_k3_propagation(mlp)
         if mode == "r1":
-            return _factorized_k3_propagation(mlp, augment=_FACTOR_K3_MODE)
-        if mode in ("r1_compressed", "r1_rank_schedule") or mode.startswith("r1_cap"):
-            schedule = _r1_rank_schedule_for_mode(mode, mlp)
-            compression = os.environ.get("WHEST_R1_COMPRESS", "topk")
-            return _factorized_k3_propagation(
-                mlp,
-                augment=_FACTOR_K3_MODE,
-                rank_schedule=schedule,
-                rank_compression=compression,
-            )
-        if mode in ("none", "simple", "r1_no4", "r1_slices", "r1_slices_k211") or (
-            mode.startswith("last") and mode.endswith("_r1_slices_k211")
-        ):
-            return _factorized_k3_propagation(mlp, augment=mode)
-        if mode == "mean":
-            return _mean_propagation(mlp)
-        if mode == "cov":
-            return _covariance_propagation(mlp)
-        if mode == "sample":
-            n_samples = _sample_count_for_budget(mlp, budget)
-            return _antithetic_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-        if mode == "rademacher":
-            n_samples = _sample_count_for_budget(mlp, budget)
-            return _rademacher_sample_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-        if mode == "hadamard":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
-            return _hadamard_rademacher_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+            return _factorized_k3_propagation(mlp)
         if mode == "hadamard_first_cov":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
-        if mode == "axis":
-            return _axis_cubature_means(mlp)
-        if mode == "k2_sample":
-            return _covariance_plus_sampling(mlp, budget)
-        if mode == "r1_sample_blend":
-            return _r1_sample_blend(mlp, budget)
-        if mode == "lr_cov":
-            rank = int(os.environ.get("WHEST_LR_RANK", "256"))
-            return _lowrank_covariance_propagation(mlp, rank=rank)
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")
-
-
-def _load_baseline(name: str) -> type[BaseEstimator]:
-    """Load the `Estimator` class from `examples/<name>.py` or `examples/0N_<name>.py`."""
-    examples_dir = Path(__file__).resolve().parent / "examples"
-    candidates = [examples_dir / f"{name}.py", *examples_dir.glob(f"??_{name}.py")]
-    for candidate in candidates:
-        if candidate.is_file():
-            spec = importlib.util.spec_from_file_location(candidate.stem, candidate)
-            assert spec and spec.loader
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module.Estimator
-    raise SystemExit(
-        f"\n[whest-starterkit] Could not find baseline `{name}` in examples/.\n"
-        f"Available: {sorted(p.name for p in examples_dir.glob('*.py'))}\n"
-    )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Iterate on your estimator locally.")
-    parser.add_argument(
-        "--baseline",
-        default=None,
-        help="Compare your estimator against an example: 'random', 'mean_propagation', "
-        "or 'covariance_propagation'.",
-    )
-    parser.add_argument("--width", type=int, default=256)
-    parser.add_argument("--depth", type=int, default=32)  # phase-1 competition shape (warmup was 8)
-    parser.add_argument("--seed", type=int, default=0)
-    args = parser.parse_args()
-
-    from local_engine import build_mlp, compare_against_monte_carlo
-
-    mlp = build_mlp(width=args.width, depth=args.depth, seed=args.seed)
-
-    print("--- Your estimator ---")
-    compare_against_monte_carlo(Estimator(), mlp, estimator_budget=272_000_000_000)
-
-    if args.baseline:
-        baseline_cls = _load_baseline(args.baseline)
-        print(f"\n--- Baseline: {args.baseline} ---")
-        compare_against_monte_carlo(baseline_cls(), mlp)

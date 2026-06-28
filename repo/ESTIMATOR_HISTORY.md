@@ -24,6 +24,13 @@ groups, and a diagonal-only final-layer ReLU mean shortcut. The K=3 route is
 still the relevant fallback and comparison baseline for shallow or diagnostic
 runs.
 
+The submission estimator now keeps only the live default route and two direct
+comparison modes: `r1` for the shallow K=3 path and `hadamard_first_cov` for the
+deep Hadamard route. Older experimental modes for compressed K=3, K=1/K=2
+diagnostics, low-rank covariance, axis cubature, and sample blends were removed
+from `estimator.py` after losing or becoming irrelevant to the current scorer
+frontier.
+
 ## Winning Checkpoints
 
 - **K=2 covariance plus sampling floor.** The early analytical baseline tracked
