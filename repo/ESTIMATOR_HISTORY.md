@@ -120,6 +120,10 @@ after losing or becoming irrelevant to the current scorer frontier.
   scored `4.446e-7` adjusted / `3.864e-6` MSE / `3.130e10` effective compute
   for one-block groups, while a coarse 7+6 block split still lost at
   `3.806e-7` adjusted / `3.400e-6` MSE / `3.046e10` effective compute.
+  Retrying final-only Gaussian marginal mean correction after the `1.5x`
+  first-successor variance update as a 50% output blend also lost:
+  `3.700e-7` adjusted / `3.262e-6` MSE / `3.085e10` effective compute over
+  79 returned MLPs, with one failed worker.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
   Mean-and-variance correction on only the first post-recolor layer also lost
