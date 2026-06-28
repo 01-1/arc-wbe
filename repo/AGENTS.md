@@ -21,8 +21,9 @@ Guidance for coding agents working in this repository:
 - After changing estimator behavior, update relevant docs in the same turn;
   for `estimator.py` changes, update
   [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
-- Run tests with a workspace-local uv cache:
-  `UV_CACHE_DIR=/i/e/.uv-cache uv run pytest -q`.
+- Do not run `pytest` for estimator work unless the owner explicitly asks for
+  it. For estimator changes, use `python -m py_compile estimator.py` for syntax
+  and `make fly` for scorer-path proof.
 - Use the Fly fast runner by default for estimator iteration:
   `make fly` uploads the current `estimator.py`, launches 100 one-MLP EWR Fly
   Machines, and prints one averaged WhestBench text summary from the first 80
