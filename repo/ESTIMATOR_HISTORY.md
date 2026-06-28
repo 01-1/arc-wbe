@@ -132,6 +132,14 @@ after losing or becoming irrelevant to the current scorer frontier.
   ensemble preactivation mean/covariance to regenerate a fresh Hadamard
   Gaussian ensemble before continuing, lost badly at `1.775e-6` adjusted /
   `1.479e-5` MSE / `3.263e10` effective compute.
+  Late-layer block pruning, motivated by the score-efficient compute floor and
+  late-layer mean-error damping, also lost: keeping 13 blocks through layer 8
+  then pruning to 11 blocks scored `3.446e-7` adjusted / `3.378e-6` MSE /
+  `2.774e10` effective compute, pruning after layer 12 to 11 blocks scored
+  `3.813e-7` adjusted / `3.664e-6` MSE / `2.843e10` effective compute, and
+  pruning after layer 8 to 12 blocks scored `3.850e-7` adjusted / `3.580e-6`
+  MSE / `2.929e10` effective compute. The lower multiplier did not compensate
+  for the final-layer MSE hit.
   Trimming the highest and lowest final-layer Hadamard block mean per coordinate
   was neutral and stayed inside Fly noise at `3.343e-7` adjusted / `2.952e-6`
   MSE / `3.083e10` effective compute with no failures, so it was not promoted.
