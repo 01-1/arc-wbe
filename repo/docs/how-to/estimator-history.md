@@ -10,13 +10,45 @@ engineering log so future changes do not repeat known dead ends.
 
 The root estimator is now depth-aware. For the current contest shape
 width-256/depth-32, unforced `predict()` uses randomized antithetic
-Walsh-Hadamard sign cubature with 12 blocks, then recolors the first hidden
+Walsh-Hadamard sign cubature with 13 blocks, then recolors the first hidden
 activation ensemble so its mean and covariance match the exact zero-mean
 Gaussian ReLU moments for the first layer. Shallower MLPs still use the
 optimized factorized K=3 `r=1` path.
 
 Historical router experiments remain documented below because they are useful
 for interpreting benchmark results and avoiding repeated dead ends.
+
+## Deep Hadamard First-Covariance Route
+
+For the current width-256/depth-32 grader shape, deep cumulant propagation is
+less score-efficient than deterministic cubature through the network. The
+default deep route uses randomized antithetic Walsh-Hadamard sign blocks as
+input samples. After the first linear/ReLU layer, it applies an affine recolor
+so the ensemble's first hidden activations match the exact zero-mean Gaussian
+ReLU mean vector and covariance for `W0.T @ W0`; the recolored ensemble is then
+propagated through the remaining ReLU layers.
+
+Fly EWR 80-result sweeps with the corrected residual-compute scale found the
+best adjusted-score frontier at 13 Hadamard blocks:
+
+- 11 blocks: final-layer MSE `4.473e-6`, adjusted score `4.473e-7`,
+  effective compute `2.583e10`.
+- 12 blocks: final-layer MSE `3.664e-6`, adjusted score `3.786e-7`,
+  effective compute `2.811e10`.
+- 13 blocks: final-layer MSE `3.068e-6`, adjusted score `3.430e-7`,
+  effective compute `3.041e10`.
+- 14 blocks: final-layer MSE `3.458e-6`, adjusted score `4.150e-7`,
+  effective compute `3.267e10`.
+- 16 blocks: final-layer MSE `3.230e-6`, adjusted score `4.423e-7`,
+  effective compute `3.724e10`.
+
+Nearby first-layer moment experiments did not beat full first-covariance
+recoloring. Diagonal-only mean/variance matching was cheaper but worse
+(`4.387e-6` final-layer MSE, `4.387e-7` adjusted). Adding a marginal skew
+correction improved that diagnostic but still lost (`3.927e-6`, `3.927e-7`).
+Clipping the full recolored first-layer ensemble back to nonnegative support
+was much worse (`7.244e-6`, `7.561e-7`), so preserving the exact first-layer
+covariance is more valuable than preserving activation support in this route.
 
 ## Starting point
 
