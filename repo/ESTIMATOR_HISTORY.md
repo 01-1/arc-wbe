@@ -86,7 +86,11 @@ after losing or becoming irrelevant to the current scorer frontier.
   produced one promising first-80 run (`3.069e-7` adjusted / `2.710e-6` MSE),
   but a replicate bounced to `3.634e-7`, and the full-100 check was neutral at
   `3.386e-7` adjusted / `2.989e-6` MSE / `3.085e10` effective compute with no
-  failures. Do not promote without a stronger paired win.
+  failures. Do not promote without a stronger paired win. A positive log-space
+  power correction, using `sqrt(target/sample) ** 1.5` instead of the linear
+  `1.5x` scale update, also lost at `3.559e-7` adjusted / `3.135e-6` MSE /
+  `3.085e10` effective compute over 76 returned MLPs, with four worker
+  download failures.
 
 ## Rejected Or Guarded Ideas
 
