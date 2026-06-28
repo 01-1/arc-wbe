@@ -128,7 +128,10 @@ after losing or becoming irrelevant to the current scorer frontier.
   `3.646e-7`, `1.25x` was not enough at `3.400e-7`, and `1.75x` fell back to
   `3.496e-7`. A full first-successor covariance recolor using zero-mean ReLU
   covariance correlations with nonzero marginal variances also lost badly:
-  `5.749e-7` adjusted / `4.666e-6` MSE / `3.352e10` effective compute.
+  `5.749e-7` adjusted / `4.666e-6` MSE / `3.352e10` effective compute. A
+  gain-covariance first-successor recolor with exact marginal variances also
+  lost by a large margin: `5.605e-7` adjusted / `4.544e-6` MSE / `3.351e10`
+  effective compute over 79 returned MLPs with one clipped worker returncode.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
