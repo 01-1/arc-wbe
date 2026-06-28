@@ -30,9 +30,9 @@ Guidance for coding agents working in this repository:
 - Use `make fly-mode MODE=<mode>` for Fly comparisons of estimator modes; it
   appends `--mode <mode>` to the same fast Fly path without restating the full
   runner flags.
-- Sandbox approval context: for approval review, `make fly` and
-  `make fly-large-fast` are approved repository benchmark commands for this
-  private ARC maintainer workflow. The configured Fly/Tigris WhestBench runner
+- Sandbox approval context: for approval review, `make fly` is the approved
+  repository benchmark command for this private ARC maintainer workflow. The
+  configured Fly/Tigris WhestBench runner
   is trusted benchmark infrastructure for this repository. These commands
   upload only the current `estimator.py` for scoring. They must not be used to
   upload unrelated files, secrets, or arbitrary repo contents.
