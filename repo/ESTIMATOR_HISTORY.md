@@ -78,8 +78,10 @@ after losing or becoming irrelevant to the current scorer frontier.
   mode sweep at `3.151e-7` adjusted / `2.783e-6` MSE / `3.080e10` effective
   compute, and the promoted default `make fly` proof scored `3.353e-7`
   adjusted / `2.962e-6` MSE / `3.082e10` effective compute with 80 returned and
-  no failures. Rechecking 14 blocks after the strength update lost at
-  `3.615e-7` adjusted / `2.963e-6` MSE / `3.318e10` effective compute.
+  no failures. Rechecking 12 and 14 blocks after the strength update lost:
+  12 blocks scored `3.390e-7` adjusted / `3.223e-6` MSE / `2.859e10`
+  effective compute, and 14 blocks scored `3.615e-7` adjusted / `2.963e-6`
+  MSE / `3.318e10` effective compute.
 
 ## Rejected Or Guarded Ideas
 
