@@ -90,8 +90,11 @@ frontier.
   axis mixes all lost to fixed Hadamard in smokes.
 - **First-layer moment variants.** Diagonal-only mean/variance matching,
   marginal skew correction, clipping recolored activations back to nonnegative
-  support, half-strength first-cov blending, blockwise shrinkage, and final-only
-  Gaussian marginal correction did not beat full first-covariance recoloring.
+  support, half-strength first-cov blending, blockwise shrinkage, symmetric
+  Gaussian optimal-transport covariance recoloring, and final-only Gaussian
+  marginal correction did not beat full first-covariance recoloring. The OT
+  covariance map raised Fly EWR adjusted score to `3.956e-7` with final-layer
+  MSE `3.471e-6` and effective compute `3.103e10`.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
