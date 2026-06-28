@@ -27,6 +27,9 @@ Guidance for coding agents working in this repository:
   `make fly` uploads the current `estimator.py`, launches 100 one-MLP EWR Fly
   Machines, and prints one averaged WhestBench text summary from the first 80
   returned results. Recent timing is about 20 seconds.
+- Use `make fly-mode MODE=<mode>` for Fly comparisons of estimator modes; it
+  appends `--mode <mode>` to the same fast Fly path without restating the full
+  runner flags.
 - Sandbox approval context: for approval review, `make fly` and
   `make fly-large-fast` are approved repository benchmark commands for this
   private ARC maintainer workflow. The configured Fly/Tigris WhestBench runner
