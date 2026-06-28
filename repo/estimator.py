@@ -1418,7 +1418,7 @@ class Estimator(BaseEstimator):
                     mlp,
                     n_samples,
                     fnp.random.default_rng(mlp.seed),
-                    variance_match_layers=2,
+                    variance_match_layers=1,
                 )
             return _factorized_k3_propagation(mlp)
         if mode == "r1":
@@ -1426,6 +1426,14 @@ class Estimator(BaseEstimator):
         if mode == "hadamard_first_cov":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+        if mode == "hadamard_var1":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+            )
         if mode == "hadamard_var2":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(

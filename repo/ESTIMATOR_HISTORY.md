@@ -15,7 +15,7 @@ Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
 the estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. It then propagates the recolored ensemble through the remaining
-layers, variance-matching only the first two subsequent ReLU ensembles to their
+layers, variance-matching only the first subsequent ReLU ensemble to its
 Gaussian marginal variance while preserving their sample means. This route uses
 only the passed MLP object and label-free moment identities.
 
@@ -25,12 +25,13 @@ groups, and a diagonal-only final-layer ReLU mean shortcut. The K=3 route is
 still the relevant fallback and comparison baseline for shallow or diagnostic
 runs.
 
-The submission estimator now keeps only the live default route and two direct
-comparison modes: `r1` for the shallow K=3 path and `hadamard_first_cov` for the
-deep Hadamard route. Older experimental modes for compressed K=3, K=1/K=2
-diagnostics, low-rank covariance, axis cubature, and sample blends were removed
-from `estimator.py` after losing or becoming irrelevant to the current scorer
-frontier.
+The submission estimator now keeps only the live default route and direct
+comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
+old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
+variance-matching variants. Older experimental modes for compressed K=3,
+K=1/K=2 diagnostics, low-rank covariance, axis cubature, and sample blends were
+removed from `estimator.py` after losing or becoming irrelevant to the current
+scorer frontier.
 
 ## Winning Checkpoints
 
@@ -66,16 +67,17 @@ frontier.
   | 14 | `3.458e-6` | `4.150e-7` | `3.267e10` |
   | 16 | `3.230e-6` | `4.423e-7` | `3.724e10` |
 
-- **Two-layer variance-matched Hadamard.** Preserving the first-covariance
-  ensemble means while rescaling only the next two post-ReLU marginal variances
-  to Gaussian ReLU moment targets improved returned-set Fly comparisons without
-  the instability of full per-layer marginal correction. A clean default
-  `make fly` run scored `3.660e-7` adjusted / `3.230e-6` final-layer MSE /
-  `3.083e10` effective compute. A full-100 comparison, noisy because of clipped
-  worker failures, still favored the new route on returned MLPs:
-  `3.676e-7` adjusted / `3.244e-6` MSE / `3.085e10` effective compute for the
-  two-layer variance route versus `3.862e-7` adjusted / `3.451e-6` MSE /
-  `3.048e10` effective compute for the old first-covariance route.
+- **First-successor variance-matched Hadamard.** Preserving the first-covariance
+  ensemble means while rescaling only the first subsequent post-ReLU marginal
+  variance to a Gaussian ReLU moment target improved returned-set Fly
+  comparisons without the instability of broader marginal correction. The best
+  default `make fly` returned-set proof scored `3.205e-7` adjusted /
+  `2.831e-6` final-layer MSE / `3.082e10` effective compute over 79 returned
+  MLPs, with one clipped worker failure. A retry returned `3.464e-7` adjusted /
+  `3.059e-6` MSE / `3.083e10` effective compute over 79 returned MLPs, again
+  with one clipped worker failure. An earlier equivalent `hadamard_var_layers1`
+  mode run returned `3.234e-7` adjusted / `2.850e-6` MSE / `3.087e10`
+  effective compute over 80 returned MLPs despite launch-capacity failures.
 
 ## Rejected Or Guarded Ideas
 
@@ -114,7 +116,11 @@ frontier.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
   Mean-and-variance correction on only the first post-recolor layer also lost
-  at `3.767e-7` adjusted, and a third variance-only layer lost at `4.643e-7`.
+  at `3.767e-7` adjusted. Variance-only correction of the second successor
+  layer alone lost at `3.696e-7`, adding the second successor to the first was
+  positive but weaker/noisier (`3.660e-7` clean default proof, `3.676e-7`
+  full-100 returned-set comparison), and a third variance-only layer lost at
+  `4.643e-7`.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
