@@ -117,10 +117,11 @@ after losing or becoming irrelevant to the current scorer frontier.
   axis mixes all lost to fixed Hadamard in smokes. Deterministic per-block
   Hadamard column permutations after the `1.5x` first-successor variance update
   also lost at `3.634e-7` adjusted / `3.201e-6` MSE / `3.089e10` effective
-  compute. Trimming the highest and lowest final-layer Hadamard block mean per
-  coordinate was neutral and stayed inside Fly noise at `3.343e-7` adjusted /
-  `2.952e-6` MSE / `3.083e10` effective compute with no failures, so it was
-  not promoted.
+  compute, and balancing the random diagonal signs across 13 blocks lost at
+  `3.629e-7` adjusted / `3.202e-6` MSE / `3.085e10` effective compute.
+  Trimming the highest and lowest final-layer Hadamard block mean per coordinate
+  was neutral and stayed inside Fly noise at `3.343e-7` adjusted / `2.952e-6`
+  MSE / `3.083e10` effective compute with no failures, so it was not promoted.
 - **First-layer moment variants.** Diagonal-only mean/variance matching,
   marginal skew correction, clipping recolored activations back to nonnegative
   support, half-strength first-cov blending, blockwise shrinkage, symmetric
