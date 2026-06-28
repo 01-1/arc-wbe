@@ -170,7 +170,10 @@ after losing or becoming irrelevant to the current scorer frontier.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
-  original K=2 route.
+  original K=2 route. Blending the current Hadamard route 5% toward an
+  independently propagated full gain-covariance analytical estimate also lost:
+  `3.656e-7` adjusted / `3.048e-6` MSE / `3.266e10` effective compute, with
+  the extra covariance pass hurting the score multiplier.
 
 ## Benchmarking Notes
 
