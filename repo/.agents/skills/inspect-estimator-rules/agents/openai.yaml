@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspect Estimator Rules"
+  short_description: "Audit estimator.py for challenge rule compliance"
+  default_prompt: "Use $inspect-estimator-rules to audit estimator.py for ARC White-Box challenge rule compliance."
