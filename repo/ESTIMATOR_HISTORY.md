@@ -82,6 +82,11 @@ after losing or becoming irrelevant to the current scorer frontier.
   12 blocks scored `3.390e-7` adjusted / `3.223e-6` MSE / `2.859e10`
   effective compute, and 14 blocks scored `3.615e-7` adjusted / `2.963e-6`
   MSE / `3.318e10` effective compute.
+  Shrinking the per-coordinate variance scale halfway toward one global scalar
+  produced one promising first-80 run (`3.069e-7` adjusted / `2.710e-6` MSE),
+  but a replicate bounced to `3.634e-7`, and the full-100 check was neutral at
+  `3.386e-7` adjusted / `2.989e-6` MSE / `3.085e10` effective compute with no
+  failures. Do not promote without a stronger paired win.
 
 ## Rejected Or Guarded Ideas
 
