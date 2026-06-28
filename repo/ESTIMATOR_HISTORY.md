@@ -130,7 +130,11 @@ after losing or becoming irrelevant to the current scorer frontier.
   at `3.767e-7` adjusted. Variance-only correction of the second successor
   layer alone lost at `3.696e-7`, adding the second successor to the first was
   positive but weaker/noisier (`3.660e-7` clean default proof, `3.676e-7`
-  full-100 returned-set comparison), and a third variance-only layer lost at
+  full-100 returned-set comparison), and a decayed `1.5x`/`0.5x` two-layer
+  schedule remained behind at `3.510e-7` adjusted / `3.095e-6` MSE /
+  `3.085e10` effective compute with no failures. That decayed-schedule delta
+  is within the 15% relative Fly-noise band, so it was not promoted but is not
+  treated as a decisive mechanism loss. A third variance-only layer lost at
   `4.643e-7`. For the first-successor strength sweep, `0.75x` lost at
   `3.646e-7`, `1.25x` was not enough at `3.400e-7`, and `1.75x` fell back to
   `3.496e-7`. A full first-successor covariance recolor using zero-mean ReLU
