@@ -120,7 +120,9 @@ scorer frontier.
   layer alone lost at `3.696e-7`, adding the second successor to the first was
   positive but weaker/noisier (`3.660e-7` clean default proof, `3.676e-7`
   full-100 returned-set comparison), and a third variance-only layer lost at
-  `4.643e-7`.
+  `4.643e-7`. A full first-successor covariance recolor using zero-mean ReLU
+  covariance correlations with nonzero marginal variances also lost badly:
+  `5.749e-7` adjusted / `4.666e-6` MSE / `3.352e10` effective compute.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
