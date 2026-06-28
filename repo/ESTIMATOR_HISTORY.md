@@ -131,7 +131,12 @@ after losing or becoming irrelevant to the current scorer frontier.
   Retrying final-only Gaussian marginal mean correction after the `1.5x`
   first-successor variance update as a 50% output blend also lost:
   `3.700e-7` adjusted / `3.262e-6` MSE / `3.085e10` effective compute over
-  79 returned MLPs, with one failed worker.
+  79 returned MLPs, with one failed worker. Final-layer sample-cumulant
+  Edgeworth blends were also not robust: 50% scored `3.504e-7` adjusted /
+  `3.082e-6` MSE, 20% initially scored `3.263e-7` adjusted / `2.870e-6` MSE,
+  10% bounced to `3.409e-7` adjusted / `2.999e-6` MSE, and a full-100 check
+  of the 20% blend settled at `3.458e-7` adjusted / `3.034e-6` MSE /
+  `3.102e10` effective compute over 99 returned MLPs with one worker failure.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
   Mean-and-variance correction on only the first post-recolor layer also lost
