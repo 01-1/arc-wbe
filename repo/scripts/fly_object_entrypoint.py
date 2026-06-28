@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+RAW_RESIDUAL_FLOPS_PER_SECOND = 100_000_000_000.0
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -85,10 +86,11 @@ def _copy_one_mlp_fields(result: dict[str, object]) -> dict[str, object]:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             compact[target] = value
 
-    flops = compact.get("mlp_flops_used")
-    effective = compact.get("mlp_effective_compute")
-    if isinstance(flops, (int, float)) and isinstance(effective, (int, float)):
-        compact["mlp_residual_compute"] = max(0.0, float(effective) - float(flops))
+    residual_wall_time = compact.get("mlp_residual_wall_time_s")
+    if isinstance(residual_wall_time, (int, float)):
+        compact["mlp_residual_compute"] = max(
+            0.0, float(residual_wall_time) * RAW_RESIDUAL_FLOPS_PER_SECOND
+        )
     return compact
 
 
