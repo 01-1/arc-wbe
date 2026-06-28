@@ -1326,10 +1326,23 @@ def _zero_mean_relu_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.nda
     return mean, cov
 
 
+def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.ndarray:
+    """Gaussian marginal ReLU variance for possibly nonzero preactivations."""
+    var_pre = fnp.maximum(var_pre, _MIN_VARIANCE)
+    sigma = fnp.sqrt(var_pre)
+    alpha = mean_pre / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+    relu_mean = sigma * phi + mean_pre * Phi
+    second = (mean_pre * mean_pre + var_pre) * Phi + mean_pre * sigma * phi
+    return fnp.maximum(second - relu_mean * relu_mean, _MIN_VARIANCE)
+
+
 def _hadamard_first_cov_recolored_means(
     mlp: MLP,
     n_samples: int,
     rng: fnp.random.Generator,
+    variance_match_layers: int = 0,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
     x = _hadamard_rademacher_samples(mlp, n_samples, rng)
@@ -1348,8 +1361,17 @@ def _hadamard_first_cov_recolored_means(
     x = centered @ recolor + target_mean[None, :]
 
     rows = [target_mean]
-    for w in mlp.weights[1:]:
-        x = fnp.maximum(x @ w, 0.0)
+    for layer_idx, w in enumerate(mlp.weights[1:], start=1):
+        pre = x @ w
+        x = fnp.maximum(pre, 0.0)
+        if layer_idx <= variance_match_layers:
+            pre_mean = fnp.mean(pre, axis=0)
+            pre_centered = pre - pre_mean[None, :]
+            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
+            sample_mean = fnp.mean(x, axis=0)
+            centered_layer = x - sample_mean[None, :]
+            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            x = centered_layer * fnp.sqrt(target_var / sample_var)[None, :] + sample_mean[None, :]
         rows.append(fnp.mean(x, axis=0))
     return fnp.stack(rows, axis=0)
 
@@ -1392,11 +1414,24 @@ class Estimator(BaseEstimator):
         if mode in ("", "default"):
             if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
                 n_samples = _hadamard_sample_count_for_budget(mlp, budget)
-                return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+                return _hadamard_first_cov_recolored_means(
+                    mlp,
+                    n_samples,
+                    fnp.random.default_rng(mlp.seed),
+                    variance_match_layers=2,
+                )
             return _factorized_k3_propagation(mlp)
         if mode == "r1":
             return _factorized_k3_propagation(mlp)
         if mode == "hadamard_first_cov":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
+        if mode == "hadamard_var2":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=2,
+            )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")

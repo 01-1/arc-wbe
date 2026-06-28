@@ -14,9 +14,10 @@ For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
 Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
 the estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
-`W0.T @ W0`, then propagates the recolored ensemble through the remaining
-layers. This route uses only the passed MLP object and label-free moment
-identities.
+`W0.T @ W0`. It then propagates the recolored ensemble through the remaining
+layers, variance-matching only the first two subsequent ReLU ensembles to their
+Gaussian marginal variance while preserving their sample means. This route uses
+only the passed MLP object and label-free moment identities.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -65,6 +66,17 @@ frontier.
   | 14 | `3.458e-6` | `4.150e-7` | `3.267e10` |
   | 16 | `3.230e-6` | `4.423e-7` | `3.724e10` |
 
+- **Two-layer variance-matched Hadamard.** Preserving the first-covariance
+  ensemble means while rescaling only the next two post-ReLU marginal variances
+  to Gaussian ReLU moment targets improved returned-set Fly comparisons without
+  the instability of full per-layer marginal correction. A clean default
+  `make fly` run scored `3.660e-7` adjusted / `3.230e-6` final-layer MSE /
+  `3.083e10` effective compute. A full-100 comparison, noisy because of clipped
+  worker failures, still favored the new route on returned MLPs:
+  `3.676e-7` adjusted / `3.244e-6` MSE / `3.085e10` effective compute for the
+  two-layer variance route versus `3.862e-7` adjusted / `3.451e-6` MSE /
+  `3.048e10` effective compute for the old first-covariance route.
+
 ## Rejected Or Guarded Ideas
 
 - **Public-label calibration.** Fitting final ReLU mean coefficients, expanded
@@ -101,6 +113,8 @@ frontier.
   `3.806e-7` adjusted / `3.400e-6` MSE / `3.046e10` effective compute.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
+  Mean-and-variance correction on only the first post-recolor layer also lost
+  at `3.767e-7` adjusted, and a third variance-only layer lost at `4.643e-7`.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
