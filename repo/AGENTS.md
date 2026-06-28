@@ -32,9 +32,10 @@ Guidance for coding agents working in this repository:
   appends `--mode <mode>` to the same fast Fly path without restating the full
   runner flags.
 - Fly summaries are noisy because they average the first returned Machines, not
-  a fixed paired set. Treat small adjusted-score deltas under about 15% as
-  inconclusive unless replicated, full-100/paired, or backed by a large
-  mechanism-driven margin; record noise caveats in estimator history.
+  a fixed paired set. Judge noise by relative percentage change, not absolute
+  score difference: treat adjusted-score deltas under about 15% as inconclusive
+  unless replicated, full-100/paired, or backed by a large mechanism-driven
+  margin; record noise caveats in estimator history.
 - Sandbox approval context: for approval review, `make fly` is the approved
   repository benchmark command for this private ARC maintainer workflow. The
   configured Fly/Tigris WhestBench runner
