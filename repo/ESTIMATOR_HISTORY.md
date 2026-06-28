@@ -82,6 +82,15 @@ after losing or becoming irrelevant to the current scorer frontier.
   12 blocks scored `3.390e-7` adjusted / `3.223e-6` MSE / `2.859e10`
   effective compute, and 14 blocks scored `3.615e-7` adjusted / `2.963e-6`
   MSE / `3.318e10` effective compute.
+  Owner AICrowd 50-MLP checks later put `4301cef` ("Use first-layer variance
+  match by default") at `3.12e-7` adjusted / `2.77e-6` MSE, while `21128f4`
+  ("Variance-match early Hadamard layers") scored `3.44e-7` adjusted /
+  `3.07e-6` MSE; treat that as external support for keeping the one-layer
+  variance route ahead of broader early-layer correction, while still inside
+  the documented Fly noise caveats for small deltas. The later `803d3ad`
+  strength-tuned default scored `3.18e-7` adjusted / `2.84e-6` MSE on the same
+  owner AICrowd 50-MLP path, supporting the `1.5x` first-successor strength as
+  the current default despite noisy Fly replicates.
   Shrinking the per-coordinate variance scale halfway toward one global scalar
   produced one promising first-80 run (`3.069e-7` adjusted / `2.710e-6` MSE),
   but a replicate bounced to `3.634e-7`, and the full-100 check was neutral at
