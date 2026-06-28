@@ -144,7 +144,10 @@ after losing or becoming irrelevant to the current scorer frontier.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
   Mean-and-variance correction on only the first post-recolor layer also lost
-  at `3.767e-7` adjusted. Variance-only correction of the second successor
+  at `3.767e-7` adjusted, and a 25% first-successor mean pull on top of the
+  current `1.5x` variance update stayed neutral at `3.352e-7` adjusted /
+  `2.958e-6` MSE / `3.083e10` effective compute over 79 returned MLPs, with
+  one worker failure. Variance-only correction of the second successor
   layer alone lost at `3.696e-7`, adding the second successor to the first was
   positive but weaker/noisier (`3.660e-7` clean default proof, `3.676e-7`
   full-100 returned-set comparison), and a decayed `1.5x`/`0.5x` two-layer
