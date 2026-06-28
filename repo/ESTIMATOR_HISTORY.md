@@ -105,7 +105,10 @@ after losing or becoming irrelevant to the current scorer frontier.
 - **Alternative sample families.** Ordinary Gaussian sampling, Rademacher
   sampling, axis cubature, low-rank covariance ensembles, Halton/bridge
   samples, `H D H` rotated signs, spherical radial scaling, and fourth-moment
-  axis mixes all lost to fixed Hadamard in smokes.
+  axis mixes all lost to fixed Hadamard in smokes. Deterministic per-block
+  Hadamard column permutations after the `1.5x` first-successor variance update
+  also lost at `3.634e-7` adjusted / `3.201e-6` MSE / `3.089e10` effective
+  compute.
 - **First-layer moment variants.** Diagonal-only mean/variance matching,
   marginal skew correction, clipping recolored activations back to nonnegative
   support, half-strength first-cov blending, blockwise shrinkage, symmetric
