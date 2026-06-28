@@ -1,0 +1,100 @@
+# Estimator History
+
+This is the decision-useful history for the repository-root
+[`estimator.py`](estimator.py). It is intentionally compact: keep the current
+route, benchmark checkpoints that changed direction, and rejected ideas that
+are likely to be retried.
+
+## Current Estimator
+
+The current grader shape is width 256, depth 32, with a `2.72e11` FLOP/MLP
+budget and a score-efficient target just under `2.72e10` effective FLOPs.
+
+For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
+Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
+the estimator linearly recolors the first hidden activation ensemble so its
+mean and covariance match the exact zero-mean Gaussian ReLU moments for
+`W0.T @ W0`, then propagates the recolored ensemble through the remaining
+layers. This route uses only the passed MLP object and label-free moment
+identities.
+
+For shallower MLPs, the default remains the optimized factorized K=3 cumulant
+route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
+groups, and a diagonal-only final-layer ReLU mean shortcut. The K=3 route is
+still the relevant fallback and comparison baseline for shallow or diagnostic
+runs.
+
+## Winning Checkpoints
+
+- **K=2 covariance plus sampling floor.** The early analytical baseline tracked
+  full covariance with exact marginal ReLU moments and blended in antithetic
+  sampling when it fit below the old 10% score floor. At width-256/depth-8 it
+  used about `6.69e9` FLOPs and landed around `2.12e-05` final-layer MSE. It
+  was useful as a floor, but left too much accuracy on the table.
+- **Factorized K=3 `r1`.** Porting the upstream factorized K=3 path, caching
+  repeated diagonal slices, and routing through the `r=1` harmonic subset beat
+  K=2 despite higher compute. The final-layer shortcut later reduced the
+  width-256/depth-8 route to about `1.63e10` FLOPs with unchanged predictions.
+- **Structured grouped `r1`.** Keeping third-cumulant terms as structured
+  factor groups reduced analytical FLOPs from about `1.63e10` to `1.25e10` on
+  width-256/depth-8 while preserving predictions. Local cached-mini scoring
+  with residual-time charging kept exact grouped `r1` ahead of the compression
+  variants that were safe to run.
+- **Depth-32 retargeting.** Exact grouped `r1` fit analytically at
+  width-256/depth-32 but left too little residual-time headroom. A compressed
+  K=3 depth route was a temporary bridge, but randomized Hadamard cubature was
+  far better for deep networks.
+- **First-covariance Hadamard.** Plain Hadamard blocks outperformed compressed
+  K=3 on depth-32. Recoloring the first hidden ensemble to the exact
+  first-layer Gaussian ReLU mean/covariance improved the route further without
+  using labels. Fly EWR 80-result sweeps with corrected residual compute found
+  the best adjusted-score frontier at 13 blocks:
+
+  | Blocks | Final-layer MSE | Adjusted score | Effective compute |
+  |---:|---:|---:|---:|
+  | 11 | `4.473e-6` | `4.473e-7` | `2.583e10` |
+  | 12 | `3.664e-6` | `3.786e-7` | `2.811e10` |
+  | 13 | `3.068e-6` | `3.430e-7` | `3.041e10` |
+  | 14 | `3.458e-6` | `4.150e-7` | `3.267e10` |
+  | 16 | `3.230e-6` | `4.423e-7` | `3.724e10` |
+
+## Rejected Or Guarded Ideas
+
+- **Public-label calibration.** Fitting final ReLU mean coefficients, expanded
+  shortcut features, or residual overlays against cached public-mini labels is
+  not a legitimate estimator improvement. Those experiments were removed and
+  should not be revived.
+- **Structured compression.** Whole-group and boundary-group compression looked
+  like small local wins, but one structured-cap default was not grader-safe
+  because group ordering extracted host Python floats from flopscope remote
+  scalars. Compression is still worth revisiting only if ranking stays inside
+  flopscope-safe array operations and wins under the residual multiplier.
+- **Dense top-k rank caps.** Old flops-only adjusted-score proxies ignored
+  residual wall time and overstated the value of dense scheduled compression.
+  Current grouped exact `r1` remains the true shallow baseline unless a new
+  compression route wins under `make mini`/Fly-style residual scoring.
+- **Augmented K=3 suffixes.** Corrected `r1_slices_k211` augmentation improves
+  raw MSE, especially in late-layer suffixes, but residual wall time and
+  effective compute have beaten the accuracy gain so far. Retry only with a
+  concrete residual-time reduction.
+- **Alternative sample families.** Ordinary Gaussian sampling, Rademacher
+  sampling, axis cubature, low-rank covariance ensembles, Halton/bridge
+  samples, `H D H` rotated signs, spherical radial scaling, and fourth-moment
+  axis mixes all lost to fixed Hadamard in smokes.
+- **First-layer moment variants.** Diagonal-only mean/variance matching,
+  marginal skew correction, clipping recolored activations back to nonnegative
+  support, half-strength first-cov blending, blockwise shrinkage, and final-only
+  Gaussian marginal correction did not beat full first-covariance recoloring.
+- **Full per-layer Gaussian marginal correction.** Correcting every layer's
+  marginals destroyed useful joint geometry and produced much worse scores.
+- **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
+  These replaced the simple gain covariance approximation, but nonzero later
+  pre-activation means and numerical instability made them worse than the
+  original K=2 route.
+
+## Benchmarking Notes
+
+Use current scorer-path comparisons, not stale flops-only proxies. For
+estimator changes, follow [`AGENTS.md`](AGENTS.md): compile `estimator.py` and
+use the Fly fast runner by default unless the owner asks for a different proof.
+For docs-only changes, a link/search check and Markdown sanity are sufficient.

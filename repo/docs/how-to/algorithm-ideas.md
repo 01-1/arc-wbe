@@ -49,7 +49,7 @@ Track the full covariance matrix between neurons. More accurate because it captu
 
 For the repository-root estimator's recent covariance-plus-sampling tuning
 history, including covariance-update experiments that were rejected, see
-[`estimator-history.md`](./estimator-history.md).
+[`ESTIMATOR_HISTORY.md`](../../ESTIMATOR_HISTORY.md).
 
 ## Fixed single-strategy design
 

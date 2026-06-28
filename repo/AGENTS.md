@@ -20,7 +20,7 @@ Guidance for coding agents working in this repository:
 - Keep estimator changes focused in `estimator.py`.
 - After changing estimator behavior, update relevant docs in the same turn;
   for `estimator.py` changes, update
-  [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
+  [`ESTIMATOR_HISTORY.md`](ESTIMATOR_HISTORY.md).
 - Do not run `pytest` for estimator work unless the owner explicitly asks for
   it. For estimator changes, use `python -m py_compile estimator.py` for syntax
   and `make fly` for scorer-path proof.
@@ -42,4 +42,4 @@ Guidance for coding agents working in this repository:
   `max(0.1, C / 2.72e11)`, so the score-efficient target is just under
   `2.72e10` effective FLOPs.
 - Before changing the estimator, read
-  [`docs/how-to/estimator-history.md`](docs/how-to/estimator-history.md).
+  [`ESTIMATOR_HISTORY.md`](ESTIMATOR_HISTORY.md).
