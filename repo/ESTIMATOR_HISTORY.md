@@ -82,6 +82,12 @@ after losing or becoming irrelevant to the current scorer frontier.
   12 blocks scored `3.390e-7` adjusted / `3.223e-6` MSE / `2.859e10`
   effective compute, and 14 blocks scored `3.615e-7` adjusted / `2.963e-6`
   MSE / `3.318e10` effective compute.
+  Explicitly rechecking the lower block frontier after the `1.5x` strength
+  update found that the score floor was not enough to offset MSE: 11 blocks
+  reached the `0.1` multiplier floor but scored `3.561e-7` adjusted /
+  `3.560e-6` MSE / `2.624e10` effective compute, and 12 blocks scored
+  `3.589e-7` adjusted / `3.422e-6` MSE / `2.852e10` effective compute, both
+  with no failures.
   Owner AICrowd 50-MLP checks later put `4301cef` ("Use first-layer variance
   match by default") at `3.12e-7` adjusted / `2.77e-6` MSE, while `21128f4`
   ("Variance-match early Hadamard layers") scored `3.44e-7` adjusted /
@@ -99,7 +105,46 @@ after losing or becoming irrelevant to the current scorer frontier.
   power correction, using `sqrt(target/sample) ** 1.5` instead of the linear
   `1.5x` scale update, also lost at `3.559e-7` adjusted / `3.135e-6` MSE /
   `3.085e10` effective compute over 76 returned MLPs, with four worker
-  download failures.
+  download failures. A global energy thermostat that scaled the whole
+  first-successor centered ensemble by one total variance ratio, preserving
+  correlations more aggressively than per-coordinate scaling, was also not
+  enough: `1.5x` scored `3.319e-7` adjusted / `2.929e-6` MSE / `3.084e10`
+  effective compute with no failures. Clipping the current per-coordinate
+  first-successor scale factors around one was close but not actionable:
+  a `1.5` cap scored `3.232e-7` adjusted / `2.852e-6` MSE / `3.084e10`
+  effective compute, while a looser `2.0` cap scored `3.367e-7` adjusted /
+  `2.974e-6` MSE / `3.081e10` effective compute, both with no failures.
+  Combining the `1.5` cap with 12 blocks did not recover the lower-compute
+  frontier: it scored `3.471e-7` adjusted / `3.301e-6` MSE / `2.856e10`
+  effective compute over 79 returned MLPs, with one worker returncode failure.
+  An ensemble-derived kurtosis gate for the first-successor variance strength,
+  damping coordinates whose preactivation ensemble looked less Gaussian, landed
+  near the scale-cap result but was not promotable: damping `0.25` scored
+  `3.233e-7` adjusted / `2.852e-6` MSE / `3.084e10` effective compute over
+  78 returned MLPs, with two worker returncode failures.
+  Weighting the first-successor variance strength by the next layer's outgoing
+  weight energy, intended to spend marginal correction only on coordinates with
+  high downstream sensitivity, also stayed behind the default frontier:
+  `3.394e-7` adjusted / `2.994e-6` MSE / `3.084e10` effective compute with no
+  worker failures.
+  Restoring the original first-successor correlation geometry after the useful
+  marginal variance scale, by mapping the corrected ensemble to the original
+  post-ReLU correlation matrix with corrected marginal variances, lost on both
+  MSE and compute: `3.883e-7` adjusted / `3.148e-6` MSE / `3.353e10`
+  effective compute with no worker failures.
+  Clipping negative adjusted activations back to nonnegative support after the
+  current first-successor variance scale also lost, indicating that the
+  unconstrained centered scale's geometry is more useful than enforcing ReLU
+  support at that point: `3.624e-7` adjusted / `3.193e-6` MSE / `3.085e10`
+  effective compute with no worker failures.
+  Applying the same variance-ratio correction to centered preactivations before
+  the first-successor ReLU, instead of to centered post-ReLU activations, was a
+  decisive loss at `1.5x`: `5.821e-7` adjusted / `5.130e-6` MSE /
+  `3.089e10` effective compute with no failures.
+  Replacing the first-layer recolor matrix inverse with `fnp.linalg.solve`
+  was semantically equivalent but did not produce a useful scorer-path win:
+  `3.520e-7` adjusted / `3.100e-6` MSE / `3.083e10` effective compute with
+  no failures, so the established inverse expression was kept.
 
 ## Rejected Or Guarded Ideas
 
@@ -128,6 +173,15 @@ after losing or becoming irrelevant to the current scorer frontier.
   also lost at `3.634e-7` adjusted / `3.201e-6` MSE / `3.089e10` effective
   compute, and balancing the random diagonal signs across 13 blocks lost at
   `3.629e-7` adjusted / `3.202e-6` MSE / `3.085e10` effective compute.
+  Replacing repeated Sylvester-Hadamard blocks with 13 deterministic quadratic
+  chirp Hadamard bases, intended to diversify fourth-order aliasing while
+  preserving orthogonal sign cubature, also lost: `3.717e-7` adjusted /
+  `3.268e-6` MSE / `3.095e10` effective compute with no failures.
+  A final-row block jackknife over odd/even Hadamard block halves also lost as
+  a finite-block bias correction: +20% scored `3.758e-7` adjusted /
+  `3.304e-6` MSE / `3.095e10` effective compute, while -20% scored
+  `3.615e-7` adjusted / `3.193e-6` MSE / `3.081e10` effective compute, both
+  with no failures.
   A mid-network Gaussian preactivation restart at layer 8, using the current
   ensemble preactivation mean/covariance to regenerate a fresh Hadamard
   Gaussian ensemble before continuing, lost badly at `1.775e-6` adjusted /
@@ -140,9 +194,24 @@ after losing or becoming irrelevant to the current scorer frontier.
   pruning after layer 8 to 12 blocks scored `3.850e-7` adjusted / `3.580e-6`
   MSE / `2.929e10` effective compute. The lower multiplier did not compensate
   for the final-layer MSE hit.
+  Returning cheap placeholder rows for hidden layers while preserving the
+  final-layer propagation and final mean was attempted because the leaderboard
+  ranks on final-layer adjusted score and hidden rows are diagnostic. It did
+  not reduce effective compute and hurt robustness: one 80-return Fly run had
+  one worker failure, `3.607e-7` adjusted / `3.183e-6` MSE /
+  `3.083e10` effective compute, with all-layer MSE degraded as expected.
   Trimming the highest and lowest final-layer Hadamard block mean per coordinate
   was neutral and stayed inside Fly noise at `3.343e-7` adjusted / `2.952e-6`
   MSE / `3.083e10` effective compute with no failures, so it was not promoted.
+  Coordinatewise median aggregation of final-layer block means was much worse,
+  suggesting that mean cancellation across Hadamard blocks is important:
+  `5.216e-7` adjusted / `4.602e-6` MSE / `3.083e10` effective compute with no
+  failures.
+  Clipping high-leverage sample rows after the first-successor variance match,
+  as a robust-cubature attempt to limit rare large activation radii before they
+  propagate through later layers, also hurt raw MSE: a loose `2.0x` RMS-radius
+  cap scored `3.578e-7` adjusted / `3.152e-6` MSE / `3.092e10` effective
+  compute with no failures.
   Final-row inverse-variance weighting across Hadamard block means also lost:
   a 50% blend scored `3.508e-7` adjusted / `3.089e-6` MSE / `3.088e10`
   effective compute, and a 20% blend scored `3.427e-7` adjusted / `3.024e-6`
@@ -161,6 +230,27 @@ after losing or becoming irrelevant to the current scorer frontier.
   effective compute. Increasing the Cholesky covariance ridge from `1e-6` to
   `1e-4` and `1e-3` of the target average variance also lost at `3.497e-7` and
   `3.714e-7` adjusted, respectively.
+  Replacing the full first-layer Cholesky covariance transport with diagonal
+  coordinate transport reduced compute but lost too much accuracy:
+  `3.781e-7` adjusted / `3.494e-6` MSE / `2.945e10` effective compute with no
+  failures. A first-successor projected covariance correction in the top 32
+  next-weight right-singular directions also lost badly despite being gentler
+  than full covariance recoloring: `9.209e-7` adjusted / `8.004e-6` MSE /
+  `3.128e10` effective compute with no failures.
+  A downstream-aware orthogonal gauge inside the first-layer covariance
+  transport, preserving the exact first-layer mean/covariance while rotating
+  the whitened ensemble toward the next weight metric, was a decisive loss:
+  `8.658e-7` adjusted / `7.571e-6` MSE / `3.110e10` effective compute over
+  79 returned MLPs, with one worker returncode failure.
+  A radial transport of the centered first-layer recolored ensemble, shrinking
+  or expanding each sample toward the exact total covariance trace to reduce
+  higher-order row-radius error, also lost at half strength:
+  `4.117e-7` adjusted / `3.629e-6` MSE / `3.084e10` effective compute with no
+  worker failures.
+  A two-radius fourth-moment mixture after the first-layer covariance recolor,
+  alternating centered-row scales while recentering to keep the first reported
+  mean fixed, was catastrophic even at half strength: `1.353e-5` adjusted /
+  `1.191e-4` MSE / `3.090e10` effective compute with no worker failures.
   Retrying final-only Gaussian marginal mean correction after the `1.5x`
   first-successor variance update as a 50% output blend also lost:
   `3.700e-7` adjusted / `3.262e-6` MSE / `3.085e10` effective compute over
@@ -176,6 +266,26 @@ after losing or becoming irrelevant to the current scorer frontier.
   10% bounced to `3.409e-7` adjusted / `2.999e-6` MSE, and a full-100 check
   of the 20% blend settled at `3.458e-7` adjusted / `3.034e-6` MSE /
   `3.102e10` effective compute over 99 returned MLPs with one worker failure.
+  First-successor row-only Gaussian control variates, which changed reported
+  rows without mutating the propagated ensemble, did not provide an actionable
+  final-layer signal: 10% scored `3.368e-7` adjusted / `2.971e-6` MSE /
+  `3.085e10` effective compute, while 20% scored `3.590e-7` adjusted /
+  `3.172e-6` MSE / `3.082e10` effective compute.
+  A final-row pull toward an independently propagated diagonal Gaussian
+  mean-field estimator also lost badly even at 5% blend:
+  `5.860e-7` adjusted / `5.148e-6` MSE / `3.096e10` effective compute with no
+  failures.
+  Blending the Hadamard route with the existing analytical K=3/r=1 propagation
+  was not viable as a control variate because the fixed analytical pass
+  exhausted the combined budget even at a 5% blend: the Fly run returned
+  `9.220e-01` adjusted / `9.220e-01` MSE / `2.769e11` effective compute, with
+  all 80 returned MLPs reporting `combined_budget_exhausted`.
+  A quadratic Hermite control variate for reported ReLU means, using fitted
+  zero-mean `H2` features from each layer's current preactivation ensemble,
+  lost on score after residual compute: all-row QCV at 100% scored `3.694e-7`
+  adjusted / `3.042e-6` MSE / `3.279e10` effective compute, and final-row-only
+  QCV at 100% scored `3.415e-7` adjusted / `3.010e-6` MSE / `3.090e10`
+  effective compute, both with no failures.
 - **Full per-layer Gaussian marginal correction.** Correcting every layer's
   marginals destroyed useful joint geometry and produced much worse scores.
   Mean-and-variance correction on only the first post-recolor layer also lost
@@ -198,6 +308,30 @@ after losing or becoming irrelevant to the current scorer frontier.
   gain-covariance first-successor recolor with exact marginal variances also
   lost by a large margin: `5.605e-7` adjusted / `4.544e-6` MSE / `3.351e10`
   effective compute over 79 returned MLPs with one clipped worker returncode.
+  A third-cumulant Edgeworth target for the first-successor marginal variance
+  was tried as a more theoretical replacement for the Gaussian variance target
+  while preserving the existing one-layer variance-match hook. Both signs lost:
+  50% scored `3.689e-7` adjusted / `3.248e-6` MSE / `3.088e10` effective
+  compute, and -50% scored `3.875e-7` adjusted / `3.419e-6` MSE /
+  `3.086e10` effective compute, with no worker failures.
+  A first-layer cubic marginal transport, matching the exact ReLU half-Gaussian
+  third central moment after the first covariance recolor and before later
+  propagation, also damaged the useful joint geometry: 50% strength scored
+  `5.020e-7` adjusted / `4.419e-6` MSE / `3.090e10` effective compute over
+  79 returned MLPs, with one worker returncode failure.
+  Pre-ReLU gate-rate calibration on the first successor, shifting each
+  coordinate's threshold toward the Gaussian marginal active probability before
+  applying the existing post-ReLU variance scale, also lost badly:
+  `4.295e-7` adjusted / `3.784e-6` MSE / `3.085e10` effective compute with no
+  worker failures.
+  Heat-kernel smoothing of the ReLU kink during the Hadamard propagation,
+  replacing each hard ReLU with `E[ReLU(pre + noise)]` at 5% of each layer's
+  ensemble preactivation standard deviation, also lost and spent extra compute:
+  `4.476e-7` adjusted / `3.427e-6` MSE / `3.547e10` effective compute with no
+  worker failures. Restricting the same kink smoothing to the final scored
+  layer avoided most of the extra compute but still worsened raw MSE: a 2%
+  final-layer bandwidth scored `3.678e-7` adjusted / `3.221e-6` MSE /
+  `3.111e10` effective compute with no worker failures.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
