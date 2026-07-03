@@ -187,6 +187,23 @@ after losing or becoming irrelevant to the current scorer frontier.
   failures. Because L2 effective compute stayed above the `2.72e10` floor and
   residual charge exceeded 15% of raw FLOPs, no block-reinvestment or L3 run
   was taken from this implementation.
+  Batching all Strassen leaves into one `fnp.einsum("brk,bkc->brc", ...)` per
+  propagation matmul preserved the raw L2 Strassen FLOP count but did not fix
+  the residual-time problem. An initial leaf-ordering bug had correct
+  `2.335e10` raw FLOPs but broken predictions (`1.190e-1` adjusted /
+  `1.119e0` MSE / `2.854e10` effective compute), so it was discarded. After
+  fixing the leaf order, `hadamard_st2` scored `3.423e-7` adjusted /
+  `3.205e-6` MSE / `2.949e10` effective compute with `2.335e10` raw FLOPs and
+  `6.134e9` residual compute, again over 80 returned MLPs with no failures.
+  Since effective compute remained above the `2.72e10` floor and residual
+  charge stayed about 26% of raw FLOPs, no block reinvestment or L3 run was
+  justified. The batched `hadamard_st1` check also regressed to `3.657e-7`
+  adjusted / `3.225e-6` MSE / `3.100e10` effective compute with `2.612e10`
+  raw FLOPs and `4.883e9` residual compute. Do not promote batched Strassen.
+  Promoting the earlier recursive `st1` remains rules-spirit-review material
+  because its raw arithmetic saving is deterministic, but its replicated
+  adjusted-score edge over the documented default was only about 2%, not a
+  >15% scoring win.
 
 ## Rejected Or Guarded Ideas
 

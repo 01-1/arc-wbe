@@ -1385,7 +1385,7 @@ def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.
 
 
 def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
-    """Rectangular-by-square Strassen matmul for deep ensemble propagation."""
+    """Batched-leaf rectangular-by-square Strassen matmul for propagation."""
     if levels <= 0:
         return a @ b
     rows, inner = a.shape
@@ -1397,41 +1397,80 @@ def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray
         or rows % divisor
         or inner % divisor
         or cols % divisor
+        or inner // divisor < 32
     ):
         return a @ b
 
-    row_mid = rows // 2
-    inner_mid = inner // 2
-    col_mid = cols // 2
-    a11 = a[:row_mid, :inner_mid]
-    a12 = a[:row_mid, inner_mid:]
-    a21 = a[row_mid:, :inner_mid]
-    a22 = a[row_mid:, inner_mid:]
-    b11 = b[:inner_mid, :col_mid]
-    b12 = b[:inner_mid, col_mid:]
-    b21 = b[inner_mid:, :col_mid]
-    b22 = b[inner_mid:, col_mid:]
+    a_stack = fnp.reshape(a, (1, rows, inner))
+    b_stack = fnp.reshape(b, (1, inner, cols))
+    shapes = []
+    for _ in range(levels):
+        _, a_rows, a_cols = a_stack.shape
+        _, b_rows, b_cols = b_stack.shape
+        shapes.append((a_rows, b_cols))
+        row_mid = a_rows // 2
+        inner_mid = a_cols // 2
+        col_mid = b_cols // 2
+        a11 = a_stack[:, :row_mid, :inner_mid]
+        a12 = a_stack[:, :row_mid, inner_mid:]
+        a21 = a_stack[:, row_mid:, :inner_mid]
+        a22 = a_stack[:, row_mid:, inner_mid:]
+        b11 = b_stack[:, :inner_mid, :col_mid]
+        b12 = b_stack[:, :inner_mid, col_mid:]
+        b21 = b_stack[:, inner_mid:, :col_mid]
+        b22 = b_stack[:, inner_mid:, col_mid:]
 
-    next_level = levels - 1
-    m1 = _strassen_matmul(a11 + a22, b11 + b22, next_level)
-    m2 = _strassen_matmul(a21 + a22, b11, next_level)
-    m3 = _strassen_matmul(a11, b12 - b22, next_level)
-    m4 = _strassen_matmul(a22, b21 - b11, next_level)
-    m5 = _strassen_matmul(a11 + a12, b22, next_level)
-    m6 = _strassen_matmul(a21 - a11, b11 + b12, next_level)
-    m7 = _strassen_matmul(a12 - a22, b21 + b22, next_level)
+        stack_count = a_stack.shape[0]
+        a_stack = fnp.reshape(fnp.stack(
+            (
+                a11 + a22,
+                a21 + a22,
+                a11,
+                a22,
+                a11 + a12,
+                a21 - a11,
+                a12 - a22,
+            ),
+            axis=1,
+        ), (stack_count * 7, row_mid, inner_mid))
+        b_stack = fnp.reshape(fnp.stack(
+            (
+                b11 + b22,
+                b11,
+                b12 - b22,
+                b21 - b11,
+                b22,
+                b11 + b12,
+                b21 + b22,
+            ),
+            axis=1,
+        ), (stack_count * 7, inner_mid, col_mid))
 
-    c11 = m1 + m4 - m5 + m7
-    c12 = m3 + m5
-    c21 = m2 + m4
-    c22 = m1 - m2 + m3 + m6
-    return fnp.concatenate(
-        (
-            fnp.concatenate((c11, c12), axis=1),
-            fnp.concatenate((c21, c22), axis=1),
-        ),
-        axis=0,
-    )
+    products = fnp.einsum("brk,bkc->brc", a_stack, b_stack)
+    for out_rows, out_cols in reversed(shapes):
+        leaf_rows = products.shape[1]
+        leaf_cols = products.shape[2]
+        groups = products.shape[0] // 7
+        p = fnp.reshape(products, (groups, 7, leaf_rows, leaf_cols))
+        m1 = p[:, 0]
+        m2 = p[:, 1]
+        m3 = p[:, 2]
+        m4 = p[:, 3]
+        m5 = p[:, 4]
+        m6 = p[:, 5]
+        m7 = p[:, 6]
+        c11 = m1 + m4 - m5 + m7
+        c12 = m3 + m5
+        c21 = m2 + m4
+        c22 = m1 - m2 + m3 + m6
+        products = fnp.concatenate(
+            (
+                fnp.concatenate((c11, c12), axis=2),
+                fnp.concatenate((c21, c22), axis=2),
+            ),
+            axis=1,
+        )
+    return fnp.reshape(products, (rows, cols))
 
 
 def _hadamard_first_cov_recolored_means(
