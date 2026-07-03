@@ -29,6 +29,9 @@ _DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 16
 _DEEP_STRASSEN_LEVELS = 3
 _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
+_DEEP_HADAMARD_MAX_BLOCKS = 32
+_DEEP_BLOCK_FIXED_OVERHEAD = 1.09
+_DEEP_BLOCK_COST_SAFETY = 1.03
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1586,11 +1589,35 @@ def _hadamard_first_cov_recolored_means(
     return fnp.stack(rows, axis=0)
 
 
-def _hadamard_sample_count_for_budget(mlp: MLP, budget: int) -> int:
+def _deep_hadamard_blocks_for_budget(mlp: MLP, budget: int, strassen_levels: int) -> int:
+    rows_per_block = 2 * mlp.width
+    plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
+    strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
+    per_block_cost = (
+        mlp.depth
+        * plain_layer_cost
+        * strassen_discount
+        * _DEEP_BLOCK_FIXED_OVERHEAD
+        * _DEEP_BLOCK_COST_SAFETY
+    )
+    return min(max(int((0.1 * budget) // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
+
+
+def _hadamard_sample_count_for_budget(
+    mlp: MLP,
+    budget: int,
+    strassen_levels: int | None = None,
+) -> int:
     explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
     if explicit:
         return max(int(explicit), 2)
-    blocks = max(int(os.environ.get("WHEST_HADAMARD_BLOCKS", str(_DEEP_HADAMARD_BLOCKS))), 1)
+    block_override = os.environ.get("WHEST_HADAMARD_BLOCKS")
+    if block_override:
+        blocks = max(int(block_override), 1)
+    elif strassen_levels is not None:
+        blocks = _deep_hadamard_blocks_for_budget(mlp, budget, strassen_levels)
+    else:
+        blocks = _DEEP_HADAMARD_BLOCKS
     rows = blocks * 2 * mlp.width
     rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
     max_rows = max(2, int((0.2 * budget) // rough_cost_per_sample))
@@ -1644,7 +1671,11 @@ class Estimator(BaseEstimator):
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default"):
             if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
-                n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+                n_samples = _hadamard_sample_count_for_budget(
+                    mlp,
+                    budget,
+                    _DEEP_STRASSEN_LEVELS,
+                )
                 return _hadamard_first_cov_recolored_means(
                     mlp,
                     n_samples,
@@ -1709,7 +1740,7 @@ class Estimator(BaseEstimator):
             n_samples = (
                 n_blocks * 2 * mlp.width
                 if n_blocks is not None
-                else _hadamard_sample_count_for_budget(mlp, budget)
+                else _hadamard_sample_count_for_budget(mlp, budget, strassen_levels)
             )
             return _hadamard_first_cov_recolored_means(
                 mlp,

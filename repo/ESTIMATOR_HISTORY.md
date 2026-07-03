@@ -291,6 +291,21 @@ after losing or becoming irrelevant to the current scorer frontier.
   A clean retry returned 80 MLPs with no failures and scored `2.921e-7`
   adjusted / `2.888e-6` MSE / `2.756e10` effective compute with `2.599e10`
   raw FLOPs, serving as the promotion proof.
+  On 2026-07-03, the owner traced three AICrowd results reporting `2.99e10`
+  FLOPs / `2.79e-6` MSE to wrong-file submissions of the old default, not a
+  grader flopscope-accounting divergence. The first real grader result for
+  HEAD `hadamard_st3_b16` is still pending.
+  The deep default now chooses its Hadamard block count from the passed
+  `budget` and the MLP shape instead of relying only on the contest-tuned
+  `_DEEP_HADAMARD_BLOCKS` constant. The estimate applies the active Strassen
+  level's `(7/8)^L` propagation discount, a fixed-overhead factor for recolor
+  and reductions, and a `3%` safety margin, then floors `(budget / 10)` over
+  that per-block cost with a `[1, 32]` clamp. At the contest `2.72e11` budget
+  with L3 it selects 16 blocks, preserving the promoted `st3_b16` route while
+  adapting to other budgets using only legitimate `predict()` inputs and MLP
+  shape. The proof run scored `2.996e-7` adjusted / `2.980e-6` MSE /
+  `2.734e10` effective compute with `2.599e10` raw FLOPs over 80 returned
+  MLPs and no failures.
 
 ## Rejected Or Guarded Ideas
 
