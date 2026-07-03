@@ -51,7 +51,7 @@ FLY_ESTIMATOR_FLAGS ?= --estimator-url-cache $(FLY_ESTIMATOR_URL_CACHE)
 FLY_IMAGE_LABEL ?= whest-runner-local-scale-20260628
 FLY_BUILD_FLAGS ?=
 FLY_WORKER_RUNNER ?= local
-FLY_RESIDUAL_COMPUTE_SCALE ?= 0.2601
+FLY_RESIDUAL_COMPUTE_SCALE ?= 0.0645994832
 FLY_RUN_FLAGS ?= --launch-method api --detach-launch --ignore-destroy-time --summary-only --quiet-commands --no-timing-summary --format json --worker-runner $(FLY_WORKER_RUNNER) --presign-urls --presign-expires-in 604800 --linger-after-result 0 --min-results $(FLY_MIN_RESULTS) --max-result-seconds $(FLY_MAX_RESULT_SECONDS) --residual-compute-scale $(FLY_RESIDUAL_COMPUTE_SCALE)
 FLY_UPLOAD_FLAGS ?=
 
