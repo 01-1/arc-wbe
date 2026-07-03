@@ -1564,6 +1564,7 @@ class Estimator(BaseEstimator):
                     fnp.random.default_rng(mlp.seed),
                     variance_match_layers=1,
                     variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+                    strassen_levels=1,
                 )
             return _factorized_k3_propagation(mlp)
         if mode == "r1":

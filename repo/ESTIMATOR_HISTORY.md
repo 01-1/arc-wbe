@@ -17,10 +17,13 @@ mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
 Hadamard block for the matmul, then reconstructs the negative-half ReLU
 activations from the negated preactivations. It then propagates the recolored
-ensemble through the remaining layers, applying a `1.5x` variance-scale update
-to only the first subsequent ReLU ensemble using its Gaussian marginal variance
-target while preserving its sample mean. This route uses only the passed MLP
-object and label-free moment identities.
+ensemble through the remaining layers with one recursive Strassen level for
+the large propagation matmuls, applying a `1.5x` variance-scale update to only
+the first subsequent ReLU ensemble using its Gaussian marginal variance target
+while preserving its sample mean. This route uses only the passed MLP object
+and label-free moment identities; the Strassen promotion is a rules-spirit
+choice based on deterministic real-arithmetic savings rather than a >15% Fly
+score win.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -33,9 +36,9 @@ comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
 old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
 variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
 `hadamard_chi`, `hadamard_b<N>`, `hadamard_st<L>`, and
-`hadamard_st<L>_b<N>` are guarded diagnostics for the same variance route with
+`hadamard_st<L>_b<N>` remain diagnostics for the same variance route with
 chi-radial first-layer scaling, explicit block counts, and Strassen
-propagation matmuls, respectively.
+propagation matmuls; `hadamard_st1` now matches the promoted depth-32 default.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -203,7 +206,12 @@ after losing or becoming irrelevant to the current scorer frontier.
   Promoting the earlier recursive `st1` remains rules-spirit-review material
   because its raw arithmetic saving is deterministic, but its replicated
   adjusted-score edge over the documented default was only about 2%, not a
-  >15% scoring win.
+  >15% scoring win. The owner accepted the rules-spirit tradeoff and promoted
+  recursive `hadamard_st1` as the depth-32 default; the promotion proof scored
+  `3.470e-7` adjusted / `3.201e-6` MSE / `2.948e10` effective compute with
+  `2.612e10` raw FLOPs over 80 returned MLPs and no failures, again showing
+  deterministic raw arithmetic savings with first-80 score noise inside the
+  documented caveat band.
 
 ## Rejected Or Guarded Ideas
 
