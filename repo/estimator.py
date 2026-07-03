@@ -26,8 +26,8 @@ if hasattr(flops, "configure"):
 
 _MIN_VARIANCE = 1e-30
 _DEEP_HADAMARD_MIN_DEPTH = 16
-_DEEP_HADAMARD_BLOCKS = 13
-_DEEP_STRASSEN_LEVELS = 1
+_DEEP_HADAMARD_BLOCKS = 16
+_DEEP_STRASSEN_LEVELS = 3
 _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
 
 
@@ -1397,7 +1397,7 @@ def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.
     return fnp.maximum(second - relu_mean * relu_mean, _MIN_VARIANCE)
 
 
-def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
+def _strassen_matmul_batched(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
     """Batched-leaf rectangular-by-square Strassen matmul for propagation."""
     if levels <= 0:
         return a @ b
@@ -1484,6 +1484,58 @@ def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray
             axis=1,
         )
     return fnp.reshape(products, (rows, cols))
+
+
+def _strassen_matmul_hybrid_l4(a: fnp.ndarray, b: fnp.ndarray) -> fnp.ndarray:
+    """One explicit Strassen level over batched L3 leaves."""
+    rows, inner = a.shape
+    _, cols = b.shape
+    row_mid = rows // 2
+    inner_mid = inner // 2
+    col_mid = cols // 2
+    a11 = a[:row_mid, :inner_mid]
+    a12 = a[:row_mid, inner_mid:]
+    a21 = a[row_mid:, :inner_mid]
+    a22 = a[row_mid:, inner_mid:]
+    b11 = b[:inner_mid, :col_mid]
+    b12 = b[:inner_mid, col_mid:]
+    b21 = b[inner_mid:, :col_mid]
+    b22 = b[inner_mid:, col_mid:]
+
+    m1 = _strassen_matmul_batched(a11 + a22, b11 + b22, 3)
+    m2 = _strassen_matmul_batched(a21 + a22, b11, 3)
+    m3 = _strassen_matmul_batched(a11, b12 - b22, 3)
+    m4 = _strassen_matmul_batched(a22, b21 - b11, 3)
+    m5 = _strassen_matmul_batched(a11 + a12, b22, 3)
+    m6 = _strassen_matmul_batched(a21 - a11, b11 + b12, 3)
+    m7 = _strassen_matmul_batched(a12 - a22, b21 + b22, 3)
+    c11 = m1 + m4 - m5 + m7
+    c12 = m3 + m5
+    c21 = m2 + m4
+    c22 = m1 - m2 + m3 + m6
+    return fnp.concatenate(
+        (
+            fnp.concatenate((c11, c12), axis=1),
+            fnp.concatenate((c21, c22), axis=1),
+        ),
+        axis=0,
+    )
+
+
+def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
+    """Rectangular-by-square Strassen matmul for propagation."""
+    if levels == 4:
+        rows, inner = a.shape
+        b_rows, cols = b.shape
+        if (
+            inner == b_rows
+            and inner == cols
+            and rows % 16 == 0
+            and inner % 16 == 0
+            and cols % 16 == 0
+        ):
+            return _strassen_matmul_hybrid_l4(a, b)
+    return _strassen_matmul_batched(a, b, levels)
 
 
 def _hadamard_first_cov_recolored_means(

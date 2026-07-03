@@ -11,19 +11,19 @@ The current grader shape is width 256, depth 32, with a `2.72e11` FLOP/MLP
 budget and a score-efficient target just under `2.72e10` effective FLOPs.
 
 For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
-Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
+Walsh-Hadamard sign cubature with 16 blocks. After the first linear/ReLU layer,
 the estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
 Hadamard block for the matmul, then reconstructs the negative-half ReLU
 activations from the negated preactivations. It then propagates the recolored
-ensemble through the remaining layers with one batched-leaf Strassen level for
-the large propagation matmuls, applying a `1.5x` variance-scale update to only
-the first subsequent ReLU ensemble using its Gaussian marginal variance target
-while preserving its sample mean. This route uses only the passed MLP object
-and label-free moment identities; deeper Strassen/block-reinvestment modes
-remain diagnostics because the best L4 candidate did not produce a reliable
-80-result default proof under the fast runner's 45-second collection cutoff.
+ensemble through the remaining layers with three batched-leaf Strassen levels
+for the large propagation matmuls, applying a `1.5x` variance-scale update to
+only the first subsequent ReLU ensemble using its Gaussian marginal variance
+target while preserving its sample mean. This route uses only the passed MLP
+object and label-free moment identities; L4 remains diagnostic because the
+best clean L4 measurements were either weaker than `st3_b16` or too close to
+the combined-budget edge after widening the Fly collection window.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -39,7 +39,7 @@ variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
 `hadamard[_st<L>][_b<N>][_split<F>]` modes remain diagnostics for the same
 variance route with chi-radial first-layer scaling, explicit block counts,
 Strassen propagation matmuls, and split-block Hadamard row subsets; the
-promoted depth-32 default remains equivalent to `hadamard_st1`.
+promoted depth-32 default is equivalent to `hadamard_st3_b16`.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -256,6 +256,41 @@ after losing or becoming irrelevant to the current scorer frontier.
   adjusted / `3.240e-6` MSE / `2.734e10` effective compute with the same raw
   FLOPs. Both split probes returned 80 MLPs with no failures, so no split
   factor was composed into the promoted route.
+  A follow-up L4 timing pass confirmed that the low return count was real
+  scorer-path time, not worker failure: on the local one-MLP scorer path,
+  `st1` took `13.1s` run duration with `10.4s` tracked backend time, while
+  the original `st4_b17` took `30.4s` run duration with `26.1s` tracked
+  backend time and remained under the 60-second wall limit. Replacing the
+  monolithic 2401-leaf L4 batch with one explicit top Strassen level over
+  batched L3 leaves preserved numerical equivalence to plain matmul at
+  `2.5e-16` relative error and improved local `st4_b17` to `25.6s` run
+  duration / `21.8s` tracked backend time. The normal 45-second Fly window
+  still returned only 52 MLPs for optimized `hadamard_st4_b17`, scoring
+  `2.350e-7` adjusted / `2.254e-6` MSE / `2.836e10` effective compute with
+  `2.555e10` raw FLOPs and no failures, so L4 still needed a wider collection
+  window for unbiased measurement.
+  With `FLY_MAX_RESULT_SECONDS=90 FLY_FAST_TIMEOUT=140s`, used only to
+  complete measurement collection and not as a grader-rule change,
+  `hadamard_st4_b16` returned 80 clean MLPs and scored `2.895e-7` adjusted /
+  `2.862e-6` MSE / `2.711e10` effective compute with `2.406e10` raw FLOPs.
+  The same widened window gave `hadamard_st4_b17` 80 returned MLPs but one
+  combined-budget exhaustion, scoring `3.956e-3` adjusted / `3.958e-3` MSE /
+  `2.875e10` effective compute with `2.555e10` raw FLOPs. Therefore L4 is not
+  the clean promotion candidate despite the attractive early-subset scores.
+  The clean `hadamard_st3_b16` fallback replicated under the normal 45-second
+  Fly window at `2.811e-7` adjusted / `2.785e-6` MSE / `2.737e10` effective
+  compute with `2.599e10` raw FLOPs over 80 returned MLPs and no failures.
+  Promote `st3_b16`: it is a deterministic Strassen/block-reinvestment win
+  over the recalibrated `st1` baseline with normal-window 80-result proofs,
+  while this route family appears to bottom out around `2.2e-7` to `2.4e-7`
+  without a new variance-reduction mechanism. The split-block probe was
+  neutral to negative, so it is not that mechanism. The first plain default
+  proof after promotion had one Fly entrypoint machine failure unrelated to
+  estimator behavior and returned 79 scored MLPs at `2.793e-7` adjusted /
+  `2.726e-6` MSE / `2.754e10` effective compute with `2.599e10` raw FLOPs.
+  A clean retry returned 80 MLPs with no failures and scored `2.921e-7`
+  adjusted / `2.888e-6` MSE / `2.756e10` effective compute with `2.599e10`
+  raw FLOPs, serving as the promotion proof.
 
 ## Rejected Or Guarded Ideas
 
