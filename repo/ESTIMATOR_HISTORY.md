@@ -14,11 +14,13 @@ For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
 Walsh-Hadamard sign cubature with 13 blocks. After the first linear/ReLU layer,
 the estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
-`W0.T @ W0`. It then propagates the recolored ensemble through the remaining
-layers, applying a `1.5x` variance-scale update to only the first subsequent
-ReLU ensemble using its Gaussian marginal variance target while preserving its
-sample mean. This route uses only the passed MLP object and label-free moment
-identities.
+`W0.T @ W0`. The first layer uses only the positive half of each antithetic
+Hadamard block for the matmul, then reconstructs the negative-half ReLU
+activations from the negated preactivations. It then propagates the recolored
+ensemble through the remaining layers, applying a `1.5x` variance-scale update
+to only the first subsequent ReLU ensemble using its Gaussian marginal variance
+target while preserving its sample mean. This route uses only the passed MLP
+object and label-free moment identities.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -30,6 +32,9 @@ The submission estimator now keeps only the live default route and direct
 comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
 old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
 variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
+`hadamard_chi` and `hadamard_b<N>` are guarded diagnostics for the same
+13-block variance route with chi-radial first-layer scaling and explicit block
+counts, respectively.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -145,6 +150,27 @@ after losing or becoming irrelevant to the current scorer frontier.
   was semantically equivalent but did not produce a useful scorer-path win:
   `3.520e-7` adjusted / `3.100e-6` MSE / `3.083e10` effective compute with
   no failures, so the established inverse expression was kept.
+  Halving the first-layer antithetic Hadamard matmul, by computing only the
+  positive block halves and reconstructing `relu(-pre)` for the antithetic
+  halves, preserves the layer-0 ensemble up to row order and floating summation
+  while removing redundant first-layer FLOPs. The default `make fly` proof
+  after this change scored `3.698e-7` adjusted / `3.036e-6` MSE /
+  `3.224e10` effective compute over 80 returned MLPs with no failures. Raw
+  `flops_mean` dropped to `2.942e10`, about `1.40e9` below the prior
+  `3.082e10` effective-compute checkpoint and consistent with the expected
+  layer-0 mechanism, but residual wall-time charge made the reported effective
+  compute noisy and higher on this first-80 run. The adjusted-score move from
+  the documented `3.353e-7` baseline is about 10% worse, inside the repository
+  noise caveat, with MSE still near the prior `2.962e-6`.
+  A chi-radial variant that stratifies first-layer Hadamard row radii using
+  Wilson-Hilferty chi quantiles lost on the first clean Fly check:
+  `4.040e-7` adjusted / `3.540e-6` MSE / `3.136e10` effective compute over
+  80 returned MLPs with no failures, so it remains only `hadamard_chi`.
+  The explicit 24-block diagnostic scored `3.384e-7` adjusted / `1.639e-6`
+  MSE / `5.634e10` effective compute over 80 returned MLPs with no failures.
+  Since the MSE moved toward the expected variance-halving value rather than
+  staying near `2.9e-6`, the current 13-block route appears substantially
+  variance-limited even though 24 blocks is not an adjusted-score candidate.
 
 ## Rejected Or Guarded Ideas
 

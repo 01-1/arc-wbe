@@ -1296,8 +1296,13 @@ def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
             gc.enable()
 
 
-def _hadamard_rademacher_samples(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
-    """Return randomized antithetic Hadamard sign blocks for the input layer."""
+def _hadamard_sign_half_blocks(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
+    """Return the positive halves of randomized antithetic Hadamard sign blocks.
+
+    The antithetic halves are exact negations, so the first-layer matmul only
+    needs these rows; callers recover the antithetic activations from
+    ``relu(-pre)`` without a second matmul.
+    """
     width = mlp.width
     rows_per_block = 2 * width
     n_blocks = max(n_samples // rows_per_block, 1)
@@ -1305,10 +1310,50 @@ def _hadamard_rademacher_samples(mlp: MLP, n_samples: int, rng: fnp.random.Gener
     blocks = []
     for _ in range(n_blocks):
         flips = 2.0 * rng.integers(0, 2, size=width) - 1.0
-        x_half = base * flips[None, :]
-        blocks.append(x_half)
-        blocks.append(-x_half)
+        blocks.append(base * flips[None, :])
     return fnp.concatenate(tuple(blocks), axis=0)
+
+
+def _norm_ppf(p: float) -> float:
+    """Acklam rational approximation to the standard normal quantile."""
+    a = (-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00)
+    b = (-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01)
+    c = (-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00)
+    d = (7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00)
+    plow = 0.02425
+    if p < plow:
+        q = math.sqrt(-2.0 * math.log(p))
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0
+        )
+    if p > 1.0 - plow:
+        return -_norm_ppf(1.0 - p)
+    q = p - 0.5
+    r = q * q
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (
+        ((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0
+    )
+
+
+@cache
+def _chi_stratified_radial_scales(width: int) -> tuple[float, ...]:
+    """Stratified chi_width radius factors normalized to unit mean square.
+
+    Wilson-Hilferty chi-square quantiles at midpoint strata, expressed as
+    per-row multipliers relative to the rigid Hadamard radius ``sqrt(width)``.
+    These are MLP-independent constants, like the Hadamard matrix itself.
+    """
+    n = width
+    radii_sq = []
+    for k in range(n):
+        z = _norm_ppf((k + 0.5) / n)
+        radii_sq.append(n * (1.0 - 2.0 / (9.0 * n) + z * math.sqrt(2.0 / (9.0 * n))) ** 3)
+    mean_sq = sum(radii_sq) / n
+    return tuple(math.sqrt(r_sq / mean_sq / n) for r_sq in radii_sq)
 
 
 def _zero_mean_relu_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray]:
@@ -1345,11 +1390,17 @@ def _hadamard_first_cov_recolored_means(
     rng: fnp.random.Generator,
     variance_match_layers: int = 0,
     variance_match_strength: float = 1.0,
+    radial_chi: bool = False,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
-    x = _hadamard_rademacher_samples(mlp, n_samples, rng)
+    x_half = _hadamard_sign_half_blocks(mlp, n_samples, rng)
     w0 = mlp.weights[0]
-    y = fnp.maximum(x @ w0, 0.0)
+    pre_half = x_half @ w0
+    if radial_chi:
+        scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
+        n_blocks = x_half.shape[0] // mlp.width
+        pre_half = pre_half * fnp.concatenate((scales,) * n_blocks)[:, None]
+    y = fnp.concatenate((fnp.maximum(pre_half, 0.0), fnp.maximum(-pre_half, 0.0)), axis=0)
 
     target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
     sample_mean = fnp.mean(y, axis=0)
@@ -1446,6 +1497,26 @@ class Estimator(BaseEstimator):
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
                 variance_match_strength=int(mode[len("hadamard_var1_s") :]) / 100.0,
+            )
+        if mode == "hadamard_chi":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+                variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+                radial_chi=True,
+            )
+        if mode.startswith("hadamard_b"):
+            n_blocks = max(int(mode[len("hadamard_b") :]), 1)
+            n_samples = n_blocks * 2 * mlp.width
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+                variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
             )
         if mode == "hadamard_var2":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
