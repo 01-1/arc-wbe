@@ -27,6 +27,7 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 13
+_DEEP_STRASSEN_LEVELS = 1
 _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
 
 
@@ -1296,7 +1297,12 @@ def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
             gc.enable()
 
 
-def _hadamard_sign_half_blocks(mlp: MLP, n_samples: int, rng: fnp.random.Generator) -> fnp.ndarray:
+def _hadamard_sign_half_blocks(
+    mlp: MLP,
+    n_samples: int,
+    rng: fnp.random.Generator,
+    split_factor: int = 1,
+) -> fnp.ndarray:
     """Return the positive halves of randomized antithetic Hadamard sign blocks.
 
     The antithetic halves are exact negations, so the first-layer matmul only
@@ -1308,9 +1314,16 @@ def _hadamard_sign_half_blocks(mlp: MLP, n_samples: int, rng: fnp.random.Generat
     n_blocks = max(n_samples // rows_per_block, 1)
     base = _hadamard(width)
     blocks = []
-    for _ in range(n_blocks):
+    split_factor = max(int(split_factor), 1)
+    if width % split_factor:
+        split_factor = 1
+    rows_per_split = width // split_factor
+    for block_idx in range(n_blocks * split_factor):
+        split_idx = block_idx % split_factor
+        row_start = split_idx * rows_per_split
+        row_stop = row_start + rows_per_split
         flips = 2.0 * rng.integers(0, 2, size=width) - 1.0
-        blocks.append(base * flips[None, :])
+        blocks.append(base[row_start:row_stop] * flips[None, :])
     return fnp.concatenate(tuple(blocks), axis=0)
 
 
@@ -1397,7 +1410,7 @@ def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray
         or rows % divisor
         or inner % divisor
         or cols % divisor
-        or inner // divisor < 32
+        or inner // divisor < 16
     ):
         return a @ b
 
@@ -1481,9 +1494,10 @@ def _hadamard_first_cov_recolored_means(
     variance_match_strength: float = 1.0,
     radial_chi: bool = False,
     strassen_levels: int = 0,
+    split_factor: int = 1,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
-    x_half = _hadamard_sign_half_blocks(mlp, n_samples, rng)
+    x_half = _hadamard_sign_half_blocks(mlp, n_samples, rng, split_factor)
     w0 = mlp.weights[0]
     pre_half = _strassen_matmul(x_half, w0, strassen_levels)
     if radial_chi:
@@ -1531,6 +1545,27 @@ def _hadamard_sample_count_for_budget(mlp: MLP, budget: int) -> int:
     return min(rows, max_rows)
 
 
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int]:
+    strassen_levels = 1
+    n_blocks = None
+    split_factor = 1
+    suffix = mode[len("hadamard") :]
+    if suffix.startswith("_"):
+        suffix = suffix[1:]
+    if not suffix:
+        return strassen_levels, n_blocks, split_factor
+    for token in suffix.split("_"):
+        if token.startswith("st"):
+            strassen_levels = max(int(token[len("st") :]), 0)
+        elif token.startswith("b"):
+            n_blocks = max(int(token[len("b") :]), 1)
+        elif token.startswith("split"):
+            split_factor = max(int(token[len("split") :]), 1)
+        else:
+            raise ValueError(f"Unsupported Hadamard mode token: {token}")
+    return strassen_levels, n_blocks, split_factor
+
+
 class Estimator(BaseEstimator):
     """Depth-aware WhestBench estimator."""
 
@@ -1564,7 +1599,7 @@ class Estimator(BaseEstimator):
                     fnp.random.default_rng(mlp.seed),
                     variance_match_layers=1,
                     variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
-                    strassen_levels=1,
+                    strassen_levels=_DEEP_STRASSEN_LEVELS,
                 )
             return _factorized_k3_propagation(mlp)
         if mode == "r1":
@@ -1599,7 +1634,15 @@ class Estimator(BaseEstimator):
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
                 radial_chi=True,
             )
-        if mode.startswith("hadamard_b"):
+        if mode == "hadamard_var2":
+            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=2,
+            )
+        if mode.startswith("hadamard_b") and mode[len("hadamard_b") :].isdigit():
             n_blocks = max(int(mode[len("hadamard_b") :]), 1)
             n_samples = n_blocks * 2 * mlp.width
             return _hadamard_first_cov_recolored_means(
@@ -1609,29 +1652,20 @@ class Estimator(BaseEstimator):
                 variance_match_layers=1,
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
             )
-        if mode.startswith("hadamard_st"):
-            suffix = mode[len("hadamard_st") :]
-            if "_b" in suffix:
-                level_text, block_text = suffix.split("_b", 1)
-                n_blocks = max(int(block_text), 1)
-                n_samples = n_blocks * 2 * mlp.width
-            else:
-                level_text = suffix
-                n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+        if mode.startswith("hadamard"):
+            strassen_levels, n_blocks, split_factor = _parse_hadamard_tokens(mode)
+            n_samples = (
+                n_blocks * 2 * mlp.width
+                if n_blocks is not None
+                else _hadamard_sample_count_for_budget(mlp, budget)
+            )
             return _hadamard_first_cov_recolored_means(
                 mlp,
                 n_samples,
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
-                strassen_levels=max(int(level_text), 0),
-            )
-        if mode == "hadamard_var2":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
-            return _hadamard_first_cov_recolored_means(
-                mlp,
-                n_samples,
-                fnp.random.default_rng(mlp.seed),
-                variance_match_layers=2,
+                strassen_levels=strassen_levels,
+                split_factor=split_factor,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")

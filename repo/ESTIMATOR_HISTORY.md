@@ -17,13 +17,13 @@ mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
 Hadamard block for the matmul, then reconstructs the negative-half ReLU
 activations from the negated preactivations. It then propagates the recolored
-ensemble through the remaining layers with one recursive Strassen level for
+ensemble through the remaining layers with one batched-leaf Strassen level for
 the large propagation matmuls, applying a `1.5x` variance-scale update to only
 the first subsequent ReLU ensemble using its Gaussian marginal variance target
 while preserving its sample mean. This route uses only the passed MLP object
-and label-free moment identities; the Strassen promotion is a rules-spirit
-choice based on deterministic real-arithmetic savings rather than a >15% Fly
-score win.
+and label-free moment identities; deeper Strassen/block-reinvestment modes
+remain diagnostics because the best L4 candidate did not produce a reliable
+80-result default proof under the fast runner's 45-second collection cutoff.
 
 For shallower MLPs, the default remains the optimized factorized K=3 cumulant
 route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
@@ -35,10 +35,11 @@ The submission estimator now keeps only the live default route and direct
 comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
 old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
 variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
-`hadamard_chi`, `hadamard_b<N>`, `hadamard_st<L>`, and
-`hadamard_st<L>_b<N>` remain diagnostics for the same variance route with
-chi-radial first-layer scaling, explicit block counts, and Strassen
-propagation matmuls; `hadamard_st1` now matches the promoted depth-32 default.
+`hadamard_chi`, `hadamard_b<N>`, and composable
+`hadamard[_st<L>][_b<N>][_split<F>]` modes remain diagnostics for the same
+variance route with chi-radial first-layer scaling, explicit block counts,
+Strassen propagation matmuls, and split-block Hadamard row subsets; the
+promoted depth-32 default remains equivalent to `hadamard_st1`.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -212,6 +213,49 @@ after losing or becoming irrelevant to the current scorer frontier.
   `2.612e10` raw FLOPs over 80 returned MLPs and no failures, again showing
   deterministic raw arithmetic savings with first-80 score noise inside the
   documented caveat band.
+  On 2026-07-03 the owner recalibrated Fly residual accounting from
+  `0.2601` to `0.0645994832` to match AICrowd, where residual charge is only
+  about 2% of score. Effective-compute numbers documented before this
+  recalibration overstate residual charge by roughly 4x; in particular, the
+  old L2/L3 Strassen rejections for residual-charge reasons should not be read
+  as current evidence against deeper Strassen or block reinvestment. Under the
+  recalibrated runner, the promoted `st1` default re-baselined at `3.197e-7`
+  adjusted / `3.167e-6` MSE / `2.686e10` effective compute with `2.612e10`
+  raw FLOPs over 80 returned MLPs and no failures.
+  Rechecking the Strassen ladder with batched leaves found that `hadamard_st3`
+  at 13 blocks scored `2.933e-7` adjusted / `2.932e-6` MSE / `2.291e10`
+  effective compute with `2.114e10` raw FLOPs over 80 returned MLPs and no
+  failures, which is below the `2.72e10` score floor and points to rounding up
+  to 16 blocks. The first `hadamard_st4` check initially fell back to plain
+  matmul because the guard rejected 16-wide leaves; after enabling those
+  leaves, `hadamard_st4` at 13 blocks scored `2.746e-7` adjusted /
+  `2.746e-6` MSE / `2.156e10` effective compute with `1.957e10` raw FLOPs,
+  but only 73 MLPs returned before the 45-second fast-runner cutoff, with no
+  failures. Reinvesting blocks gave `hadamard_st3_b16` at `2.833e-7`
+  adjusted / `2.808e-6` MSE / `2.745e10` effective compute with `2.599e10`
+  raw FLOPs over 80 returned MLPs and no failures. `hadamard_st4_b17` scored
+  `2.644e-7` adjusted / `2.634e-6` MSE / `2.729e10` effective compute with
+  `2.555e10` raw FLOPs over 22 returned MLPs and no failures, then replicated
+  at `1.642e-7` adjusted / `1.632e-6` MSE / `2.733e10` effective compute with
+  the same raw FLOPs over 24 returned MLPs and no failures. The replicated
+  first-returned score cleared the nominal >15% promotion threshold against
+  the recalibrated `st1` baseline, but the low returned counts were a real
+  wall-time/selection caveat for L4 under the current Fly collection window.
+  A temporary `st4_b17` default proof then returned only 21 MLPs and scored
+  `2.976e-7` adjusted / `2.964e-6` MSE / `2.731e10` effective compute with
+  `2.555e10` raw FLOPs and no failures, which did not corroborate a >15%
+  default win. Do not promote L4 without an 80-result or otherwise
+  decision-grade proof that resolves the returned-count bias. After leaving
+  `st1` as the default, the final plain `make fly` proof scored `3.030e-7`
+  adjusted / `2.992e-6` MSE / `2.717e10` effective compute with `2.612e10`
+  raw FLOPs over 80 returned MLPs and no failures.
+  Split-block cubature did not deliver the hypothesized variance cut:
+  `hadamard_split2` scored `3.068e-7` adjusted / `3.016e-6` MSE / `2.711e10`
+  effective compute with `2.612e10` raw FLOPs, about a 5% MSE improvement over
+  the recalibrated baseline, while `hadamard_split4` regressed to `3.334e-7`
+  adjusted / `3.240e-6` MSE / `2.734e10` effective compute with the same raw
+  FLOPs. Both split probes returned 80 MLPs with no failures, so no split
+  factor was composed into the promoted route.
 
 ## Rejected Or Guarded Ideas
 
