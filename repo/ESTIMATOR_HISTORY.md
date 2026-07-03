@@ -306,6 +306,30 @@ after losing or becoming irrelevant to the current scorer frontier.
   shape. The proof run scored `2.996e-7` adjusted / `2.980e-6` MSE /
   `2.734e10` effective compute with `2.599e10` raw FLOPs over 80 returned
   MLPs and no failures.
+  A variance-mechanism round tested mid-depth re-antithetization and a
+  first-layer exact-third-moment control variate. `mirror<K>` propagates half
+  the requested rows through layer `K`, then reflects the ensemble around the
+  layer-`K` mean before continuing. The cost reduction was real, but zeroing
+  deep odd central moments introduced severe bias: `hadamard_st3_b16_mirror8`
+  scored `1.496e-6` adjusted / `1.496e-5` MSE / `2.311e10` effective compute
+  with `2.171e10` raw FLOPs; `mirror16` scored `6.912e-3` adjusted /
+  `6.925e-3` MSE / `2.070e10` effective compute with `1.870e10` raw FLOPs and
+  one combined-budget exhaustion; `mirror24` scored `1.095e-6` adjusted /
+  `1.095e-5` MSE / `1.748e10` effective compute with `1.569e10` raw FLOPs.
+  Do not reinvest mirror savings without a new way to preserve the genuine
+  post-ReLU skew.
+  The `cv3` final-row control variate, using first-layer blockwise third raw
+  moment residuals against the exact zero-mean Gaussian ReLU target, also lost:
+  `hadamard_st3_b16_cv3` scored `6.036e-7` adjusted / `5.970e-6` MSE /
+  `2.751e10` effective compute with `2.603e10` raw FLOPs. Adaptive
+  `hadamard_st4` picked a too-expensive L4 point under the current runner and
+  was not clean: only 28 MLPs returned before the fast-window cutoff, with
+  `4.593e-2` adjusted / `4.593e-2` MSE / `3.305e10` effective compute,
+  `2.854e10` raw FLOPs, and one combined-budget exhaustion. No variance
+  mechanism was promoted. The unchanged default proof scored `2.836e-7`
+  adjusted / `2.738e-6` MSE / `2.813e10` effective compute with `2.599e10`
+  raw FLOPs over 80 returned MLPs and no failures, leaving a large gap to the
+  `1.6e-7` target.
 
 ## Rejected Or Guarded Ideas
 

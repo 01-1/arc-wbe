@@ -1550,9 +1550,14 @@ def _hadamard_first_cov_recolored_means(
     radial_chi: bool = False,
     strassen_levels: int = 0,
     split_factor: int = 1,
+    mirror_layer: int | None = None,
+    final_cv3: bool = False,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
-    x_half = _hadamard_sign_half_blocks(mlp, n_samples, rng, split_factor)
+    initial_samples = n_samples
+    if mirror_layer is not None:
+        initial_samples = max((n_samples // (4 * mlp.width)) * (2 * mlp.width), 2 * mlp.width)
+    x_half = _hadamard_sign_half_blocks(mlp, initial_samples, rng, split_factor)
     w0 = mlp.weights[0]
     pre_half = _strassen_matmul(x_half, w0, strassen_levels)
     if radial_chi:
@@ -1572,6 +1577,21 @@ def _hadamard_first_cov_recolored_means(
     recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
     x = centered @ recolor + target_mean[None, :]
 
+    cv3_s_blocks = None
+    if final_cv3:
+        block_rows = 2 * mlp.width
+        n_blocks = x.shape[0] // block_rows
+        if n_blocks >= 2:
+            x_blocks = fnp.reshape(x[: n_blocks * block_rows], (n_blocks, block_rows, mlp.width))
+            block_third = fnp.mean(x_blocks * x_blocks * x_blocks, axis=1)
+            pre_std = fnp.sqrt(fnp.maximum(fnp.diag(w0.T @ w0), _MIN_VARIANCE))
+            target_third = (pre_std * pre_std * pre_std) * math.sqrt(2.0 / math.pi)
+            target_std = fnp.sqrt(fnp.maximum(fnp.diag(target_cov), _MIN_VARIANCE))
+            normalized = (block_third - target_third[None, :]) / (
+                target_std[None, :] * target_std[None, :] * target_std[None, :]
+            )
+            cv3_s_blocks = fnp.mean(normalized, axis=1)
+
     rows = [target_mean]
     for layer_idx, w in enumerate(mlp.weights[1:], start=1):
         pre = _strassen_matmul(x, w, strassen_levels)
@@ -1586,6 +1606,22 @@ def _hadamard_first_cov_recolored_means(
             scale = 1.0 + variance_match_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
             x = centered_layer * scale[None, :] + sample_mean[None, :]
         rows.append(fnp.mean(x, axis=0))
+        if mirror_layer is not None and layer_idx == mirror_layer:
+            mirror_mean = rows[-1]
+            x = fnp.concatenate((x, 2.0 * mirror_mean[None, :] - x), axis=0)
+    if final_cv3 and cv3_s_blocks is not None:
+        block_rows = 2 * mlp.width
+        n_blocks = cv3_s_blocks.shape[0]
+        if x.shape[0] >= n_blocks * block_rows:
+            final_blocks = fnp.reshape(x[: n_blocks * block_rows], (n_blocks, block_rows, mlp.width))
+            block_final_means = fnp.mean(final_blocks, axis=1)
+            s_mean = fnp.mean(cv3_s_blocks)
+            s_centered = cv3_s_blocks - s_mean
+            denom = fnp.maximum(fnp.mean(s_centered * s_centered), _MIN_VARIANCE)
+            final_mean = rows[-1]
+            cov = fnp.mean(s_centered[:, None] * (block_final_means - final_mean[None, :]), axis=0)
+            beta = 0.5 * cov / denom
+            rows[-1] = final_mean - beta * s_mean
     return fnp.stack(rows, axis=0)
 
 
@@ -1624,15 +1660,17 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int]:
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
+    mirror_layer = None
+    final_cv3 = False
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
     if not suffix:
-        return strassen_levels, n_blocks, split_factor
+        return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3
     for token in suffix.split("_"):
         if token.startswith("st"):
             strassen_levels = max(int(token[len("st") :]), 0)
@@ -1640,9 +1678,13 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int]:
             n_blocks = max(int(token[len("b") :]), 1)
         elif token.startswith("split"):
             split_factor = max(int(token[len("split") :]), 1)
+        elif token.startswith("mirror"):
+            mirror_layer = max(int(token[len("mirror") :]), 1)
+        elif token == "cv3":
+            final_cv3 = True
         else:
             raise ValueError(f"Unsupported Hadamard mode token: {token}")
-    return strassen_levels, n_blocks, split_factor
+    return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3
 
 
 class Estimator(BaseEstimator):
@@ -1736,7 +1778,7 @@ class Estimator(BaseEstimator):
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
             )
         if mode.startswith("hadamard"):
-            strassen_levels, n_blocks, split_factor = _parse_hadamard_tokens(mode)
+            strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3 = _parse_hadamard_tokens(mode)
             n_samples = (
                 n_blocks * 2 * mlp.width
                 if n_blocks is not None
@@ -1750,5 +1792,7 @@ class Estimator(BaseEstimator):
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
                 strassen_levels=strassen_levels,
                 split_factor=split_factor,
+                mirror_layer=mirror_layer,
+                final_cv3=final_cv3,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")
