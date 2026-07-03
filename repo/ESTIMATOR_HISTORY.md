@@ -32,9 +32,10 @@ The submission estimator now keeps only the live default route and direct
 comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
 old deep Hadamard route, and `hadamard_var1`/`hadamard_var2` for the first-layer
 variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
-`hadamard_chi` and `hadamard_b<N>` are guarded diagnostics for the same
-13-block variance route with chi-radial first-layer scaling and explicit block
-counts, respectively.
+`hadamard_chi`, `hadamard_b<N>`, `hadamard_st<L>`, and
+`hadamard_st<L>_b<N>` are guarded diagnostics for the same variance route with
+chi-radial first-layer scaling, explicit block counts, and Strassen
+propagation matmuls, respectively.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -171,6 +172,21 @@ after losing or becoming irrelevant to the current scorer frontier.
   Since the MSE moved toward the expected variance-halving value rather than
   staying near `2.9e-6`, the current 13-block route appears substantially
   variance-limited even though 24 blocks is not an adjusted-score candidate.
+  Replacing only the large ensemble propagation matmuls with plain recursive
+  Strassen arithmetic reduces actually executed array arithmetic without
+  modifying or bypassing flopscope accounting; keep it flagged for owner
+  rules-spirit review before submission use. One Strassen level at 13 blocks
+  cut raw `flops_mean` to `2.612e10` and scored `3.343e-7` adjusted /
+  `3.141e-6` MSE / `2.910e10` effective compute, then replicated at
+  `3.283e-7` adjusted / `2.974e-6` MSE / `3.011e10` effective compute, both
+  over 80 returned MLPs with no failures. The adjusted scores are close to but
+  not >15% better than the documented `3.353e-7` default, so `hadamard_st1`
+  was not promoted. Two Strassen levels reduced raw `flops_mean` further to
+  `2.335e10`, but residual wall-time charge rose sharply and the run scored
+  `3.482e-7` adjusted / `3.122e-6` MSE / `2.960e10` effective compute with no
+  failures. Because L2 effective compute stayed above the `2.72e10` floor and
+  residual charge exceeded 15% of raw FLOPs, no block-reinvestment or L3 run
+  was taken from this implementation.
 
 ## Rejected Or Guarded Ideas
 

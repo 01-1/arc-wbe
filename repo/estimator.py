@@ -1384,6 +1384,56 @@ def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.
     return fnp.maximum(second - relu_mean * relu_mean, _MIN_VARIANCE)
 
 
+def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
+    """Rectangular-by-square Strassen matmul for deep ensemble propagation."""
+    if levels <= 0:
+        return a @ b
+    rows, inner = a.shape
+    b_rows, cols = b.shape
+    divisor = 1 << levels
+    if (
+        inner != b_rows
+        or inner != cols
+        or rows % divisor
+        or inner % divisor
+        or cols % divisor
+    ):
+        return a @ b
+
+    row_mid = rows // 2
+    inner_mid = inner // 2
+    col_mid = cols // 2
+    a11 = a[:row_mid, :inner_mid]
+    a12 = a[:row_mid, inner_mid:]
+    a21 = a[row_mid:, :inner_mid]
+    a22 = a[row_mid:, inner_mid:]
+    b11 = b[:inner_mid, :col_mid]
+    b12 = b[:inner_mid, col_mid:]
+    b21 = b[inner_mid:, :col_mid]
+    b22 = b[inner_mid:, col_mid:]
+
+    next_level = levels - 1
+    m1 = _strassen_matmul(a11 + a22, b11 + b22, next_level)
+    m2 = _strassen_matmul(a21 + a22, b11, next_level)
+    m3 = _strassen_matmul(a11, b12 - b22, next_level)
+    m4 = _strassen_matmul(a22, b21 - b11, next_level)
+    m5 = _strassen_matmul(a11 + a12, b22, next_level)
+    m6 = _strassen_matmul(a21 - a11, b11 + b12, next_level)
+    m7 = _strassen_matmul(a12 - a22, b21 + b22, next_level)
+
+    c11 = m1 + m4 - m5 + m7
+    c12 = m3 + m5
+    c21 = m2 + m4
+    c22 = m1 - m2 + m3 + m6
+    return fnp.concatenate(
+        (
+            fnp.concatenate((c11, c12), axis=1),
+            fnp.concatenate((c21, c22), axis=1),
+        ),
+        axis=0,
+    )
+
+
 def _hadamard_first_cov_recolored_means(
     mlp: MLP,
     n_samples: int,
@@ -1391,11 +1441,12 @@ def _hadamard_first_cov_recolored_means(
     variance_match_layers: int = 0,
     variance_match_strength: float = 1.0,
     radial_chi: bool = False,
+    strassen_levels: int = 0,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
     x_half = _hadamard_sign_half_blocks(mlp, n_samples, rng)
     w0 = mlp.weights[0]
-    pre_half = x_half @ w0
+    pre_half = _strassen_matmul(x_half, w0, strassen_levels)
     if radial_chi:
         scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
         n_blocks = x_half.shape[0] // mlp.width
@@ -1415,7 +1466,7 @@ def _hadamard_first_cov_recolored_means(
 
     rows = [target_mean]
     for layer_idx, w in enumerate(mlp.weights[1:], start=1):
-        pre = x @ w
+        pre = _strassen_matmul(x, w, strassen_levels)
         x = fnp.maximum(pre, 0.0)
         if layer_idx <= variance_match_layers:
             pre_mean = fnp.mean(pre, axis=0)
@@ -1517,6 +1568,23 @@ class Estimator(BaseEstimator):
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+            )
+        if mode.startswith("hadamard_st"):
+            suffix = mode[len("hadamard_st") :]
+            if "_b" in suffix:
+                level_text, block_text = suffix.split("_b", 1)
+                n_blocks = max(int(block_text), 1)
+                n_samples = n_blocks * 2 * mlp.width
+            else:
+                level_text = suffix
+                n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                n_samples,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+                variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+                strassen_levels=max(int(level_text), 0),
             )
         if mode == "hadamard_var2":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
