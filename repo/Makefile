@@ -1,8 +1,12 @@
-.PHONY: demo-cast demo-cast-headless install test lint help random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help shadow-snapshot shadow-watch shadow-status random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry full e v local
 
 HF_HOME ?= /i/e/.cache/huggingface
 HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
 UV := HF_HOME=$(HF_HOME) HF_DATASETS_CACHE=$(HF_DATASETS_CACHE) UV_CACHE_DIR=/i/e/.uv-cache uv
+SHADOW_HISTORY_DIR ?= .shadow-history
+SHADOW_INTERVAL_SECONDS ?= 5
+SHADOW_QUIET_SECONDS ?= 60
+SHADOW_MIN_COMMIT_SECONDS ?= 120
 FLOPSCOPE_GPU ?= 1
 MINI_SOURCE_DATASET ?= hf://aicrowd/arc-whestbench-public-2026
 MINI_SOURCE_SPLIT ?= mini
@@ -52,6 +56,18 @@ FLY_RUN_FLAGS ?= --launch-method api --detach-launch --ignore-destroy-time --sum
 FLY_UPLOAD_FLAGS ?=
 
 random-mini-dataset: $(RANDOM_MINI_METADATA)
+
+shadow-snapshot:
+	$(UV) run python scripts/shadow_history.py --shadow-dir $(SHADOW_HISTORY_DIR) snapshot
+
+shadow-watch:
+	$(UV) run python scripts/shadow_history.py --shadow-dir $(SHADOW_HISTORY_DIR) watch \
+   --interval-seconds $(SHADOW_INTERVAL_SECONDS) \
+   --quiet-seconds $(SHADOW_QUIET_SECONDS) \
+   --min-commit-seconds $(SHADOW_MIN_COMMIT_SECONDS)
+
+shadow-status:
+	$(UV) run python scripts/shadow_history.py --shadow-dir $(SHADOW_HISTORY_DIR) status
 
 $(RANDOM_MINI_METADATA):
 	$(UV) run python scripts/randomize_whest_dataset.py \
@@ -215,6 +231,9 @@ help:
 	@echo "  install                 uv sync --group dev"
 	@echo "  test                    run pytest"
 	@echo "  lint                    run ruff check"
+	@echo "  shadow-snapshot         commit a private .gitignore-respecting repo snapshot"
+	@echo "  shadow-watch            keep private repo-scale shadow history running"
+	@echo "  shadow-status           show recent shadow-history snapshots"
 	@echo "  mini                    fast local 3-MLP smoke check"
 	@echo "  mini-subprocess         isolated 3-MLP subprocess check"
 	@echo "  mini-mode               cached mini split with MODE=<mode>"

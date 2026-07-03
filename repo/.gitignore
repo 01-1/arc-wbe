@@ -29,6 +29,8 @@ Thumbs.db
 # Internal process docs (specs, plans, scratch) — not for participant repo.
 .aicrowd/
 
+# Repo-local private snapshot history.
+.shadow-history/
 
 # Env file
 .env
