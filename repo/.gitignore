@@ -34,3 +34,6 @@ Thumbs.db
 
 # Env file
 .env
+
+# Paired fly logs
+paired_fly_logs/
