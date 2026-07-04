@@ -751,10 +751,48 @@ after losing or becoming irrelevant to the current scorer frontier.
   80 MLPs with no failures at `2.763e-7` adjusted / `2.640e-6` MSE /
   `2.846e10` effective compute / `2.599e10` raw FLOPs and `2.473e9`
   residual compute.
+- **First full paired Fly screen.** On 2026-07-04, the fixed 100-MLP Fly
+  dataset was screened with per-MLP JSON instead of summary-only run means.
+  The determinism gate ran the default `hadamard_st3_b16` twice with
+  `FLY_MIN_RESULTS=100`, `FLY_MAX_RESULT_SECONDS=90`, and `FLY_RUN_FLAGS`
+  omitting `--summary-only`. Both runs returned all 100 MLPs, and matched
+  per-MLP relative final-layer MSE deltas were exactly zero: min/median/mean/
+  max `0.0`, with `0/100` nonzero entries. This validates exact matched
+  comparisons for deterministic per-MLP modes on the fixed Fly set. The
+  canonical full-100 default baseline from that gate is `2.666646644e-6`
+  mean final-layer MSE.
+  Tier-1 knob comparisons are now judged by paired per-MLP deltas against
+  the same default rows; sub-1% claims are legitimate for deterministic
+  strength knobs when supported by the matched dependence structure and sign
+  test, so the old `<15%` run-mean bounce rule does not apply to these
+  paired knob checks. The strength ladder produced no promotable win:
+  `s125` was `-0.123%` mean paired MSE delta, 53 wins / 47 losses,
+  sign-test `p=0.617`; `s140` was `-0.233%`, 54 / 46, `p=0.484`;
+  `s150` is the default and tied all 100 rows; `s165` was `+0.796%`,
+  43 / 57, `p=0.193`; and `s175` was `+1.619%`, 41 / 59, `p=0.0886`.
+  Because neither `s125` nor `s140` cleared the `>1%` improvement gate or
+  showed a strong sign test, `_DEEP_VARIANCE_MATCH_STRENGTH` remains `1.5`.
+  Tier-2 structural re-checks retain wider honest bars at n=100 and only
+  count wins beyond roughly `3-4%`. `hadamard_st4` was bit-identical on
+  final-layer MSE for all 100 fixed MLPs (`0.0% +/- 0.0%` paired delta),
+  confirming that the Strassen-depth issue is scorer residual cost rather
+  than prediction quality. `hadamard_st3_b16_split2` had mean MSE `1.071%`
+  worse than default with a broad paired-difference 95% bar of about
+  `+/-16.3%` of baseline mean MSE, 51 wins / 49 losses, sign-test
+  `p=0.920`; it is not a structural win. Saved full-JSON logs live under
+  `paired_fly_logs/` for this local screen. Verdict: no estimator code
+  change; the important change is methodological.
 
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
-estimator changes, follow [`AGENTS.md`](AGENTS.md): compile `estimator.py` and
-use the Fly fast runner by default unless the owner asks for a different proof.
-For docs-only changes, a link/search check and Markdown sanity are sufficient.
+deterministic Hadamard knob comparisons on the fixed Fly dataset, prefer
+full per-MLP JSON and matched pairs over repeated summary-only run means:
+override `FLY_RUN_FLAGS` on the `make` command line to omit `--summary-only`,
+request all 100 results, and compare per-MLP final-layer MSE deltas against
+the same baseline rows. Summary-only Fly means are still useful for quick
+smoke tests, but they discard the pairing and can recreate the old returned-set
+`bounce` ambiguity. For estimator changes, follow [`AGENTS.md`](AGENTS.md):
+compile `estimator.py` and use the Fly fast runner by default unless the owner
+asks for a different proof. For docs-only changes, a link/search check and
+Markdown sanity are sufficient.
