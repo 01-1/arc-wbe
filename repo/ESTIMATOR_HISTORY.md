@@ -355,15 +355,54 @@ after losing or becoming irrelevant to the current scorer frontier.
   promising at `2.480e-7` adjusted / `2.359e-6` MSE / `2.859e10` effective
   compute, but replicated at only `2.894e-7` adjusted / `2.768e-6` MSE /
   `2.840e10` effective compute. No strength change was promoted.
+  The closeout retune resolved `s165` as another neutral bounce, consistent
+  with the historical strength-sweep pattern: two more clean Fly replicates
+  scored `2.747e-7` adjusted / `2.670e-6` MSE / `2.812e10` effective compute
+  and `2.634e-7` adjusted / `2.544e-6` MSE / `2.819e10` effective compute.
+  Across the four `s165` runs, the MSEs were `2.359e-6`, `2.768e-6`,
+  `2.670e-6`, and `2.544e-6`, with only one run at or below `~2.45e-6` and a
+  four-run mean of `2.585e-6`, only about `5%` below the default's
+  `~2.72e-6`; therefore `_DEEP_VARIANCE_MATCH_STRENGTH` remains `1.5`.
+  Full-json Fly diagnostics for the sporadic `combined_budget_exhausted`
+  failures showed a harness-side residual-accounting mismatch rather than an
+  estimator raw-FLOP tail. A fresh `hadamard_st3_b16_s125` capture returned
+  80 clean MLPs; its slowest residual rows had raw FLOPs `2.599e10`, measured
+  residual wall `0.77s`, worker WhestBench wall near `25-30s`, and scaled
+  Fly-summary effective compute only `3.37e10`. A fresh `hadamard_st4_b15`
+  capture reproduced one failure over 78 returned MLPs: the failed worker had
+  raw FLOPs `2.256e10`, measured residual wall `1.476s`, flopscope backend
+  `19.02s`, flopscope overhead `1.14s`, and worker WhestBench wall `36.56s`.
+  The worker-side post-hoc check still used the local
+  `--residual-wall-time-multiplier 2.0` rate, so it reported effective compute
+  `3.178e11` (`2.256e10 + 2 * 1e11 * 1.476`) and zeroed the MLP, even though
+  the Fly summary later rescales residual by `0.1` for AICrowd-like scoring,
+  which would put the same row at only `3.73e10`. This explains why exhaustion
+  could appear in runs whose reported mean effective compute was near
+  `2.8e10`, and why it also appeared at lower raw FLOPs: it is a slow/loaded
+  Fly worker plus local harness failure-threshold artifact, not evidence of a
+  shape-dependent pathological slow path in recolor, Cholesky, or Strassen.
+  Under the local `2.0` residual multiplier, a default-class `2.599e10` raw
+  route trips the `2.72e11` combined budget at about `1.23s` residual wall.
+  Under the AICrowd-like `0.1` residual scale used for realistic score
+  summaries, the same raw route would need about `24.6s` residual wall to
+  exhaust; compared with the current local default residual wall around
+  `0.51s` and full one-MLP wall around `16.4s`, that is roughly a `48x`
+  residual-wall margin, matching the owner's observation that AICrowd
+  submissions have not exhausted.
   A local 5-MLP mini layerwise MSE profile for the default showed error
   peaking in the middle layers and then decaying: block means were
   layers 1-8 `4.94e-6`, 9-16 `5.90e-6`, 17-24 `3.81e-6`, 25-32 `2.60e-6`,
   with the final layer at `2.35e-6` on that mini set. The final unchanged
   default proof returned 80 MLPs with no failures at `2.869e-7` adjusted /
   `2.720e-6` MSE / `2.866e10` effective compute with `2.599e10` raw FLOPs.
-  The practical frontier remains around the low-to-mid `2e-7` range unless L4
-  wall time is materially reduced or a new variance mechanism cuts MSE without
-  introducing the mirror/cv3 bias seen above.
+  The final cycle frontier is: grader-confirmed `2.411e-7` adjusted at
+  `st3_b16`; a realistic low-to-mid `2e-7` frontier if leaner L4 wall time can
+  convert its raw-FLOP savings into AICrowd score margin; and `1.6e-7`
+  unreachable without a new variance mechanism. The candidate mechanisms
+  tested in this cycle, including split blocks, mirror re-antithetization,
+  `cv3`, final/reporting control variates, robust aggregation, and marginal or
+  covariance correction variants, were falsified or left weaker than the
+  current route under the repository noise caveats.
 
 ## Rejected Or Guarded Ideas
 
