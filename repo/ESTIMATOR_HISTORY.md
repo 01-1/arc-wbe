@@ -820,6 +820,38 @@ after losing or becoming irrelevant to the current scorer frontier.
   new-vs-old paired confirmation was run. Verdict: the historical graveyard is
   closed at sub-1% paired resolution for these deterministic post-sampling
   tokens; leave the unforced default unchanged.
+- **Edgeworth analytic-prefix sampler M1 kill.** On 2026-07-04, a mode-gated
+  `hybs<K>` diagnostic extended the existing Gaussian analytic-prefix sampler
+  with a diagonal third-cumulant correction for `K=2`, without changing
+  unforced default behavior. The target kept the `hyb2` mean and covariance
+  exactly, and approximated layer-2 preactivation diagonal third cumulants by
+  independence:
+  `kappa3(z2_a) ~= sum_i W1_ia^3 * kappa3(y1_i)`. For
+  `u ~ N(0, s^2)`, `E[relu(u)] = s / sqrt(2*pi)`,
+  `E[relu(u)^2] = s^2 / 2`, and
+  `E[relu(u)^3] = s^3 * sqrt(2/pi)`, so the central coefficient used was
+  `sqrt(2/pi) - 3/(2*sqrt(2*pi)) + 2/(2*pi)^(3/2)`. The sampler draws the same
+  Hadamard Gaussian base rows as `hyb2`, forms `z = m2 + A g`, then applies a
+  diagonal Cornish-Fisher-style quadratic map
+  `(gamma/6) * (((z-m)^2/S_aa) - 1) * sqrt(S_aa)` and per-coordinate
+  recenter/rescale to restore the exact target mean and diagonal variance.
+  Because the quadratic correction is even in the centered Hadamard draw, the
+  antithetic half receives the same correction rather than canceling odd
+  errors as in the pure Gaussian sample; RNG consumption remains the same as
+  `hyb2`.
+  Full-100 JSON Fly control under `FLY_MIN_RESULTS=100`,
+  `FLY_MAX_RESULT_SECONDS=90`, and no `--summary-only` found
+  `hadamard_st3_hyb2` clean at `4.098e-6` adjusted / `3.970e-5`
+  final-layer MSE / `2.741e10` effective compute / `2.476e10` raw FLOPs, with
+  no failures. `hadamard_st3_hybs2` returned 100 rows with no failures at
+  `4.005e-6` adjusted / `3.946e-5` final-layer MSE / `2.693e10` effective
+  compute / `2.479e10` raw FLOPs. The M1 gate required `hybs2 <= ~8e-6`
+  final-layer MSE to recover the majority of the Gaussian-hybrid loss; instead
+  the skew-matched diagonal transport was essentially neutral to `hyb2` and
+  still about `15x` worse than the canonical full-100 default baseline
+  `2.666646644e-6`. Verdict: stop at M1. The simple diagonal third-cumulant
+  carrier does not rescue the analytic-prefix sampler, so M2 factored third
+  cumulants and M3 depth economics were not run.
 
 ## Benchmarking Notes
 

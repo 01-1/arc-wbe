@@ -42,6 +42,11 @@ _DEEP_RESIDUAL_BLOCK_SAFETY = {
     4: 1.06,
 }
 _HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
+_ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF = (
+    math.sqrt(2.0 / math.pi)
+    - 1.5 / math.sqrt(2.0 * math.pi)
+    + 2.0 / ((2.0 * math.pi) ** 1.5)
+)
 _BIVAR_RELU_GL16_NODES = (
     -0.9894009349916499,
     -0.9445750230732326,
@@ -1717,6 +1722,7 @@ def _hybrid_analytic_prefix_hadamard_means(
     prefix_layers: int,
     variance_match_strength: float,
     strassen_levels: int,
+    skew_matched: bool = False,
 ) -> fnp.ndarray:
     """Analytic Gaussian-closure prefix, then Hadamard sample the prefix preactivation."""
     prefix_layers = min(max(int(prefix_layers), 1), mlp.depth)
@@ -1725,13 +1731,21 @@ def _hybrid_analytic_prefix_hadamard_means(
     analytic_rows = []
     pre_mean = None
     pre_cov = None
+    pre_kappa3_diag = None
+    relu_kappa3_diag = None
     for layer_idx, w in enumerate(mlp.weights[:prefix_layers]):
         pre_mean = mean @ w
         pre_cov = w.T @ cov @ w
+        if skew_matched and layer_idx == 1 and relu_kappa3_diag is not None:
+            pre_kappa3_diag = relu_kappa3_diag @ (w * w * w)
         if layer_idx == 0:
             mean, cov = _zero_mean_relu_mean_cov(pre_cov)
+            if skew_matched:
+                var0 = fnp.maximum(fnp.diag(pre_cov), _MIN_VARIANCE)
+                relu_kappa3_diag = _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF * var0 * fnp.sqrt(var0)
         else:
             mean, cov = _gaussian_relu_mean_cov(pre_mean, pre_cov)
+            relu_kappa3_diag = None
         analytic_rows.append(mean)
 
     assert pre_mean is not None and pre_cov is not None
@@ -1740,6 +1754,18 @@ def _hybrid_analytic_prefix_hadamard_means(
     centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
     pre_half = signs @ centered_chol.T
     pre = fnp.concatenate((pre_half, -pre_half), axis=0) + pre_mean[None, :]
+    if skew_matched and prefix_layers == 2 and pre_kappa3_diag is not None:
+        var = fnp.maximum(fnp.diag(pre_cov), _MIN_VARIANCE)
+        std = fnp.sqrt(var)
+        gamma = pre_kappa3_diag / (var * std)
+        centered_pre = pre - pre_mean[None, :]
+        pre = pre + (gamma[None, :] / 6.0) * (
+            (centered_pre * centered_pre) / var[None, :] - 1.0
+        ) * std[None, :]
+        sample_mean = fnp.mean(pre, axis=0)
+        centered_pre = pre - sample_mean[None, :]
+        sample_var = fnp.maximum(fnp.mean(centered_pre * centered_pre, axis=0), _MIN_VARIANCE)
+        pre = centered_pre * fnp.sqrt(var / sample_var)[None, :] + pre_mean[None, :]
     x = fnp.maximum(pre, 0.0)
 
     rows = list(analytic_rows[:-1])
@@ -1968,6 +1994,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     int,
     float,
     int | None,
+    bool,
     _HadamardPosthocConfig,
 ]:
     strassen_levels = 1
@@ -1980,6 +2007,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     variance_match_start_layer = 1
     antithetic_fraction = 1.0
     hybrid_prefix_layers = None
+    hybrid_skew_matched = False
     scale_cap = None
     kurtosis_gate = None
     gaussian_pull = 0.0
@@ -2001,6 +2029,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             variance_match_start_layer,
             antithetic_fraction,
             hybrid_prefix_layers,
+            hybrid_skew_matched,
             _HadamardPosthocConfig(),
         )
     for token in suffix.split("_"):
@@ -2018,6 +2047,9 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             antithetic_fraction = 0.0
         elif token == "anti50":
             antithetic_fraction = 0.5
+        elif token.startswith("hybs"):
+            hybrid_prefix_layers = max(int(token[len("hybs") :]), 1)
+            hybrid_skew_matched = True
         elif token.startswith("hyb"):
             hybrid_prefix_layers = max(int(token[len("hyb") :]), 1)
         elif token.startswith("cap"):
@@ -2056,6 +2088,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         variance_match_start_layer,
         antithetic_fraction,
         hybrid_prefix_layers,
+        hybrid_skew_matched,
         _HadamardPosthocConfig(
             scale_cap=scale_cap,
             kurtosis_gate=kurtosis_gate,
@@ -2169,6 +2202,7 @@ class Estimator(BaseEstimator):
                 variance_match_start_layer,
                 antithetic_fraction,
                 hybrid_prefix_layers,
+                hybrid_skew_matched,
                 posthoc,
             ) = _parse_hadamard_tokens(mode)
             if hybrid_prefix_layers is not None:
@@ -2189,6 +2223,7 @@ class Estimator(BaseEstimator):
                     hybrid_prefix_layers,
                     _DEEP_VARIANCE_MATCH_STRENGTH if variance_strength is None else variance_strength,
                     strassen_levels,
+                    hybrid_skew_matched,
                 )
             n_samples = (
                 n_blocks * 2 * mlp.width
