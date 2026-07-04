@@ -1018,6 +1018,49 @@ after losing or becoming irrelevant to the current scorer frontier.
   must cut the full-column raw cost from about `6.75e10` toward the
   score-efficient floor. Stop for review; do not implement M3 from this M2c
   state.
+- **Low-rank kappa3 transport Gate 1 negative.** On 2026-07-04, an offline
+  plain-numpy rank diagnostic regenerated the exact `hybx2` factored layer-2
+  preactivation third cumulant for three representative public Mini MLPs
+  (`mlp_id` rows 0, 49, and 99), using only the public weights/seed fields and
+  ignoring baked label means. For the existing quadratic generator columns
+  `(gamma, u, v)`, it compared the best rank-R mass in the symmetric tensor
+  Gram spectrum with the old M2c column-order truncation, and measured the
+  sampler-relevant trace contribution plus the covariance wall through the
+  largest eigenvalue of `S2^-1/2 Cov(Q_R) S2^-1/2`. The old M2c ordering is
+  not catastrophically misordered, but it is not optimal: it retains about
+  `0.80x`-`0.83x` of the best symmetric Frobenius mass at each tested rank.
+
+  | Public row | Rank | Best Frobenius mass | Old-order Frobenius | Sampler trace mass | PD without damping? | Cov load |
+  |---:|---:|---:|---:|---:|---|---:|
+  | 0 | 8 | `0.025` | `0.020` | `0.026` | no | `1.861` |
+  | 0 | 16 | `0.048` | `0.039` | `0.050` | no | `2.057` |
+  | 0 | 32 | `0.092` | `0.075` | `0.094` | no | `2.570` |
+  | 0 | 64 | `0.176` | `0.141` | `0.178` | no | `3.027` |
+  | 0 | 128 | `0.330` | `0.266` | `0.335` | no | `4.041` |
+  | 49 | 8 | `0.026` | `0.021` | `0.026` | no | `1.640` |
+  | 49 | 16 | `0.049` | `0.041` | `0.051` | no | `2.009` |
+  | 49 | 32 | `0.095` | `0.077` | `0.097` | no | `2.381` |
+  | 49 | 64 | `0.179` | `0.145` | `0.183` | no | `3.054` |
+  | 49 | 128 | `0.332` | `0.269` | `0.338` | no | `4.078` |
+  | 99 | 8 | `0.025` | `0.021` | `0.026` | no | `1.755` |
+  | 99 | 16 | `0.049` | `0.040` | `0.050` | no | `2.094` |
+  | 99 | 32 | `0.094` | `0.076` | `0.096` | no | `2.511` |
+  | 99 | 64 | `0.178` | `0.144` | `0.181` | no | `3.543` |
+  | 99 | 128 | `0.332` | `0.268` | `0.337` | no | `4.434` |
+
+  Full-column undamped load was only about `3.67x`-`3.70x` `S2`, so the small
+  old-order subsets can exceed the full load because the discarded cross terms
+  were canceling covariance load. This is the conditioning wall in miniature:
+  even rank 8 is already non-PD without damping, while rank 64 captures only
+  about `18%` of the sampler-relevant trace mass, far below the `~70%` Gate 1
+  threshold. The k128/k512 M2c ladder was therefore not mainly a bad column
+  ordering accident; k128 was weak because valuable joint-k3 mass is genuinely
+  spread thin across the transport span, and covariance feasibility does not
+  improve at low rank for this quadratic construction. Verdict: do not
+  implement `hybr<R>` and do not spend a Fly run. Gate 2 multi-layer low-rank
+  closure is not worth designing on this transport family; any next attempt
+  should first change the carrier so covariance load is intrinsically lower
+  rather than hoping a small symmetric truncation will expose a clean subspace.
 
 ## Benchmarking Notes
 
