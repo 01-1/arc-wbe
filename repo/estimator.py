@@ -32,6 +32,14 @@ _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
 _DEEP_HADAMARD_MAX_BLOCKS = 32
 _DEEP_BLOCK_FIXED_OVERHEAD = 1.09
 _DEEP_BLOCK_COST_SAFETY = 1.03
+_DEEP_MEASURED_ROW_FLOPS = {
+    3: 3.17e6,
+    4: 2.94e6,
+}
+_DEEP_RESIDUAL_BLOCK_SAFETY = {
+    3: 1.0,
+    4: 1.06,
+}
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1627,15 +1635,24 @@ def _hadamard_first_cov_recolored_means(
 
 def _deep_hadamard_blocks_for_budget(mlp: MLP, budget: int, strassen_levels: int) -> int:
     rows_per_block = 2 * mlp.width
-    plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
-    strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
-    per_block_cost = (
-        mlp.depth
-        * plain_layer_cost
-        * strassen_discount
-        * _DEEP_BLOCK_FIXED_OVERHEAD
-        * _DEEP_BLOCK_COST_SAFETY
-    )
+    measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(strassen_levels)
+    if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
+        per_block_cost = (
+            rows_per_block
+            * measured_row_cost
+            * _DEEP_BLOCK_COST_SAFETY
+            * _DEEP_RESIDUAL_BLOCK_SAFETY.get(strassen_levels, 1.0)
+        )
+    else:
+        plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
+        strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
+        per_block_cost = (
+            mlp.depth
+            * plain_layer_cost
+            * strassen_discount
+            * _DEEP_BLOCK_FIXED_OVERHEAD
+            * _DEEP_BLOCK_COST_SAFETY
+        )
     return min(max(int((0.1 * budget) // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
 
 
@@ -1660,17 +1677,18 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool]:
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
     mirror_layer = None
     final_cv3 = False
+    variance_strength = None
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
     if not suffix:
-        return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3
+        return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3, variance_strength
     for token in suffix.split("_"):
         if token.startswith("st"):
             strassen_levels = max(int(token[len("st") :]), 0)
@@ -1682,9 +1700,11 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             mirror_layer = max(int(token[len("mirror") :]), 1)
         elif token == "cv3":
             final_cv3 = True
+        elif token.startswith("s"):
+            variance_strength = int(token[len("s") :]) / 100.0
         else:
             raise ValueError(f"Unsupported Hadamard mode token: {token}")
-    return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3
+    return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3, variance_strength
 
 
 class Estimator(BaseEstimator):
@@ -1778,7 +1798,14 @@ class Estimator(BaseEstimator):
                 variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
             )
         if mode.startswith("hadamard"):
-            strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3 = _parse_hadamard_tokens(mode)
+            (
+                strassen_levels,
+                n_blocks,
+                split_factor,
+                mirror_layer,
+                final_cv3,
+                variance_strength,
+            ) = _parse_hadamard_tokens(mode)
             n_samples = (
                 n_blocks * 2 * mlp.width
                 if n_blocks is not None
@@ -1789,7 +1816,11 @@ class Estimator(BaseEstimator):
                 n_samples,
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
-                variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+                variance_match_strength=(
+                    _DEEP_VARIANCE_MATCH_STRENGTH
+                    if variance_strength is None
+                    else variance_strength
+                ),
                 strassen_levels=strassen_levels,
                 split_factor=split_factor,
                 mirror_layer=mirror_layer,

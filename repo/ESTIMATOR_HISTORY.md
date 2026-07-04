@@ -330,6 +330,40 @@ after losing or becoming irrelevant to the current scorer frontier.
   adjusted / `2.738e-6` MSE / `2.813e10` effective compute with `2.599e10`
   raw FLOPs over 80 returned MLPs and no failures, leaving a large gap to the
   `1.6e-7` target.
+  Owner AICrowd later scored the real `hadamard_st3_b16` default at
+  `2.411e-7` adjusted / about `2.3e-6` MSE / `2.6e10` raw FLOPs /
+  `2.86e10` effective compute, confirming that wall/residual charge, not raw
+  FLOPs, is the remaining cost leak. Local one-MLP timing under the current
+  runner put default L3 at `16.4s` run duration / `13.4s` flopscope backend /
+  `0.51s` residual wall, while adaptive L4 took `24.0s` / `20.4s` / `0.44s`.
+  The L4 adaptive block model was tightened with measured per-row costs
+  (`3.17e6` for L3, `2.94e6` for L4 at width 256/depth 32) and a
+  level-specific residual allowance so L3 remains 16 blocks and L4 rounds down
+  to 16 blocks instead of the previous budget-exhausting point.
+  With the recalibrated `0.1` Fly residual scale, the default re-baseline
+  returned 79 MLPs at `2.802e-7` adjusted / `2.723e-6` MSE / `2.806e10`
+  effective compute with `2.599e10` raw FLOPs and no failures. Adaptive
+  `hadamard_st4` returned 80 clean MLPs at `2.717e-7` adjusted / `2.572e-6`
+  MSE / `2.853e10` effective compute with `2.406e10` raw FLOPs, but residual
+  remained high enough to sit above the floor. `hadamard_st4_b15` reached
+  floor compute but was not clean: one combined-budget exhaustion made the run
+  score `1.913e-2` adjusted / `1.914e-2` MSE despite `2.256e10` raw FLOPs.
+  Retuning the first-successor variance strength at 16 blocks was noisy and
+  not promotable. `hadamard_st3_b16_s125` had one combined-budget exhaustion
+  and scored `5.057e-3`; `s140` was clean at `2.846e-7` adjusted /
+  `2.712e-6` MSE / `2.849e10` effective compute; `s165` first looked
+  promising at `2.480e-7` adjusted / `2.359e-6` MSE / `2.859e10` effective
+  compute, but replicated at only `2.894e-7` adjusted / `2.768e-6` MSE /
+  `2.840e10` effective compute. No strength change was promoted.
+  A local 5-MLP mini layerwise MSE profile for the default showed error
+  peaking in the middle layers and then decaying: block means were
+  layers 1-8 `4.94e-6`, 9-16 `5.90e-6`, 17-24 `3.81e-6`, 25-32 `2.60e-6`,
+  with the final layer at `2.35e-6` on that mini set. The final unchanged
+  default proof returned 80 MLPs with no failures at `2.869e-7` adjusted /
+  `2.720e-6` MSE / `2.866e10` effective compute with `2.599e10` raw FLOPs.
+  The practical frontier remains around the low-to-mid `2e-7` range unless L4
+  wall time is materially reduced or a new variance mechanism cuts MSE without
+  introducing the mirror/cv3 bias seen above.
 
 ## Rejected Or Guarded Ideas
 
