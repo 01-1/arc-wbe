@@ -42,7 +42,9 @@ _DEEP_RESIDUAL_BLOCK_SAFETY = {
     4: 1.06,
 }
 _HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
-_HYBRID_JOINT_K3_PREFIX_FLOPS = 7.2e9
+_HYBRID_JOINT_K3_PREFIX_FLOPS = 1.1e9
+_HYBRID_JOINT_K3_MAX_TERMS = 128
+_HYBRID_JOINT_K3_COV_FRACTION = 0.5
 _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF = (
     math.sqrt(2.0 / math.pi)
     - 1.5 / math.sqrt(2.0 * math.pi)
@@ -1718,7 +1720,8 @@ def _hybrid_analytic_blocks_for_budget(
             * _DEEP_BLOCK_FIXED_OVERHEAD
             * _DEEP_BLOCK_COST_SAFETY
         )
-    return min(max(int(score_floor_budget // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
+    max_blocks = 8 if joint_k3_matched else _DEEP_HADAMARD_MAX_BLOCKS
+    return min(max(int(score_floor_budget // per_block_cost), 1), max_blocks)
 
 
 def _layer2_gaussian_prefix_and_factored_k3(mlp: MLP) -> tuple[fnp.ndarray, fnp.ndarray, _FactoredThird]:
@@ -1740,6 +1743,7 @@ def _layer2_gaussian_prefix_and_factored_k3(mlp: MLP) -> tuple[fnp.ndarray, fnp.
 def _joint_k3_quadratic_terms(
     chol: fnp.ndarray,
     k3: _FactoredThird,
+    max_terms: int | None = None,
 ) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
     factors = []
     eye_jitter = fnp.maximum(fnp.mean(fnp.diag(chol @ chol.T)), _MIN_VARIANCE) * 1e-10
@@ -1753,9 +1757,27 @@ def _joint_k3_quadratic_terms(
     if not factors:
         empty = _empty_factor(k3.width)
         return empty, empty, empty
+    if max_terms is not None and len(factors) > max_terms:
+        scored = []
+        for item in factors:
+            gamma, u, v = item
+            score = float(fnp.sum(gamma * gamma) * fnp.sum(u * u) * fnp.sum(v * v))
+            scored.append((score, item))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        factors = [item for _, item in scored[:max_terms]]
     gamma = fnp.concatenate(tuple(item[0] for item in factors), axis=1)
     u_all = fnp.concatenate(tuple(item[1] for item in factors), axis=1)
     v_all = fnp.concatenate(tuple(item[2] for item in factors), axis=1)
+    if max_terms is not None and gamma.shape[1] > max_terms:
+        score = (
+            fnp.sum(gamma * gamma, axis=0)
+            * fnp.sum(u_all * u_all, axis=0)
+            * fnp.sum(v_all * v_all, axis=0)
+        )
+        keep = fnp.argsort(score)[-max_terms:]
+        gamma = gamma[:, keep]
+        u_all = u_all[:, keep]
+        v_all = v_all[:, keep]
     return gamma, u_all, v_all
 
 
@@ -1786,6 +1808,32 @@ def _largest_pd_transport_scale(cov: fnp.ndarray, q_cov: fnp.ndarray) -> float:
     return lo
 
 
+def _taper_joint_k3_terms(
+    cov: fnp.ndarray,
+    gamma: fnp.ndarray,
+    u: fnp.ndarray,
+    v: fnp.ndarray,
+) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
+    if gamma.shape[1] == 0:
+        return gamma, u, v
+    eigvals, eigvecs = fnp.linalg.eigh(cov)
+    budget = _HYBRID_JOINT_K3_COV_FRACTION * fnp.maximum(eigvals, _MIN_VARIANCE)
+    gamma_eig = eigvecs.T @ gamma
+    term_load = (gamma_eig * gamma_eig) * (
+        fnp.sum(u * u, axis=0)[None, :] * fnp.sum(v * v, axis=0)[None, :]
+        + fnp.sum(u * v, axis=0)[None, :] * fnp.sum(u * v, axis=0)[None, :]
+    )
+    weights = fnp.ones(gamma.shape[1])
+    for _ in range(3):
+        load = term_load @ (weights * weights)
+        direction_scale = fnp.minimum(1.0, fnp.sqrt(budget / fnp.maximum(load, _MIN_VARIANCE)))
+        weights = weights * fnp.min(
+            fnp.where(term_load > 0.0, direction_scale[:, None], 1.0),
+            axis=0,
+        )
+    return gamma * weights[None, :], u, v
+
+
 def _joint_k3_transport(
     cov: fnp.ndarray,
     k3: _FactoredThird,
@@ -1794,11 +1842,14 @@ def _joint_k3_transport(
     eye = _eye(width)
     jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
     chol = fnp.linalg.cholesky(cov + jitter * eye)
-    gamma, u, v = _joint_k3_quadratic_terms(chol, k3)
+    gamma, u, v = _joint_k3_quadratic_terms(chol, k3, _HYBRID_JOINT_K3_MAX_TERMS)
+    gamma, u, v = _taper_joint_k3_terms(cov, gamma, u, v)
     q_cov = _joint_k3_quadratic_cov(gamma, u, v)
     damping = _largest_pd_transport_scale(cov, q_cov)
-    chol = fnp.linalg.cholesky(cov - (damping * damping) * q_cov + jitter * eye)
-    return chol, gamma * damping, u, v, damping, q_cov * (damping * damping)
+    gamma = gamma * damping
+    q_cov = q_cov * (damping * damping)
+    chol = fnp.linalg.cholesky(cov - q_cov + jitter * eye)
+    return chol, gamma, u, v, damping, q_cov
 
 
 def _apply_joint_k3_transport(
@@ -1816,7 +1867,14 @@ def _apply_joint_k3_transport(
     ug = signs @ u
     vg = signs @ v
     uv = fnp.sum(u * v, axis=0)
-    q = (ug * vg - uv[None, :]) @ gamma.T
+    q = fnp.zeros_like(linear)
+    chunk = 192
+    for start in range(0, gamma.shape[1], chunk):
+        stop = min(start + chunk, gamma.shape[1])
+        q = q + (
+            (ug[:, start:stop] * vg[:, start:stop] - uv[None, start:stop])
+            @ gamma[:, start:stop].T
+        )
     pre = linear + q
     sample_mean = fnp.mean(pre, axis=0)
     centered = pre - sample_mean[None, :]

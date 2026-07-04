@@ -905,6 +905,59 @@ after losing or becoming irrelevant to the current scorer frontier.
   the dominant carrier, while exact covariance-corrected full-strength matching
   needs a different lower-covariance transport or factorization before default
   consideration.
+- **Edgeworth analytic-prefix sampler M2b tapered/compressed joint-k3.** On
+  2026-07-04, `hadamard_st3_hybx2` was updated behind the same mode gate to
+  test a cheap tapered joint-k3 transport; unforced default behavior remains
+  unchanged. The previous global damping was replaced by an `S2` eigenbasis
+  taper: after forming the layer-2 covariance `S2`, factor vectors are
+  whitened through the Cholesky factor as before, but the quadratic columns
+  are ranked by contribution norm and truncated to 128 retained columns. The
+  retained columns are projected into the eigensystem of `S2`; their
+  per-direction `Cov(Q)` load is iteratively downweighted so the diagonalized
+  load fits under `0.5 * eig(S2)`, then the residual covariance
+  `S2 - Cov(Q_tapered)` is Choleskyed for the linear carrier. `Q(g)`
+  evaluation is chunked to avoid the old full `rows x 2304` temporary, and
+  adaptive joint-k3 hybrid sampling is capped at eight Hadamard suffix blocks
+  so the exact `hadamard_st3_hybx2` mode is the compressed K=2 decision
+  candidate.
+
+  Cost breakdown moved in the intended direction. The old M2 full joint path
+  used `5.381e10` raw FLOPs; an intermediate 128-column truncation without
+  suffix-block compression measured `2.92e10` raw on a one-MLP scorer smoke,
+  showing that the old `Q` machinery and suffix generator were both material.
+  The final eight-block compressed path measured `1.55e10` raw locally and
+  `1.546680255e10` raw on every Fly row. Representative operation accounting
+  on Fly was dominated by `matmul` at `1.3468548096e10` FLOPs, with
+  `linalg.solve` `8.053e8`, `add` `4.323e8`, `linalg.cholesky` `2.013e8`,
+  `linalg.eigh` `1.510e8`, `subtract` `1.981e8`, and all other operations
+  much smaller. This satisfies the requested `~1.5e10` raw prefix-plus-suffix
+  carrier target, but only by spending eight suffix blocks rather than the
+  previous sixteen.
+
+  No new 200k-row offline kappa3 validation cleared the requested
+  `>0.9`/`>0.85` matching target after truncation; the available evidence is
+  the recovery failure below. The direction is consistent with over-compressed
+  third-cumulant matching rather than a residual scorer artifact: the previous
+  damped 2304-column construction had diag/repeated/distinct correlations
+  `0.818`/`0.909`/`0.946` and recovered clean rows around `~4e-6`; this
+  128-column tapered path is much cheaper but does not preserve enough joint
+  carrier.
+
+  Full-100 JSON Fly for the final compressed `hadamard_st3_hybx2` under
+  `FLY_MIN_RESULTS=100`, `FLY_MAX_RESULT_SECONDS=90`, and no `--summary-only`
+  returned all 100 rows with no failures or budget artifacts:
+  `1.552e-6` adjusted / `1.552e-5` final-layer MSE / `3.812e-5`
+  all-layer MSE / `1.782e10` effective compute / `1.547e10` raw FLOPs,
+  `2.354e9` residual compute at the scorer's `0.1` residual scale, and the
+  score multiplier pinned at the `0.1` floor. Compared with the canonical
+  full-100 default baseline `2.666646644e-6`, this is about `5.82x` worse;
+  compared with clean `hyb2` at `3.970e-5`, it recovers a majority but not
+  enough of the Gaussian-prefix loss. Verdict: M2b compression succeeded on
+  FLOPs and produced a clean decision number, but the retained/tapered
+  matching is too weak. Do not promote. The residual appears to be matching
+  quality and sample-count loss, not a fourth-order-only gap; future M2 work
+  needs a better low-covariance factorization before M3 depth economics is
+  worth implementing.
 
 ## Benchmarking Notes
 
