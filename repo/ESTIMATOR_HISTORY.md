@@ -735,6 +735,22 @@ after losing or becoming irrelevant to the current scorer frontier.
   materially different sampler preserves non-Gaussian post-ReLU structure.
   The leaderboard gap is therefore unlikely to be explained by this simple
   Gaussian-closure analytic-prefix mechanism.
+- **AICrowd A/B closes deep Strassen defaults.** On 2026-07-04, the owner
+  reported the grader A/B for commit `a96d8d5` with L4 as the default:
+  `3.438e-7` adjusted / `2.3e-6` MSE / `2.41e10` raw FLOPs /
+  `4.11e10` effective compute. The FLOP cut transferred exactly, but the
+  grader charged `1.70e10` residual compute versus about `2.6e9` for the L3
+  build, raising the multiplier to `0.151` and regressing score by about
+  `43%` versus the L3 default's `2.411e-7`. Verdict: revert the default
+  `_DEEP_STRASSEN_LEVELS` from 4 to 3. Deep-level Strassen (L4+) is closed on
+  this grader because its many-small-leaf execution pattern draws roughly
+  `6.5x` the residual charge of L3's batched einsum on grader hardware despite
+  being leaner locally. L3 batched is the wall-time sweet spot; future scored
+  implementations should prefer large plain BLAS-shaped operations over
+  deeper small-leaf Strassen work. Restored-default proof: `make fly` returned
+  80 MLPs with no failures at `2.763e-7` adjusted / `2.640e-6` MSE /
+  `2.846e10` effective compute / `2.599e10` raw FLOPs and `2.473e9`
+  residual compute.
 
 ## Benchmarking Notes
 
