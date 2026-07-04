@@ -674,6 +674,17 @@ after losing or becoming irrelevant to the current scorer frontier.
   unamortized `r1` path as a viable analytic carrier for the depth-32 floor;
   any leaderboard-gap analytic lane would need a much cheaper amortized or
   low-rank carrier and cannot be inferred from the current exact K=3 route.
+- **Grader A/B candidate: default Strassen level 4.** On 2026-07-04, the deep
+  default was flipped from L3 to L4 as a grader A/B experiment. The adaptive
+  contest-budget selector uses the measured L4 row cost and residual allowance
+  to choose 16 Hadamard blocks at `2.72e11`, matching the clean adaptive
+  `hadamard_st4` route and avoiding the explicit `hadamard_st4_b15` edge case.
+  Motivation is local wall time: current L4 measured `14.8s` versus L3
+  `23.6s`, while Fly residual pricing disagrees and may make effective compute
+  look neutral. The owner will submit this candidate to AICrowd and keep or
+  revert it based on grader numbers. If the grader tracks wall time, the
+  expected outcome is about `2.6e10` compute, still under the floor, and around
+  `2.25e-7` score.
 
 ## Benchmarking Notes
 
