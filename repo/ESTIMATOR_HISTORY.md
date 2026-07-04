@@ -782,6 +782,35 @@ after losing or becoming irrelevant to the current scorer frontier.
   `p=0.920`; it is not a structural win. Saved full-JSON logs live under
   `paired_fly_logs/` for this local screen. Verdict: no estimator code
   change; the important change is methodological.
+- **Near-miss graveyard paired sweep, interrupted by Fly object-download
+  failures.** On 2026-07-04, composable diagnostic tokens were re-added for
+  the historical diagonal/readout near misses without changing unforced
+  default behavior: `cap<N>` clips the first-successor variance-match scale
+  around one at `N/100`; `kg<N>` damps first-successor variance strength by
+  positive ensemble excess kurtosis; `gp<N>` blends only the final reported row
+  toward the Gaussian marginal final-layer closure; `ew<N>` blends only the
+  final reported row toward a sample-cumulant Edgeworth final-layer closure;
+  `tr` replaces only the final reported row with a highest/lowest-block
+  trimmed block mean; and `w2<N>` adds a second-successor variance match at
+  `N/100` strength. These tokens consume the same Hadamard RNG stream as the
+  canonical `hadamard_st3_b16` route and apply only post-sampling transforms.
+  Syntax proof passed with `python -m py_compile estimator.py`, and a local
+  one-MLP composed smoke of `hadamard_st3_b16_cap150_gp10_ew10_tr_w250` ran
+  without estimator failure.
+  The requested full-100 Fly protocol was only partially completed because
+  repeated workers failed while downloading the one-MLP dataset object before
+  estimator execution, even with presigned URLs and launch concurrency reduced
+  from 100 to 10. Clean or near-clean paired results against the canonical
+  default baseline `2.666646644e-6` were non-promotable: `kg25` returned all
+  100 rows at `2.664752591e-6` mean final-layer MSE, `-0.0347%` mean paired
+  relative delta, 53 wins / 47 losses, sign-test `p=0.617`; `cap150` returned
+  96 matched rows at `2.631170795e-6` on that subset, only `-0.00119%` paired
+  relative delta, with 93 exact ties, 2 wins, 1 loss, sign-test `p=1.0`. The
+  attempted `gp10`, `gp05`, and `tr` logs are not decision-grade: they
+  produced only 1, 3, and 30 matched rows respectively before pre-score
+  download failures/timeouts, and must be rerun before drawing statistical
+  conclusions. Because no candidate cleared the REAL gate and the sweep did
+  not finish, no stacking or default promotion was attempted.
 
 ## Benchmarking Notes
 

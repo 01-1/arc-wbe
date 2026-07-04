@@ -14,6 +14,7 @@ import itertools
 import math
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from functools import cache
 
 import flopscope as flops
@@ -77,6 +78,16 @@ _BIVAR_RELU_GL16_WEIGHTS = (
     0.0622535239386479,
     0.0271524594117541,
 )
+
+
+@dataclass(frozen=True)
+class _HadamardPosthocConfig:
+    scale_cap: float | None = None
+    kurtosis_gate: float | None = None
+    gaussian_pull: float = 0.0
+    edgeworth_blend: float = 0.0
+    trimmed_final: bool = False
+    second_variance_strength: float | None = None
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1460,6 +1471,30 @@ def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.
     return fnp.maximum(second - relu_mean * relu_mean, _MIN_VARIANCE)
 
 
+def _gaussian_relu_mean(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.ndarray:
+    var_pre = fnp.maximum(var_pre, _MIN_VARIANCE)
+    sigma = fnp.sqrt(var_pre)
+    alpha = mean_pre / sigma
+    return sigma * flops.stats.norm.pdf(alpha) + mean_pre * flops.stats.norm.cdf(alpha)
+
+
+def _edgeworth_relu_mean(pre: fnp.ndarray) -> fnp.ndarray:
+    mean_pre = fnp.mean(pre, axis=0)
+    centered = pre - mean_pre[None, :]
+    var_pre = fnp.maximum(fnp.mean(centered * centered, axis=0), _MIN_VARIANCE)
+    sigma = fnp.sqrt(var_pre)
+    z = centered / sigma[None, :]
+    skew = fnp.mean(z * z * z, axis=0)
+    excess = fnp.mean(z * z * z * z, axis=0) - 3.0
+    alpha = mean_pre / sigma
+    phi = flops.stats.norm.pdf(alpha)
+    Phi = flops.stats.norm.cdf(alpha)
+    gaussian = sigma * phi + mean_pre * Phi
+    h3_int = -sigma * (alpha * alpha - 1.0) * phi
+    h4_int = sigma * (alpha * alpha * alpha - 3.0 * alpha) * phi
+    return gaussian + (skew / 6.0) * h3_int + (excess / 24.0) * h4_int
+
+
 def _gaussian_relu_mean_cov(
     mean_pre: fnp.ndarray,
     cov_pre: fnp.ndarray,
@@ -1742,6 +1777,7 @@ def _hadamard_first_cov_recolored_means(
     mirror_layer: int | None = None,
     final_cv3: bool = False,
     antithetic_fraction: float = 1.0,
+    posthoc: _HadamardPosthocConfig | None = None,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
     initial_samples = n_samples
@@ -1796,9 +1832,12 @@ def _hadamard_first_cov_recolored_means(
             )
             cv3_s_blocks = fnp.mean(normalized, axis=1)
 
+    posthoc = posthoc or _HadamardPosthocConfig()
     rows = [target_mean]
+    final_pre = None
     for layer_idx, w in enumerate(mlp.weights[1:], start=1):
         pre = _strassen_matmul(x, w, strassen_levels)
+        final_pre = pre
         x = fnp.maximum(pre, 0.0)
         if layer_idx <= exact_recolor_layers:
             target_pre_mean = target_mean @ w
@@ -1819,12 +1858,45 @@ def _hadamard_first_cov_recolored_means(
             sample_mean = fnp.mean(x, axis=0)
             centered_layer = x - sample_mean[None, :]
             sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
-            scale = 1.0 + variance_match_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
+            strength = variance_match_strength
+            if layer_idx == 1 and posthoc.kurtosis_gate is not None:
+                pre_z = pre_centered / fnp.sqrt(fnp.maximum(fnp.mean(pre_centered * pre_centered, axis=0), _MIN_VARIANCE))[None, :]
+                excess = fnp.maximum(fnp.mean(pre_z * pre_z * pre_z * pre_z, axis=0) - 3.0, 0.0)
+                strength = strength / (1.0 + posthoc.kurtosis_gate * excess)
+            scale = 1.0 + strength * (fnp.sqrt(target_var / sample_var) - 1.0)
+            if layer_idx == 1 and posthoc.scale_cap is not None:
+                cap = posthoc.scale_cap
+                scale = fnp.maximum(fnp.minimum(scale, cap), 1.0 / cap)
+            x = centered_layer * scale[None, :] + sample_mean[None, :]
+        if posthoc.second_variance_strength is not None and layer_idx == 2:
+            pre_mean = fnp.mean(pre, axis=0)
+            pre_centered = pre - pre_mean[None, :]
+            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
+            sample_mean = fnp.mean(x, axis=0)
+            centered_layer = x - sample_mean[None, :]
+            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            scale = 1.0 + posthoc.second_variance_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
             x = centered_layer * scale[None, :] + sample_mean[None, :]
         rows.append(fnp.mean(x, axis=0))
         if mirror_layer is not None and layer_idx == mirror_layer:
             mirror_mean = rows[-1]
             x = fnp.concatenate((x, 2.0 * mirror_mean[None, :] - x), axis=0)
+    if posthoc.trimmed_final:
+        block_rows = 2 * mlp.width
+        n_blocks = x.shape[0] // block_rows
+        if n_blocks >= 3:
+            final_blocks = fnp.reshape(x[: n_blocks * block_rows], (n_blocks, block_rows, mlp.width))
+            block_means = fnp.mean(final_blocks, axis=1)
+            sorted_means = fnp.sort(block_means, axis=0)
+            rows[-1] = fnp.mean(sorted_means[1:-1], axis=0)
+    if final_pre is not None and posthoc.gaussian_pull:
+        pre_mean = fnp.mean(final_pre, axis=0)
+        pre_centered = final_pre - pre_mean[None, :]
+        gaussian_mean = _gaussian_relu_mean(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
+        rows[-1] = (1.0 - posthoc.gaussian_pull) * rows[-1] + posthoc.gaussian_pull * gaussian_mean
+    if final_pre is not None and posthoc.edgeworth_blend:
+        edgeworth_mean = _edgeworth_relu_mean(final_pre)
+        rows[-1] = (1.0 - posthoc.edgeworth_blend) * rows[-1] + posthoc.edgeworth_blend * edgeworth_mean
     if final_cv3 and cv3_s_blocks is not None:
         block_rows = 2 * mlp.width
         n_blocks = cv3_s_blocks.shape[0]
@@ -1885,7 +1957,19 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int, float, int | None]:
+def _parse_hadamard_tokens(mode: str) -> tuple[
+    int,
+    int | None,
+    int,
+    int | None,
+    bool,
+    float | None,
+    int,
+    int,
+    float,
+    int | None,
+    _HadamardPosthocConfig,
+]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
@@ -1896,6 +1980,12 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
     variance_match_start_layer = 1
     antithetic_fraction = 1.0
     hybrid_prefix_layers = None
+    scale_cap = None
+    kurtosis_gate = None
+    gaussian_pull = 0.0
+    edgeworth_blend = 0.0
+    trimmed_final = False
+    second_variance_strength = None
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
@@ -1911,6 +2001,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             variance_match_start_layer,
             antithetic_fraction,
             hybrid_prefix_layers,
+            _HadamardPosthocConfig(),
         )
     for token in suffix.split("_"):
         if token.startswith("st"):
@@ -1929,6 +2020,18 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             antithetic_fraction = 0.5
         elif token.startswith("hyb"):
             hybrid_prefix_layers = max(int(token[len("hyb") :]), 1)
+        elif token.startswith("cap"):
+            scale_cap = max(int(token[len("cap") :]) / 100.0, 1.0)
+        elif token.startswith("kg"):
+            kurtosis_gate = max(int(token[len("kg") :]) / 100.0, 0.0)
+        elif token.startswith("gp"):
+            gaussian_pull = max(int(token[len("gp") :]) / 100.0, 0.0)
+        elif token.startswith("ew"):
+            edgeworth_blend = max(int(token[len("ew") :]) / 100.0, 0.0)
+        elif token == "tr":
+            trimmed_final = True
+        elif token.startswith("w2"):
+            second_variance_strength = max(int(token[len("w2") :]) / 100.0, 0.0)
         elif token == "l2x":
             exact_recolor_layers = 1
             variance_match_start_layer = 99
@@ -1953,6 +2056,14 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
         variance_match_start_layer,
         antithetic_fraction,
         hybrid_prefix_layers,
+        _HadamardPosthocConfig(
+            scale_cap=scale_cap,
+            kurtosis_gate=kurtosis_gate,
+            gaussian_pull=gaussian_pull,
+            edgeworth_blend=edgeworth_blend,
+            trimmed_final=trimmed_final,
+            second_variance_strength=second_variance_strength,
+        ),
     )
 
 
@@ -2058,6 +2169,7 @@ class Estimator(BaseEstimator):
                 variance_match_start_layer,
                 antithetic_fraction,
                 hybrid_prefix_layers,
+                posthoc,
             ) = _parse_hadamard_tokens(mode)
             if hybrid_prefix_layers is not None:
                 n_hybrid_blocks = (
@@ -2100,5 +2212,6 @@ class Estimator(BaseEstimator):
                 mirror_layer=mirror_layer,
                 final_cv3=final_cv3,
                 antithetic_fraction=antithetic_fraction,
+                posthoc=posthoc,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")
