@@ -782,8 +782,8 @@ after losing or becoming irrelevant to the current scorer frontier.
   `p=0.920`; it is not a structural win. Saved full-JSON logs live under
   `paired_fly_logs/` for this local screen. Verdict: no estimator code
   change; the important change is methodological.
-- **Near-miss graveyard paired sweep, interrupted by Fly object-download
-  failures.** On 2026-07-04, composable diagnostic tokens were re-added for
+- **Near-miss graveyard paired sweep.** On 2026-07-04, composable diagnostic
+  tokens were re-added for
   the historical diagonal/readout near misses without changing unforced
   default behavior: `cap<N>` clips the first-successor variance-match scale
   around one at `N/100`; `kg<N>` damps first-successor variance strength by
@@ -797,20 +797,29 @@ after losing or becoming irrelevant to the current scorer frontier.
   Syntax proof passed with `python -m py_compile estimator.py`, and a local
   one-MLP composed smoke of `hadamard_st3_b16_cap150_gp10_ew10_tr_w250` ran
   without estimator failure.
-  The requested full-100 Fly protocol was only partially completed because
-  repeated workers failed while downloading the one-MLP dataset object before
-  estimator execution, even with presigned URLs and launch concurrency reduced
-  from 100 to 10. Clean or near-clean paired results against the canonical
-  default baseline `2.666646644e-6` were non-promotable: `kg25` returned all
-  100 rows at `2.664752591e-6` mean final-layer MSE, `-0.0347%` mean paired
-  relative delta, 53 wins / 47 losses, sign-test `p=0.617`; `cap150` returned
-  96 matched rows at `2.631170795e-6` on that subset, only `-0.00119%` paired
-  relative delta, with 93 exact ties, 2 wins, 1 loss, sign-test `p=1.0`. The
-  attempted `gp10`, `gp05`, and `tr` logs are not decision-grade: they
-  produced only 1, 3, and 30 matched rows respectively before pre-score
-  download failures/timeouts, and must be rerun before drawing statistical
-  conclusions. Because no candidate cleared the REAL gate and the sweep did
-  not finish, no stacking or default promotion was attempted.
+  Full-100 Fly JSON pairing against the canonical default baseline
+  `2.666646644e-6` mean final-layer MSE completed the tier-1 graveyard sweep.
+  The REAL gate was paired mean delta `<= -1%` and sign-test `p < 0.05`.
+  Results:
+  `cap150` was `-0.00119%` on 96 matched rows, 2 wins / 1 loss / 93 ties,
+  sign-test `p=1.0`;
+  `kg25` was `-0.0347%`, 53 / 47 / 0, `p=0.617`;
+  `gp05` was `+0.0884%`, 45 / 55 / 0, `p=0.368`;
+  `gp10` was `+0.453%`, 41 / 59 / 0, `p=0.0886`;
+  `tr` was `+7.23%`, 26 / 74 / 0, `p=1.67e-6`;
+  `ew10` was `+1.10%`, 16 / 84 / 0, `p=2.61e-12`;
+  `ew20` was `+4.97%` on 99 clean matched rows, 3 / 96 / 0,
+  `p=5.11e-25`;
+  `w250` was `+4.91%`, 45 / 55 / 0, `p=0.368`;
+  and `w225` was `+0.727%`, 49 / 51 / 0, `p=0.920`.
+  The previous Fly/Tigris dataset-download failure pattern did not recur.
+  `ew10` and `ew20` each needed one rerun because one run had a
+  `combined_budget_exhausted` scorer artifact; the clean `ew10` rerun and the
+  99-row clean `ew20` first run are decision-grade losses. No candidate passed
+  the REAL gate, so no stacking, default promotion, plain `make fly` proof, or
+  new-vs-old paired confirmation was run. Verdict: the historical graveyard is
+  closed at sub-1% paired resolution for these deterministic post-sampling
+  tokens; leave the unforced default unchanged.
 
 ## Benchmarking Notes
 
