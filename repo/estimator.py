@@ -40,6 +40,7 @@ _DEEP_RESIDUAL_BLOCK_SAFETY = {
     3: 1.0,
     4: 1.06,
 }
+_HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
 _BIVAR_RELU_GL16_NODES = (
     -0.9894009349916499,
     -0.9445750230732326,
@@ -1641,6 +1642,92 @@ def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray
     return _strassen_matmul_batched(a, b, levels)
 
 
+def _hybrid_analytic_blocks_for_budget(
+    mlp: MLP,
+    budget: int,
+    strassen_levels: int,
+    prefix_layers: int,
+) -> int:
+    rows_per_block = 2 * mlp.width
+    suffix_layers = max(mlp.depth - prefix_layers, 1)
+    measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(strassen_levels)
+    analytic_cost = max(prefix_layers, 1) * _HYBRID_ANALYTIC_LAYER_FLOPS
+    score_floor_budget = max(0.1 * budget - analytic_cost, rows_per_block)
+    if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
+        per_block_cost = (
+            rows_per_block
+            * measured_row_cost
+            * suffix_layers
+            / mlp.depth
+            * _DEEP_BLOCK_COST_SAFETY
+            * _DEEP_RESIDUAL_BLOCK_SAFETY.get(strassen_levels, 1.0)
+        )
+    else:
+        plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
+        strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
+        per_block_cost = (
+            suffix_layers
+            * plain_layer_cost
+            * strassen_discount
+            * _DEEP_BLOCK_FIXED_OVERHEAD
+            * _DEEP_BLOCK_COST_SAFETY
+        )
+    return min(max(int(score_floor_budget // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
+
+
+def _hybrid_analytic_prefix_hadamard_means(
+    mlp: MLP,
+    n_samples: int,
+    rng: fnp.random.Generator,
+    prefix_layers: int,
+    variance_match_strength: float,
+    strassen_levels: int,
+) -> fnp.ndarray:
+    """Analytic Gaussian-closure prefix, then Hadamard sample the prefix preactivation."""
+    prefix_layers = min(max(int(prefix_layers), 1), mlp.depth)
+    mean = _zeros_vec(mlp.width)
+    cov = _eye(mlp.width)
+    analytic_rows = []
+    pre_mean = None
+    pre_cov = None
+    for layer_idx, w in enumerate(mlp.weights[:prefix_layers]):
+        pre_mean = mean @ w
+        pre_cov = w.T @ cov @ w
+        if layer_idx == 0:
+            mean, cov = _zero_mean_relu_mean_cov(pre_cov)
+        else:
+            mean, cov = _gaussian_relu_mean_cov(pre_mean, pre_cov)
+        analytic_rows.append(mean)
+
+    assert pre_mean is not None and pre_cov is not None
+    n_blocks = max(n_samples // (2 * mlp.width), 1)
+    signs = _hadamard_sign_half_blocks(mlp, n_blocks * 2 * mlp.width, rng)
+    centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
+    pre_half = signs @ centered_chol.T
+    pre = fnp.concatenate((pre_half, -pre_half), axis=0) + pre_mean[None, :]
+    x = fnp.maximum(pre, 0.0)
+
+    rows = list(analytic_rows[:-1])
+    rows.append(fnp.mean(x, axis=0))
+    for layer_idx, w in enumerate(mlp.weights[prefix_layers:], start=prefix_layers):
+        pre = _strassen_matmul(x, w, strassen_levels)
+        x = fnp.maximum(pre, 0.0)
+        if layer_idx == prefix_layers:
+            pre_mean_sample = fnp.mean(pre, axis=0)
+            pre_centered = pre - pre_mean_sample[None, :]
+            target_var = _gaussian_relu_variance(
+                pre_mean_sample,
+                fnp.mean(pre_centered * pre_centered, axis=0),
+            )
+            sample_mean = fnp.mean(x, axis=0)
+            centered_layer = x - sample_mean[None, :]
+            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            scale = 1.0 + variance_match_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
+            x = centered_layer * scale[None, :] + sample_mean[None, :]
+        rows.append(fnp.mean(x, axis=0))
+    return fnp.stack(rows, axis=0)
+
+
 def _hadamard_first_cov_recolored_means(
     mlp: MLP,
     n_samples: int,
@@ -1798,7 +1885,7 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int, float]:
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int, float, int | None]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
@@ -1808,6 +1895,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
     exact_recolor_layers = 0
     variance_match_start_layer = 1
     antithetic_fraction = 1.0
+    hybrid_prefix_layers = None
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
@@ -1822,6 +1910,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             exact_recolor_layers,
             variance_match_start_layer,
             antithetic_fraction,
+            hybrid_prefix_layers,
         )
     for token in suffix.split("_"):
         if token.startswith("st"):
@@ -1838,6 +1927,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             antithetic_fraction = 0.0
         elif token == "anti50":
             antithetic_fraction = 0.5
+        elif token.startswith("hyb"):
+            hybrid_prefix_layers = max(int(token[len("hyb") :]), 1)
         elif token == "l2x":
             exact_recolor_layers = 1
             variance_match_start_layer = 99
@@ -1861,6 +1952,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
         exact_recolor_layers,
         variance_match_start_layer,
         antithetic_fraction,
+        hybrid_prefix_layers,
     )
 
 
@@ -1965,7 +2057,27 @@ class Estimator(BaseEstimator):
                 exact_recolor_layers,
                 variance_match_start_layer,
                 antithetic_fraction,
+                hybrid_prefix_layers,
             ) = _parse_hadamard_tokens(mode)
+            if hybrid_prefix_layers is not None:
+                n_hybrid_blocks = (
+                    n_blocks
+                    if n_blocks is not None
+                    else _hybrid_analytic_blocks_for_budget(
+                        mlp,
+                        budget,
+                        strassen_levels,
+                        hybrid_prefix_layers,
+                    )
+                )
+                return _hybrid_analytic_prefix_hadamard_means(
+                    mlp,
+                    n_hybrid_blocks * 2 * mlp.width,
+                    fnp.random.default_rng(mlp.seed),
+                    hybrid_prefix_layers,
+                    _DEEP_VARIANCE_MATCH_STRENGTH if variance_strength is None else variance_strength,
+                    strassen_levels,
+                )
             n_samples = (
                 n_blocks * 2 * mlp.width
                 if n_blocks is not None

@@ -685,6 +685,56 @@ after losing or becoming irrelevant to the current scorer frontier.
   revert it based on grader numbers. If the grader tracks wall time, the
   expected outcome is about `2.6e10` compute, still under the floor, and around
   `2.25e-7` score.
+- **Hybrid analytic-prefix plus sampled-suffix probe.** On 2026-07-04, a
+  mode-gated `hyb<K>` diagnostic tested the leaderboard-gap hypothesis: five
+  public entries clustered around `1.25e-7` to `1.63e-7`, with the next entry
+  around `1.94e-7`, looked like a discrete shared mechanism. Budget
+  fingerprints were consistent with analytic prefix plus sampled suffix, with
+  one roughly `47%`-budget entry resembling a K=3-class analytic chain to
+  half depth plus sampling and floor-group entries around `10-11%` resembling
+  a cheaper shallow analytic prefix and sampled suffix. The old layer-8
+  Gaussian restart failure (`1.479e-5` final-layer MSE) did not by itself
+  falsify this idea because it resampled from noisy ensemble moments without
+  an analytic chain; this probe separated moment noise from structure loss.
+  The implementation reused the `l2x` round's exact nonzero-mean bivariate
+  ReLU Gaussian-closure machinery: layer 1 uses the exact zero-mean
+  arc-cosine mean/covariance target, later prefix layers form
+  `m = mu @ W`, `S = W.T @ C @ W`, and apply the 16-node
+  Gauss-Legendre Price-identity covariance update. The analytic cost model
+  charges `1.05e8` FLOPs per prefix layer, in line with the expected
+  `~1e8/layer` from two dense covariance matmuls plus `16 * 256^2`
+  bivariate quadrature work, and reinvests the remaining floor budget into
+  suffix-only Hadamard blocks. At layer K it samples the analytic
+  preactivation Gaussian with randomized Hadamard signs and antithetic
+  centered negation, applies ReLU without recoloring, reports analytic means
+  for layers `1..K-1`, and uses sampled rows from layer K onward with the
+  existing `1.5x` first-successor variance hook. The committed default
+  `_DEEP_STRASSEN_LEVELS = 4` was not changed.
+  Same-day plain `make fly` was poisoned by one known harness-side
+  `combined_budget_exhausted` row: `5.057e-3` adjusted / `5.059e-3` MSE /
+  `2.895e10` effective / `2.406e10` raw FLOPs over 80 returned MLPs. The
+  comparison baseline therefore used `hadamard_st3_b16`, which was clean at
+  `2.655e-7` adjusted / `2.513e-6` MSE / `2.867e10` effective /
+  `2.599e10` raw FLOPs over 80 returned and no failures. Adaptive
+  `hadamard_st3_hyb2` and `hadamard_st3_hyb4` both landed on the artifact
+  edge and each had two `combined_budget_exhausted` rows, giving unusable
+  aggregate means (`1.091e-2` and `1.370e-2` adjusted, respectively) despite
+  raw FLOPs around `2.47e10`. Clean fixed-block checks resolved the direction:
+  `hadamard_st3_b15_hyb2` scored `3.782e-6` adjusted / `3.767e-5` MSE /
+  `2.429e10` effective / `2.187e10` raw FLOPs over 80 returned with no
+  failures, and adaptive `hadamard_st3_hyb8` scored `4.222e-6` adjusted /
+  `3.970e-5` MSE / `2.840e10` effective / `2.525e10` raw FLOPs over 80
+  returned with no failures. A `hadamard_st3_b15_hyb4` confirmation was also
+  bad but not clean: 79 returned scored MLPs plus one Fly entrypoint machine
+  failure and one `combined_budget_exhausted` row, `6.076e-3` adjusted /
+  `6.102e-3` MSE / `2.415e10` effective / `2.067e10` raw FLOPs.
+  Verdict: the K-curve is not neutral-then-improving; even K=2 loses by more
+  than an order of magnitude on clean MSE, while K=8 is similarly broken.
+  This supports the structure-loss interpretation and closes the
+  analytic-prefix plus sampled-suffix family for this estimator unless a
+  materially different sampler preserves non-Gaussian post-ReLU structure.
+  The leaderboard gap is therefore unlikely to be explained by this simple
+  Gaussian-closure analytic-prefix mechanism.
 
 ## Benchmarking Notes
 
