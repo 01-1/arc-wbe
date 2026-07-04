@@ -958,6 +958,66 @@ after losing or becoming irrelevant to the current scorer frontier.
   quality and sample-count loss, not a fourth-order-only gap; future M2 work
   needs a better low-covariance factorization before M3 depth economics is
   worth implementing.
+- **Edgeworth analytic-prefix sampler M2c disentangled K=2 ladder.** On
+  2026-07-04, the M2b confound was split apart behind mode-gated diagnostics;
+  unforced default behavior remains unchanged. The accidental joint-k3
+  adaptive suffix cap was removed, so all decision runs below used the
+  standard 16 Hadamard suffix blocks. The mode parser now accepts explicit
+  joint-k3 transport tokens: `k128`, `k512`, or `kfull` for the number of
+  retained quadratic columns, and `tg`/`te` for global damping or `S2`
+  eigen-tapering. The global damping mode uses `0.516` as a ceiling under the
+  same Cholesky positive-definiteness guard, matching the M2 global-damped
+  construction without letting a rounded constant make `S2 - Cov(Q)` non-PD.
+
+  Mandatory offline kappa3 validation used one He-initialized
+  width-256/depth-32 MLP, `200192` antithetic Hadamard-base rows, all 256
+  diagonal entries, 79 fixed repeated off-diagonal entries, and 120 fixed
+  fully distinct triples. Correlations are against the exact factored layer-2
+  preactivation third-cumulant target:
+
+  | Quadratic columns | Taper | Damping | kappa3 corr diag | repeated | distinct |
+  |---:|---|---:|---:|---:|---:|
+  | 128 | global | `0.492` | `0.511` | `0.719` | `0.567` |
+  | 128 | eigen | `1.000` | `0.511` | `0.721` | `0.581` |
+  | 512 | global | `0.409` | `0.741` | `0.808` | `0.821` |
+  | 512 | eigen | `1.000` | `0.751` | `0.810` | `0.840` |
+  | full 2304 | global | `0.516` | `0.878` | `0.939` | `0.963` |
+  | full 2304 | eigen | `1.000` | `0.894` | `0.961` | `0.979` |
+
+  The ladder isolates the M2b regression: the 128-column truncation was the
+  main matching failure, while the eight-block suffix cap also made that
+  compressed result an economics measurement rather than a K=2 decision
+  measurement. Full-column transports recover repeated/distinct structure, but
+  even the best-correlation eigen taper remains just below the `0.9` diagonal
+  threshold.
+
+  Full-100 JSON Fly decision runs were then taken with 16 suffix blocks and no
+  `--summary-only`; all three returned 100 rows with no failures or budget
+  artifacts:
+
+  | Mode | Offline corr diag / rep / distinct | Final-layer MSE | Adjusted score | Effective compute | Raw FLOPs |
+  |---|---|---:|---:|---:|---:|
+  | `hadamard_st3_b16_hybx2_k512_te` | `0.751` / `0.810` / `0.840` | `6.543e-6` | `8.939e-7` | `3.703e10` | `3.462e10` |
+  | `hadamard_st3_b16_hybx2_kfull_te` | `0.894` / `0.961` / `0.979` | `9.255e-6` | `2.395e-6` | `7.036e10` | `6.798e10` |
+  | `hadamard_st3_b16_hybx2_kfull_tg` | `0.878` / `0.939` / `0.963` | `3.881e-6` | `9.984e-7` | `6.996e10` | `6.751e10` |
+
+  The best-achievable measured K=2 number in this disentangled pass is the
+  full global-damped 16-block route at `3.881e-6` final-layer MSE. That misses
+  the pre-registered M3 viability bar of `<= 3.1e-6` by about `0.78e-6` and
+  leaves about `1.21e-6` residual over the `2.666646644e-6` canonical
+  baseline, well above the allowed `~0.4e-6` residual bias. Because the best
+  practical MSE point still has poor diagonal matching (`0.878 < 0.9`), the
+  verdict tier is **transport quality blocker**, not the irreducible
+  fourth-order closeout tier. Joint-k3 remains the dominant carrier: restoring
+  full columns and 16 suffix blocks recovers roughly a 10x factor over clean
+  `hyb2` at `3.970e-5`, but the current quadratic transport cannot carry the
+  diagonal third cumulants strongly enough while keeping covariance feasible
+  and compute sane. A better transport would need a lower-covariance
+  factorization or coupled linear/quadratic map that gets diagonal correlation
+  above `0.9` without the eigen full route's high-MSE over-injection, and it
+  must cut the full-column raw cost from about `6.75e10` toward the
+  score-efficient floor. Stop for review; do not implement M3 from this M2c
+  state.
 
 ## Benchmarking Notes
 

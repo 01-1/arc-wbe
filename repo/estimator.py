@@ -45,6 +45,7 @@ _HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
 _HYBRID_JOINT_K3_PREFIX_FLOPS = 1.1e9
 _HYBRID_JOINT_K3_MAX_TERMS = 128
 _HYBRID_JOINT_K3_COV_FRACTION = 0.5
+_HYBRID_JOINT_K3_GLOBAL_DAMP = 0.516
 _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF = (
     math.sqrt(2.0 / math.pi)
     - 1.5 / math.sqrt(2.0 * math.pi)
@@ -1720,8 +1721,7 @@ def _hybrid_analytic_blocks_for_budget(
             * _DEEP_BLOCK_FIXED_OVERHEAD
             * _DEEP_BLOCK_COST_SAFETY
         )
-    max_blocks = 8 if joint_k3_matched else _DEEP_HADAMARD_MAX_BLOCKS
-    return min(max(int(score_floor_budget // per_block_cost), 1), max_blocks)
+    return min(max(int(score_floor_budget // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
 
 
 def _layer2_gaussian_prefix_and_factored_k3(mlp: MLP) -> tuple[fnp.ndarray, fnp.ndarray, _FactoredThird]:
@@ -1837,15 +1837,19 @@ def _taper_joint_k3_terms(
 def _joint_k3_transport(
     cov: fnp.ndarray,
     k3: _FactoredThird,
+    max_terms: int | None = _HYBRID_JOINT_K3_MAX_TERMS,
+    taper: str = "eigen",
 ) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray, float, fnp.ndarray]:
     width = cov.shape[0]
     eye = _eye(width)
     jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
     chol = fnp.linalg.cholesky(cov + jitter * eye)
-    gamma, u, v = _joint_k3_quadratic_terms(chol, k3, _HYBRID_JOINT_K3_MAX_TERMS)
-    gamma, u, v = _taper_joint_k3_terms(cov, gamma, u, v)
+    gamma, u, v = _joint_k3_quadratic_terms(chol, k3, max_terms)
+    if taper == "eigen":
+        gamma, u, v = _taper_joint_k3_terms(cov, gamma, u, v)
     q_cov = _joint_k3_quadratic_cov(gamma, u, v)
-    damping = _largest_pd_transport_scale(cov, q_cov)
+    pd_damping = _largest_pd_transport_scale(cov, q_cov)
+    damping = min(_HYBRID_JOINT_K3_GLOBAL_DAMP, pd_damping) if taper == "global" else pd_damping
     gamma = gamma * damping
     q_cov = q_cov * (damping * damping)
     chol = fnp.linalg.cholesky(cov - q_cov + jitter * eye)
@@ -1895,6 +1899,8 @@ def _hybrid_analytic_prefix_hadamard_means(
     strassen_levels: int,
     skew_matched: bool = False,
     joint_k3_matched: bool = False,
+    joint_k3_max_terms: int | None = _HYBRID_JOINT_K3_MAX_TERMS,
+    joint_k3_taper: str = "eigen",
 ) -> fnp.ndarray:
     """Analytic Gaussian-closure prefix, then Hadamard sample the prefix preactivation."""
     prefix_layers = min(max(int(prefix_layers), 1), mlp.depth)
@@ -1931,7 +1937,12 @@ def _hybrid_analytic_prefix_hadamard_means(
     signs = _hadamard_sign_half_blocks(mlp, n_blocks * 2 * mlp.width, rng)
     if joint_k3_matched and z2_k3 is not None:
         full_signs = fnp.concatenate((signs, -signs), axis=0)
-        centered_chol, gamma, u, v, _, _ = _joint_k3_transport(pre_cov, z2_k3)
+        centered_chol, gamma, u, v, _, _ = _joint_k3_transport(
+            pre_cov,
+            z2_k3,
+            joint_k3_max_terms,
+            joint_k3_taper,
+        )
         pre = _apply_joint_k3_transport(full_signs, pre_mean, pre_cov, centered_chol, gamma, u, v)
     else:
         centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
@@ -2179,6 +2190,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     int | None,
     bool,
     bool,
+    int | None,
+    str,
     _HadamardPosthocConfig,
 ]:
     strassen_levels = 1
@@ -2193,6 +2206,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     hybrid_prefix_layers = None
     hybrid_skew_matched = False
     hybrid_joint_k3_matched = False
+    hybrid_joint_k3_max_terms = _HYBRID_JOINT_K3_MAX_TERMS
+    hybrid_joint_k3_taper = "eigen"
     scale_cap = None
     kurtosis_gate = None
     gaussian_pull = 0.0
@@ -2216,6 +2231,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             hybrid_prefix_layers,
             hybrid_skew_matched,
             hybrid_joint_k3_matched,
+            hybrid_joint_k3_max_terms,
+            hybrid_joint_k3_taper,
             _HadamardPosthocConfig(),
         )
     for token in suffix.split("_"):
@@ -2236,6 +2253,14 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         elif token.startswith("hybx"):
             hybrid_prefix_layers = max(int(token[len("hybx") :]), 1)
             hybrid_joint_k3_matched = True
+        elif token == "kfull":
+            hybrid_joint_k3_max_terms = None
+        elif token.startswith("k") and token[1:].isdigit():
+            hybrid_joint_k3_max_terms = max(int(token[1:]), 1)
+        elif token == "tg":
+            hybrid_joint_k3_taper = "global"
+        elif token == "te":
+            hybrid_joint_k3_taper = "eigen"
         elif token.startswith("hybs"):
             hybrid_prefix_layers = max(int(token[len("hybs") :]), 1)
             hybrid_skew_matched = True
@@ -2279,6 +2304,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         hybrid_prefix_layers,
         hybrid_skew_matched,
         hybrid_joint_k3_matched,
+        hybrid_joint_k3_max_terms,
+        hybrid_joint_k3_taper,
         _HadamardPosthocConfig(
             scale_cap=scale_cap,
             kurtosis_gate=kurtosis_gate,
@@ -2394,6 +2421,8 @@ class Estimator(BaseEstimator):
                 hybrid_prefix_layers,
                 hybrid_skew_matched,
                 hybrid_joint_k3_matched,
+                hybrid_joint_k3_max_terms,
+                hybrid_joint_k3_taper,
                 posthoc,
             ) = _parse_hadamard_tokens(mode)
             if hybrid_prefix_layers is not None:
@@ -2417,6 +2446,8 @@ class Estimator(BaseEstimator):
                     strassen_levels,
                     hybrid_skew_matched,
                     hybrid_joint_k3_matched,
+                    hybrid_joint_k3_max_terms,
+                    hybrid_joint_k3_taper,
                 )
             n_samples = (
                 n_blocks * 2 * mlp.width
