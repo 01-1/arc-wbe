@@ -28,6 +28,10 @@ Guidance for coding agents working in this repository:
   `make fly` uploads the current `estimator.py`, launches 100 one-MLP EWR Fly
   Machines, and prints one averaged WhestBench text summary from the first 80
   returned results. Recent timing is about 20 seconds.
+- Be liberal with Fly runs when iterating on changed estimator code or comparing
+  modes; Fly Machines are approximately free for this workflow. Repeating the
+  same run on unchanged code is usually not useful because it evaluates the same
+  MLPs.
 - Use `make fly-mode MODE=<mode>` for Fly comparisons of estimator modes; it
   appends `--mode <mode>` to the same fast Fly path without restating the full
   runner flags.
