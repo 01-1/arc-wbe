@@ -1744,6 +1744,7 @@ def _joint_k3_quadratic_terms(
     chol: fnp.ndarray,
     k3: _FactoredThird,
     max_terms: int | None = None,
+    symmetric_order: bool = False,
 ) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
     factors = []
     eye_jitter = fnp.maximum(fnp.mean(fnp.diag(chol @ chol.T)), _MIN_VARIANCE) * 1e-10
@@ -1757,7 +1758,7 @@ def _joint_k3_quadratic_terms(
     if not factors:
         empty = _empty_factor(k3.width)
         return empty, empty, empty
-    if max_terms is not None and len(factors) > max_terms:
+    if max_terms is not None and len(factors) > max_terms and not symmetric_order:
         scored = []
         for item in factors:
             gamma, u, v = item
@@ -1769,11 +1770,30 @@ def _joint_k3_quadratic_terms(
     u_all = fnp.concatenate(tuple(item[1] for item in factors), axis=1)
     v_all = fnp.concatenate(tuple(item[2] for item in factors), axis=1)
     if max_terms is not None and gamma.shape[1] > max_terms:
-        score = (
-            fnp.sum(gamma * gamma, axis=0)
-            * fnp.sum(u_all * u_all, axis=0)
-            * fnp.sum(v_all * v_all, axis=0)
-        )
+        if symmetric_order:
+            gg = gamma.T @ gamma
+            uu = u_all.T @ u_all
+            vv = v_all.T @ v_all
+            gu = gamma.T @ u_all
+            gv = gamma.T @ v_all
+            uv = u_all.T @ v_all
+            gram = (
+                gg * uu * vv
+                + gg * uv * uv.T
+                + gu * gu.T * vv
+                + gu * uv.T * gv
+                + gv * gu.T * uv.T
+                + gv * uu * gv.T
+            )
+            eigvals, eigvecs = fnp.linalg.eigh((gram + gram.T) * 0.5)
+            top = eigvecs[:, fnp.argsort(eigvals)[-max_terms:]]
+            score = fnp.sum(top * top, axis=1)
+        else:
+            score = (
+                fnp.sum(gamma * gamma, axis=0)
+                * fnp.sum(u_all * u_all, axis=0)
+                * fnp.sum(v_all * v_all, axis=0)
+            )
         keep = fnp.argsort(score)[-max_terms:]
         gamma = gamma[:, keep]
         u_all = u_all[:, keep]
@@ -1844,12 +1864,13 @@ def _joint_k3_transport(
     eye = _eye(width)
     jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
     chol = fnp.linalg.cholesky(cov + jitter * eye)
-    gamma, u, v = _joint_k3_quadratic_terms(chol, k3, max_terms)
+    symmetric_order = taper == "hybr"
+    gamma, u, v = _joint_k3_quadratic_terms(chol, k3, max_terms, symmetric_order)
     if taper == "eigen":
         gamma, u, v = _taper_joint_k3_terms(cov, gamma, u, v)
     q_cov = _joint_k3_quadratic_cov(gamma, u, v)
     pd_damping = _largest_pd_transport_scale(cov, q_cov)
-    damping = min(_HYBRID_JOINT_K3_GLOBAL_DAMP, pd_damping) if taper == "global" else pd_damping
+    damping = min(_HYBRID_JOINT_K3_GLOBAL_DAMP, pd_damping) if taper in ("global", "hybr") else pd_damping
     gamma = gamma * damping
     q_cov = q_cov * (damping * damping)
     chol = fnp.linalg.cholesky(cov - q_cov + jitter * eye)
@@ -2250,6 +2271,11 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             antithetic_fraction = 0.0
         elif token == "anti50":
             antithetic_fraction = 0.5
+        elif token.startswith("hybr"):
+            hybrid_prefix_layers = 2
+            hybrid_joint_k3_matched = True
+            hybrid_joint_k3_max_terms = max(int(token[len("hybr") :]), 1)
+            hybrid_joint_k3_taper = "hybr"
         elif token.startswith("hybx"):
             hybrid_prefix_layers = max(int(token[len("hybx") :]), 1)
             hybrid_joint_k3_matched = True

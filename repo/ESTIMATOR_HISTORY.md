@@ -1061,6 +1061,52 @@ after losing or becoming irrelevant to the current scorer frontier.
   closure is not worth designing on this transport family; any next attempt
   should first change the carrier so covariance load is intrinsically lower
   rather than hoping a small symmetric truncation will expose a clean subspace.
+- **Gate-1 proxy validation: `hybr64`.** On 2026-07-04, despite the negative
+  Gate-1 recommendation, a small empirical validation mode was added as
+  `hadamard_st3_b16_hybr64`; unforced default behavior remains unchanged. The
+  mode is the K=2 `hybx2` joint-k3 path with 16 suffix Hadamard blocks, but the
+  layer-2 quadratic columns are selected with the symmetric third-tensor Gram
+  ordering used by the Gate-1 diagnostic instead of the old per-column
+  contribution ordering. The rank is fixed by the token suffix (`64` here) and
+  the existing covariance correction / Cholesky PD guard is reused with global
+  damping. The PD guard still requires damping at this low rank; on the quick
+  validation probe the applied damping was `0.516`.
+
+  Quick offline kappa3 validation used one deterministic He-initialized
+  width-256/depth-32 MLP, `200192` antithetic Hadamard-base rows, all 256
+  diagonal entries, 79 fixed repeated off-diagonal entries, and 120 fixed
+  fully distinct triples. Against the exact factored layer-2 preactivation
+  third-cumulant target, correlations were low as Gate 1 predicted:
+  diagonals `0.486`, repeated off-diagonals `0.501`, and fully distinct
+  triples `0.381`. RMS/error details were: diagonal target RMS `6.672e-2`,
+  error RMS `5.980e-2`, max error `2.264e-1`; repeated target RMS `2.802e-2`,
+  error RMS `2.459e-2`, max error `7.452e-2`; distinct target RMS
+  `1.700e-2`, error RMS `1.576e-2`, max error `5.280e-2`. This is consistent
+  with the rank-64 trace-mass proxy rather than a hidden high-quality
+  low-rank carrier.
+
+  One full-100 JSON Fly run of `hadamard_st3_b16_hybr64` was launched with
+  `--min-results 100`, `--max-result-seconds 90`, no `--summary-only`, and
+  `--residual-compute-scale 0.1`. All 100 rows returned, but five rows had
+  `combined_budget_exhausted` scorer artifacts, making the printed aggregate
+  unusable as a clean mean: `3.905e-2` adjusted / `3.905e-2` final-layer MSE /
+  `3.983e-2` all-layer MSE / `1.571e11` effective compute /
+  `1.546e11` raw FLOPs, with `combined_budget_exhausted=5`. The raw FLOP cost
+  is high because the symmetric Gram eigensolve is charged (`linalg.eigh`
+  about `1.10e11` FLOPs/MLP). Clean JSON rows visible in the stream were in
+  the intended few-`e-6` final-layer MSE band (representative rows:
+  `4.496e-6`, `2.638e-6`, `7.574e-6`, `5.652e-6`, `5.969e-6`) rather than near
+  `hyb2`'s `3.970e-5`, but the artifacted printed mean should not be used as
+  a leaderboard-quality point.
+
+  Proxy-validation verdict: the offline proxy is directionally supported, not
+  falsified. The rank-64 symmetric transport did not produce a clean result at
+  or below `kfull_tg`'s `3.881e-6`; visible clean rows straddle/mostly exceed
+  that level and remain far worse than the `2.666646644e-6` canonical
+  baseline, while the kappa3 correlations are plainly weak. The experiment
+  does not justify re-opening the low-rank ordering as a promotion path. A
+  cleaner paired rerun would be needed only to put an exact clean mean on the
+  artifacted Fly output; the methodology datum already agrees with Gate 1.
 
 ## Benchmarking Notes
 
