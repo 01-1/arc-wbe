@@ -403,6 +403,32 @@ after losing or becoming irrelevant to the current scorer frontier.
   `cv3`, final/reporting control variates, robust aggregation, and marginal or
   covariance correction variants, were falsified or left weaker than the
   current route under the repository noise caveats.
+  A follow-up L4 wall-trim round replaced the tiny L4 leaf
+  `fnp.einsum("brk,bkc->brc", ...)` with batched matmul only when Strassen
+  leaf rows are at most 512, preserving the established L3 einsum path and
+  the same counted Strassen FLOPs. Local one-MLP profiling before the change
+  put adaptive L4 at `23.1s` wall / `21.4s` backend / `0.63s` residual, with
+  the 224 leaf einsums taking `11.7s`, operand adds/stacks about `7.6s`, and
+  reassembly about `2.5s`. After the conditional leaf-matmul change, a
+  sequential local check measured `hadamard_st4` at `14.8s` wall /
+  `13.4s` backend / `0.53s` residual with unchanged `2.406e10` raw FLOPs,
+  versus `hadamard_st3_b16` at `23.6s` wall / `22.6s` backend / `0.79s`
+  residual in the same run. A later post-change cProfile pass on a less-loaded
+  local run measured L4 at `11.5s` wall / `9.9s` backend / `0.63s` residual;
+  the leaf matmuls were then only `1.7s`, leaving operand combination,
+  stacking, concatenation/reassembly, and flopscope wrapper overhead as the
+  remaining L4 wall bottlenecks.
+  Normal-window Fly proof showed the wall-trim was not enough to promote L4:
+  the default L3 baseline returned 80 clean MLPs at `2.959e-7` adjusted /
+  `2.824e-6` MSE / `2.852e10` effective compute with `2.599e10` raw FLOPs,
+  while adaptive `hadamard_st4` returned 80 clean MLPs at `2.911e-7`
+  adjusted / `2.757e-6` MSE / `2.881e10` effective compute with `2.406e10`
+  raw FLOPs. `hadamard_st4_b15` reached lower reported mean effective compute
+  (`2.751e10`, `2.256e10` raw) but again had one
+  `combined_budget_exhausted` row and scored `1.913e-2`, so it remains
+  unusable under the current harness. Leave `st3_b16` as the default; the
+  L4 leaf-kernel trim is kept as a diagnostic improvement and future
+  foundation, not as a promotion.
 
 ## Rejected Or Guarded Ideas
 

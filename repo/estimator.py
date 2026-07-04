@@ -1559,7 +1559,10 @@ def _strassen_matmul_batched(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp
             axis=1,
         ), (stack_count * 7, inner_mid, col_mid))
 
-    products = fnp.einsum("brk,bkc->brc", a_stack, b_stack)
+    if a_stack.shape[1] <= 512:
+        products = a_stack @ b_stack
+    else:
+        products = fnp.einsum("brk,bkc->brc", a_stack, b_stack)
     for out_rows, out_cols in reversed(shapes):
         leaf_rows = products.shape[1]
         leaf_cols = products.shape[2]
