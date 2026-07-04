@@ -1374,6 +1374,21 @@ def _hadamard_sign_half_blocks(
     return fnp.concatenate(tuple(blocks), axis=0)
 
 
+def _hadamard_sign_fresh_half_blocks(
+    mlp: MLP,
+    n_half_blocks: int,
+    rng: fnp.random.Generator,
+) -> fnp.ndarray:
+    """Return fresh randomized Hadamard half-blocks without antithetic pairs."""
+    width = mlp.width
+    base = _hadamard(width)
+    blocks = []
+    for _ in range(max(int(n_half_blocks), 1)):
+        flips = 2.0 * rng.integers(0, 2, size=width) - 1.0
+        blocks.append(base * flips[None, :])
+    return fnp.concatenate(tuple(blocks), axis=0)
+
+
 def _norm_ppf(p: float) -> float:
     """Acklam rational approximation to the standard normal quantile."""
     a = (-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
@@ -1636,19 +1651,34 @@ def _hadamard_first_cov_recolored_means(
     split_factor: int = 1,
     mirror_layer: int | None = None,
     final_cv3: bool = False,
+    antithetic_fraction: float = 1.0,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
     initial_samples = n_samples
     if mirror_layer is not None:
         initial_samples = max((n_samples // (4 * mlp.width)) * (2 * mlp.width), 2 * mlp.width)
-    x_half = _hadamard_sign_half_blocks(mlp, initial_samples, rng, split_factor)
     w0 = mlp.weights[0]
-    pre_half = _strassen_matmul(x_half, w0, strassen_levels)
-    if radial_chi:
-        scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
-        n_blocks = x_half.shape[0] // mlp.width
-        pre_half = pre_half * fnp.concatenate((scales,) * n_blocks)[:, None]
-    y = fnp.concatenate((fnp.maximum(pre_half, 0.0), fnp.maximum(-pre_half, 0.0)), axis=0)
+    n_blocks = max(initial_samples // (2 * mlp.width), 1)
+    antithetic_blocks = max(min(int(round(n_blocks * antithetic_fraction)), n_blocks), 0)
+    y_parts = []
+    if antithetic_blocks:
+        x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor)
+        pre_half = _strassen_matmul(x_half, w0, strassen_levels)
+        if radial_chi:
+            scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
+            n_scale_blocks = x_half.shape[0] // mlp.width
+            pre_half = pre_half * fnp.concatenate((scales,) * n_scale_blocks)[:, None]
+        y_parts.append(fnp.maximum(pre_half, 0.0))
+        y_parts.append(fnp.maximum(-pre_half, 0.0))
+    fresh_half_blocks = 2 * (n_blocks - antithetic_blocks)
+    if fresh_half_blocks:
+        x_fresh = _hadamard_sign_fresh_half_blocks(mlp, fresh_half_blocks, rng)
+        pre_fresh = _strassen_matmul(x_fresh, w0, strassen_levels)
+        if radial_chi:
+            scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
+            pre_fresh = pre_fresh * fnp.concatenate((scales,) * fresh_half_blocks)[:, None]
+        y_parts.append(fnp.maximum(pre_fresh, 0.0))
+    y = fnp.concatenate(tuple(y_parts), axis=0)
 
     target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
     sample_mean = fnp.mean(y, axis=0)
@@ -1765,7 +1795,7 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int]:
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int, float]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
@@ -1774,6 +1804,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
     variance_strength = None
     exact_recolor_layers = 0
     variance_match_start_layer = 1
+    antithetic_fraction = 1.0
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
@@ -1787,6 +1818,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             variance_strength,
             exact_recolor_layers,
             variance_match_start_layer,
+            antithetic_fraction,
         )
     for token in suffix.split("_"):
         if token.startswith("st"):
@@ -1799,6 +1831,10 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             mirror_layer = max(int(token[len("mirror") :]), 1)
         elif token == "cv3":
             final_cv3 = True
+        elif token == "noanti":
+            antithetic_fraction = 0.0
+        elif token == "anti50":
+            antithetic_fraction = 0.5
         elif token == "l2x":
             exact_recolor_layers = 1
             variance_match_start_layer = 99
@@ -1821,6 +1857,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
         variance_strength,
         exact_recolor_layers,
         variance_match_start_layer,
+        antithetic_fraction,
     )
 
 
@@ -1924,6 +1961,7 @@ class Estimator(BaseEstimator):
                 variance_strength,
                 exact_recolor_layers,
                 variance_match_start_layer,
+                antithetic_fraction,
             ) = _parse_hadamard_tokens(mode)
             n_samples = (
                 n_blocks * 2 * mlp.width
@@ -1946,5 +1984,6 @@ class Estimator(BaseEstimator):
                 split_factor=split_factor,
                 mirror_layer=mirror_layer,
                 final_cv3=final_cv3,
+                antithetic_fraction=antithetic_fraction,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")

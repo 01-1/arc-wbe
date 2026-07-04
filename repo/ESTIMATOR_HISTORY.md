@@ -627,6 +627,27 @@ after losing or becoming irrelevant to the current scorer frontier.
   independently propagated full gain-covariance analytical estimate also lost:
   `3.656e-7` adjusted / `3.048e-6` MSE / `3.266e10` effective compute, with
   the extra covariance pass hurting the score multiplier.
+- **Antithetic ablation and depth-32 analytic-route datum.** On 2026-07-04,
+  the last unablated Hadamard design choice was tested by adding composable
+  `noanti` and `anti50` diagnostics. `noanti` gives each 256-row half-block a
+  fresh random sign vector, uses twice as many half-blocks to keep total rows
+  unchanged, and therefore gives up the layer-0 antithetic matmul shortcut.
+  Same-day default `make fly` scored `2.806e-7` adjusted / `2.659e-6`
+  final-layer MSE / `2.848e10` effective compute with `2.599e10` raw FLOPs
+  over 80 returned MLPs and no failures. `hadamard_st3_b16_noanti` scored
+  `2.878e-7` adjusted / `2.763e-6` MSE / `2.837e10` effective compute with
+  `2.636e10` raw FLOPs over 80 returned MLPs and no failures. The MSE moved
+  about 4% worse, far short of the requested >12% improvement gate, so no
+  replicate or `anti50` run was spent. Interpretation: deep antithetic pairing
+  is not the floor group's missing `~1.5x` variance edge; if anything, the odd
+  cancellation still pays a small amount after the first-layer exact recolor.
+  The pure factorized K=3 `r1` depth-32 datum was also collected once:
+  `make fly-mode MODE=r1` returned 80 MLPs with `combined_budget_exhausted=80`,
+  `8.757e-1` adjusted / `8.757e-1` final-layer MSE / `2.373e11` effective
+  compute and `2.307e11` raw FLOPs. This failure datum rules out the existing
+  unamortized `r1` path as a viable analytic carrier for the depth-32 floor;
+  any leaderboard-gap analytic lane would need a much cheaper amortized or
+  low-rank carrier and cannot be inferred from the current exact K=3 route.
 
 ## Benchmarking Notes
 
