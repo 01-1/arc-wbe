@@ -40,6 +40,42 @@ _DEEP_RESIDUAL_BLOCK_SAFETY = {
     3: 1.0,
     4: 1.06,
 }
+_BIVAR_RELU_GL16_NODES = (
+    -0.9894009349916499,
+    -0.9445750230732326,
+    -0.8656312023878318,
+    -0.7554044083550030,
+    -0.6178762444026438,
+    -0.4580167776572274,
+    -0.2816035507792589,
+    -0.0950125098376374,
+    0.0950125098376374,
+    0.2816035507792589,
+    0.4580167776572274,
+    0.6178762444026438,
+    0.7554044083550030,
+    0.8656312023878318,
+    0.9445750230732326,
+    0.9894009349916499,
+)
+_BIVAR_RELU_GL16_WEIGHTS = (
+    0.0271524594117541,
+    0.0622535239386479,
+    0.0951585116824928,
+    0.1246289712555339,
+    0.1495959888165767,
+    0.1691565193950025,
+    0.1826034150449236,
+    0.1894506104550685,
+    0.1894506104550685,
+    0.1826034150449236,
+    0.1691565193950025,
+    0.1495959888165767,
+    0.1246289712555339,
+    0.0951585116824928,
+    0.0622535239386479,
+    0.0271524594117541,
+)
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1408,6 +1444,44 @@ def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.
     return fnp.maximum(second - relu_mean * relu_mean, _MIN_VARIANCE)
 
 
+def _gaussian_relu_mean_cov(
+    mean_pre: fnp.ndarray,
+    cov_pre: fnp.ndarray,
+) -> tuple[fnp.ndarray, fnp.ndarray]:
+    """Gaussian ReLU mean/covariance for nonzero-mean preactivations."""
+    var_pre = fnp.maximum(fnp.diag(cov_pre), _MIN_VARIANCE)
+    sigma = fnp.sqrt(var_pre)
+    beta = mean_pre / sigma
+    phi = flops.stats.norm.pdf(beta)
+    Phi = flops.stats.norm.cdf(beta)
+    relu_mean = sigma * phi + mean_pre * Phi
+    marginal_second = (mean_pre * mean_pre + var_pre) * Phi + mean_pre * sigma * phi
+
+    denom = sigma[:, None] * sigma[None, :]
+    rho = cov_pre / denom
+    rho = fnp.maximum(fnp.minimum(rho, 1.0 - 1e-7), -1.0 + 1e-7)
+    alpha_i = -beta[:, None]
+    alpha_j = -beta[None, :]
+    tail_i = Phi[:, None]
+    tail_j = Phi[None, :]
+    rho_int = fnp.zeros_like(rho)
+    for node, weight in zip(_BIVAR_RELU_GL16_NODES, _BIVAR_RELU_GL16_WEIGHTS):
+        r = 0.5 * rho * (node + 1.0)
+        one_minus = fnp.maximum(1.0 - r * r, _MIN_VARIANCE)
+        exponent = -(
+            alpha_i * alpha_i - 2.0 * r * alpha_i * alpha_j + alpha_j * alpha_j
+        ) / (2.0 * one_minus)
+        phi2 = fnp.exp(exponent) / (2.0 * math.pi * fnp.sqrt(one_minus))
+        rho_int = rho_int + weight * (rho - r) * phi2
+    second = relu_mean[:, None] * relu_mean[None, :] + denom * (
+        rho * tail_i * tail_j + 0.5 * rho * rho_int
+    )
+    eye = _eye(mean_pre.shape[0])
+    second = second * (1.0 - eye) + fnp.diag(marginal_second) * eye
+    cov = second - fnp.outer(relu_mean, relu_mean)
+    return relu_mean, cov
+
+
 def _strassen_matmul_batched(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
     """Batched-leaf rectangular-by-square Strassen matmul for propagation."""
     if levels <= 0:
@@ -1554,7 +1628,9 @@ def _hadamard_first_cov_recolored_means(
     n_samples: int,
     rng: fnp.random.Generator,
     variance_match_layers: int = 0,
+    variance_match_start_layer: int = 1,
     variance_match_strength: float = 1.0,
+    exact_recolor_layers: int = 0,
     radial_chi: bool = False,
     strassen_levels: int = 0,
     split_factor: int = 1,
@@ -1604,7 +1680,19 @@ def _hadamard_first_cov_recolored_means(
     for layer_idx, w in enumerate(mlp.weights[1:], start=1):
         pre = _strassen_matmul(x, w, strassen_levels)
         x = fnp.maximum(pre, 0.0)
-        if layer_idx <= variance_match_layers:
+        if layer_idx <= exact_recolor_layers:
+            target_pre_mean = target_mean @ w
+            target_pre_cov = w.T @ target_cov @ w
+            target_mean, target_cov = _gaussian_relu_mean_cov(target_pre_mean, target_pre_cov)
+            sample_mean = fnp.mean(x, axis=0)
+            centered_layer = x - sample_mean[None, :]
+            sample_cov = (centered_layer.T @ centered_layer) / float(centered_layer.shape[0])
+            jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
+            sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
+            target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
+            recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+            x = centered_layer @ recolor + target_mean[None, :]
+        if variance_match_start_layer <= layer_idx < variance_match_start_layer + variance_match_layers:
             pre_mean = fnp.mean(pre, axis=0)
             pre_centered = pre - pre_mean[None, :]
             target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
@@ -1677,18 +1765,29 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None]:
+def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None, bool, float | None, int, int]:
     strassen_levels = 1
     n_blocks = None
     split_factor = 1
     mirror_layer = None
     final_cv3 = False
     variance_strength = None
+    exact_recolor_layers = 0
+    variance_match_start_layer = 1
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
     if not suffix:
-        return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3, variance_strength
+        return (
+            strassen_levels,
+            n_blocks,
+            split_factor,
+            mirror_layer,
+            final_cv3,
+            variance_strength,
+            exact_recolor_layers,
+            variance_match_start_layer,
+        )
     for token in suffix.split("_"):
         if token.startswith("st"):
             strassen_levels = max(int(token[len("st") :]), 0)
@@ -1700,11 +1799,29 @@ def _parse_hadamard_tokens(mode: str) -> tuple[int, int | None, int, int | None,
             mirror_layer = max(int(token[len("mirror") :]), 1)
         elif token == "cv3":
             final_cv3 = True
+        elif token == "l2x":
+            exact_recolor_layers = 1
+            variance_match_start_layer = 99
+        elif token == "l2xv":
+            exact_recolor_layers = 1
+            variance_match_start_layer = 2
+        elif token == "l3x":
+            exact_recolor_layers = 2
+            variance_match_start_layer = 99
         elif token.startswith("s"):
             variance_strength = int(token[len("s") :]) / 100.0
         else:
             raise ValueError(f"Unsupported Hadamard mode token: {token}")
-    return strassen_levels, n_blocks, split_factor, mirror_layer, final_cv3, variance_strength
+    return (
+        strassen_levels,
+        n_blocks,
+        split_factor,
+        mirror_layer,
+        final_cv3,
+        variance_strength,
+        exact_recolor_layers,
+        variance_match_start_layer,
+    )
 
 
 class Estimator(BaseEstimator):
@@ -1805,6 +1922,8 @@ class Estimator(BaseEstimator):
                 mirror_layer,
                 final_cv3,
                 variance_strength,
+                exact_recolor_layers,
+                variance_match_start_layer,
             ) = _parse_hadamard_tokens(mode)
             n_samples = (
                 n_blocks * 2 * mlp.width
@@ -1816,11 +1935,13 @@ class Estimator(BaseEstimator):
                 n_samples,
                 fnp.random.default_rng(mlp.seed),
                 variance_match_layers=1,
+                variance_match_start_layer=variance_match_start_layer,
                 variance_match_strength=(
                     _DEEP_VARIANCE_MATCH_STRENGTH
                     if variance_strength is None
                     else variance_strength
                 ),
+                exact_recolor_layers=exact_recolor_layers,
                 strassen_levels=strassen_levels,
                 split_factor=split_factor,
                 mirror_layer=mirror_layer,

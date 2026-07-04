@@ -590,6 +590,36 @@ after losing or becoming irrelevant to the current scorer frontier.
   layer avoided most of the extra compute but still worsened raw MSE: a 2%
   final-layer bandwidth scored `3.678e-7` adjusted / `3.221e-6` MSE /
   `3.111e10` effective compute with no worker failures.
+- **Exact nonzero-mean bivariate layer-2 recolor.** On 2026-07-04, exact
+  nonzero-mean bivariate Gaussian layer-2 recoloring was tested because the
+  public leaderboard has a `1.51e-7` to `1.63e-7` adjusted-score cluster,
+  including roughly 10%-budget entries, implying around `1.5e-6` final-layer
+  MSE at floor compute and about `1.5x` better variance per FLOP than this
+  route's `~2.3e-6` to `~2.8e-6` MSE band. The mechanism used the exact
+  layer-1 post-ReLU mean/covariance target and linearity to form layer-2
+  Gaussian-closure preactivation moments `m = W1.T @ mu1`,
+  `S = W1.T @ C1 @ W1`, then computed nonzero-mean ReLU cross moments with a
+  16-node Gauss-Legendre integration over Price's theorem. Validation caught
+  that directly integrating only the bivariate density gives the derivative of
+  quadrant probability, not the derivative of ReLU cross moment. The
+  implemented identity is `E0 + sigma_i sigma_j * (rho * Phi_i * Phi_j +
+  integral_0^rho (rho-r) * phi2(alpha_i, alpha_j; r) dr)`, with closed-form
+  marginal second moments on the diagonal. Offline plain-NumPy validation on
+  four nonzero-mean cases found 8/16/32-node quadrature agreement to
+  `<= 5.6e-17`; 16-node versus a 2,000,000-sample Monte Carlo differed by
+  `9.3e-6`, `3.4e-4`, `5.2e-4`, and `3.3e-4`, consistent with MC noise.
+  Same-day default baseline `make fly` scored `2.853e-7` adjusted /
+  `2.747e-6` final-layer MSE / `2.844e10` effective compute with `2.599e10`
+  raw FLOPs over 80 returned MLPs and no failures. The diagnostic
+  `hadamard_st3_b16_l2x`, which replaces the first-successor `1.5x` variance
+  match with exact layer-2 Cholesky recoloring, lost decisively:
+  `5.366e-7` adjusted / `4.809e-6` MSE / `3.049e10` effective compute with
+  `2.830e10` raw FLOPs over 80 returned MLPs and no failures. Because `l2x`
+  missed the requested `~2.4e-6` MSE promise gate by a wide margin, `l2xv` and
+  `l3x` were not run. Do not promote exact layer-2 covariance anchoring; the
+  clean loss suggests that the Gaussian-closure full covariance target damages
+  useful finite-ensemble joint geometry despite being more exact under the
+  assumed closure.
 - **Zero-mean arc-cosine and conditional-quadrature K=2 covariance updates.**
   These replaced the simple gain covariance approximation, but nonzero later
   pre-activation means and numerical instability made them worse than the
