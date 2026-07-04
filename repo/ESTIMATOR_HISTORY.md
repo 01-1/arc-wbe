@@ -852,6 +852,59 @@ after losing or becoming irrelevant to the current scorer frontier.
   `2.666646644e-6`. Verdict: stop at M1. The simple diagonal third-cumulant
   carrier does not rescue the analytic-prefix sampler, so M2 factored third
   cumulants and M3 depth economics were not run.
+- **Edgeworth analytic-prefix sampler M2 joint-k3 probe.** On 2026-07-04, a
+  mode-gated `hybx<K>` diagnostic added a joint third-cumulant matched
+  quadratic prefix sampler for `K=2`, without changing the unforced default.
+  The target computes exact factored layer-2 preactivation cumulants by running
+  the existing single-transition K=3/r=1 machinery on the layer-1 Gaussian
+  tower and contracting the resulting `_FactoredThird` through `W1`. For a
+  factored group `Sym(a,b,c)`, the sampler uses the same randomized Hadamard
+  Gaussian base as `hyb2` and forms
+  `z = m2 + A g + Q(g)`, with
+  `Q_o(g) = gamma_o * ((u.g) * (v.g) - u.v)`. Cyclic role assignments
+  `(o,u,v) = (c,A^-1 a,A^-1 b), (a,A^-1 b,A^-1 c),
+  (b,A^-1 c,A^-1 a)` use coefficient `1/6`: the three cross terms
+  `E[(Ag)(Ag)Q]` then produce the six symmetric permutations under the local
+  averaged-`Sym` convention. `Cov(Q)` is computed exactly from factor inner
+  products as
+  `gamma ( (U^T U)*(V^T V) + (U^T V)*(U^T V)^T ) gamma^T`.
+  Full-strength matching was not positive-definite: on a width-256/depth-32
+  offline probe, `lambda_max(Cov(Q)) ~= 22.4` while
+  `lambda_min(S2) ~= 1.69e-5`. The implemented guard therefore applies the
+  largest one-shot damping that keeps `S2 - lambda^2 Cov(Q)` Choleskyable; the
+  probe found `lambda = 0.51598`.
+
+  Mandatory plain-numpy offline validation used `200192` Hadamard-base rows,
+  `2304` quadratic terms, and the same factored target. Mean matched to
+  machine precision, covariance was close but finite-block/no-recolor error
+  remained (`max_abs=3.84e-2`, `rms=3.54e-3`). Against the full, undamped
+  target, the third-cumulant table was:
+  diagonals `n=256`, target RMS `5.91e-2`, error RMS `3.57e-2`,
+  max error `1.19e-1`, corr `0.818`; repeated off-diagonals `n=79`,
+  target RMS `2.68e-2`, error RMS `1.13e-2`, max error `3.24e-2`,
+  corr `0.909`; fully distinct triples `n=120`, target RMS `1.64e-2`,
+  error RMS `5.41e-3`, max error `1.37e-2`, corr `0.946`. This validates the
+  algebra and also proves the requested exact undamped joint target is not
+  reachable with the specified covariance correction for this construction.
+
+  Full-100 JSON Fly for `hadamard_st3_hybx2` under
+  `FLY_MIN_RESULTS=100`, `FLY_MAX_RESULT_SECONDS=90`, and no
+  `--summary-only` ran twice. The first run had five
+  `combined_budget_exhausted` scorer artifacts and an unusable printed mean
+  (`3.995e-2`). The rerun had one such artifact; its printed aggregate was
+  `7.198e-3` adjusted / `7.201e-3` final-layer MSE / `5.639e10` effective
+  compute / `5.381e10` raw FLOPs, with the single artifact dominating the
+  mean. Removing that one bad row by aggregate arithmetic puts the 99 clean
+  rows at roughly `4e-6` final-layer MSE, and individual clean rows observed
+  in the JSON stream were in the `~1e-6` to `~1e-5` band. Compared with
+  `hyb2` at `3.970e-5`, the damped joint tensor recovers nearly all of the
+  Gaussian-prefix loss; compared with the canonical baseline
+  `2.666646644e-6`, it is near the M2 major-carrier gate but not a clean
+  decision-grade win because both full-100 attempts had scorer artifacts and
+  the sampler is damped to about half-strength. Verdict: joint third-order is
+  the dominant carrier, while exact covariance-corrected full-strength matching
+  needs a different lower-covariance transport or factorization before default
+  consideration.
 
 ## Benchmarking Notes
 

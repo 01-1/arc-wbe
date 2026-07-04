@@ -42,6 +42,7 @@ _DEEP_RESIDUAL_BLOCK_SAFETY = {
     4: 1.06,
 }
 _HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
+_HYBRID_JOINT_K3_PREFIX_FLOPS = 7.2e9
 _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF = (
     math.sqrt(2.0 / math.pi)
     - 1.5 / math.sqrt(2.0 * math.pi)
@@ -1687,11 +1688,16 @@ def _hybrid_analytic_blocks_for_budget(
     budget: int,
     strassen_levels: int,
     prefix_layers: int,
+    joint_k3_matched: bool = False,
 ) -> int:
     rows_per_block = 2 * mlp.width
     suffix_layers = max(mlp.depth - prefix_layers, 1)
     measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(strassen_levels)
-    analytic_cost = max(prefix_layers, 1) * _HYBRID_ANALYTIC_LAYER_FLOPS
+    analytic_cost = (
+        _HYBRID_JOINT_K3_PREFIX_FLOPS
+        if joint_k3_matched
+        else max(prefix_layers, 1) * _HYBRID_ANALYTIC_LAYER_FLOPS
+    )
     score_floor_budget = max(0.1 * budget - analytic_cost, rows_per_block)
     if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
         per_block_cost = (
@@ -1715,6 +1721,113 @@ def _hybrid_analytic_blocks_for_budget(
     return min(max(int(score_floor_budget // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
 
 
+def _layer2_gaussian_prefix_and_factored_k3(mlp: MLP) -> tuple[fnp.ndarray, fnp.ndarray, _FactoredThird]:
+    width = mlp.width
+    w0 = mlp.weights[0]
+    w1 = mlp.weights[1]
+    z1_cov = w0.T @ w0
+    y1_mean, y1_cov = _zero_mean_relu_mean_cov(z1_cov)
+    tower: dict[int, object] = {
+        1: _HTensor(_zeros_vec(width), r=0),
+        2: _HTensor(_eye(width), r=0),
+    }
+    wk1 = {degree: value.contract_w(w0) for degree, value in tower.items()}
+    y1_tower = _factored_nonlin_k3_r1_fast(wk1)
+    z2_k3 = y1_tower[3].contract_w(w1)
+    return y1_mean @ w1, w1.T @ y1_cov @ w1, z2_k3
+
+
+def _joint_k3_quadratic_terms(
+    chol: fnp.ndarray,
+    k3: _FactoredThird,
+) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
+    factors = []
+    eye_jitter = fnp.maximum(fnp.mean(fnp.diag(chol @ chol.T)), _MIN_VARIANCE) * 1e-10
+    solve_chol = chol + eye_jitter * _eye(chol.shape[0])
+    for group in k3._groups:
+        a, b, c = (_materialize_factor(factor) for factor in group)
+        for out, left, right in ((c, a, b), (a, b, c), (b, c, a)):
+            u = fnp.linalg.solve(solve_chol, left)
+            v = fnp.linalg.solve(solve_chol, right)
+            factors.append((out / 6.0, u, v))
+    if not factors:
+        empty = _empty_factor(k3.width)
+        return empty, empty, empty
+    gamma = fnp.concatenate(tuple(item[0] for item in factors), axis=1)
+    u_all = fnp.concatenate(tuple(item[1] for item in factors), axis=1)
+    v_all = fnp.concatenate(tuple(item[2] for item in factors), axis=1)
+    return gamma, u_all, v_all
+
+
+def _joint_k3_quadratic_cov(gamma: fnp.ndarray, u: fnp.ndarray, v: fnp.ndarray) -> fnp.ndarray:
+    if gamma.shape[1] == 0:
+        return fnp.zeros((gamma.shape[0], gamma.shape[0]))
+    uu = u.T @ u
+    vv = v.T @ v
+    uv = u.T @ v
+    term = uu * vv + uv * uv.T
+    return gamma @ term @ gamma.T
+
+
+def _largest_pd_transport_scale(cov: fnp.ndarray, q_cov: fnp.ndarray) -> float:
+    if fnp.max(fnp.abs(q_cov)) <= 0.0:
+        return 1.0
+    jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-8
+    eye = _eye(cov.shape[0])
+    lo = 0.0
+    hi = 1.0
+    for _ in range(32):
+        mid = (lo + hi) * 0.5
+        try:
+            fnp.linalg.cholesky(cov - (mid * mid) * q_cov + jitter * eye)
+            lo = mid
+        except Exception:
+            hi = mid
+    return lo
+
+
+def _joint_k3_transport(
+    cov: fnp.ndarray,
+    k3: _FactoredThird,
+) -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray, float, fnp.ndarray]:
+    width = cov.shape[0]
+    eye = _eye(width)
+    jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
+    chol = fnp.linalg.cholesky(cov + jitter * eye)
+    gamma, u, v = _joint_k3_quadratic_terms(chol, k3)
+    q_cov = _joint_k3_quadratic_cov(gamma, u, v)
+    damping = _largest_pd_transport_scale(cov, q_cov)
+    chol = fnp.linalg.cholesky(cov - (damping * damping) * q_cov + jitter * eye)
+    return chol, gamma * damping, u, v, damping, q_cov * (damping * damping)
+
+
+def _apply_joint_k3_transport(
+    signs: fnp.ndarray,
+    mean: fnp.ndarray,
+    cov: fnp.ndarray,
+    chol: fnp.ndarray,
+    gamma: fnp.ndarray,
+    u: fnp.ndarray,
+    v: fnp.ndarray,
+) -> fnp.ndarray:
+    linear = signs @ chol.T
+    if gamma.shape[1] == 0:
+        return linear + mean[None, :]
+    ug = signs @ u
+    vg = signs @ v
+    uv = fnp.sum(u * v, axis=0)
+    q = (ug * vg - uv[None, :]) @ gamma.T
+    pre = linear + q
+    sample_mean = fnp.mean(pre, axis=0)
+    centered = pre - sample_mean[None, :]
+    sample_cov = (centered.T @ centered) / float(centered.shape[0])
+    jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
+    sample_chol = fnp.linalg.cholesky(sample_cov + jitter * _eye(cov.shape[0]))
+    target_chol = fnp.linalg.cholesky(cov + jitter * _eye(cov.shape[0]))
+    recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+    return centered @ recolor + mean[None, :]
+
+
 def _hybrid_analytic_prefix_hadamard_means(
     mlp: MLP,
     n_samples: int,
@@ -1723,6 +1836,7 @@ def _hybrid_analytic_prefix_hadamard_means(
     variance_match_strength: float,
     strassen_levels: int,
     skew_matched: bool = False,
+    joint_k3_matched: bool = False,
 ) -> fnp.ndarray:
     """Analytic Gaussian-closure prefix, then Hadamard sample the prefix preactivation."""
     prefix_layers = min(max(int(prefix_layers), 1), mlp.depth)
@@ -1733,27 +1847,38 @@ def _hybrid_analytic_prefix_hadamard_means(
     pre_cov = None
     pre_kappa3_diag = None
     relu_kappa3_diag = None
-    for layer_idx, w in enumerate(mlp.weights[:prefix_layers]):
-        pre_mean = mean @ w
-        pre_cov = w.T @ cov @ w
-        if skew_matched and layer_idx == 1 and relu_kappa3_diag is not None:
-            pre_kappa3_diag = relu_kappa3_diag @ (w * w * w)
-        if layer_idx == 0:
-            mean, cov = _zero_mean_relu_mean_cov(pre_cov)
-            if skew_matched:
-                var0 = fnp.maximum(fnp.diag(pre_cov), _MIN_VARIANCE)
-                relu_kappa3_diag = _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF * var0 * fnp.sqrt(var0)
-        else:
-            mean, cov = _gaussian_relu_mean_cov(pre_mean, pre_cov)
-            relu_kappa3_diag = None
-        analytic_rows.append(mean)
+    z2_k3 = None
+    if joint_k3_matched and prefix_layers == 2:
+        pre_mean, pre_cov, z2_k3 = _layer2_gaussian_prefix_and_factored_k3(mlp)
+        mean, cov = _gaussian_relu_mean_cov(pre_mean, pre_cov)
+        analytic_rows = [_zero_mean_relu_mean_cov(mlp.weights[0].T @ mlp.weights[0])[0], mean]
+    else:
+        for layer_idx, w in enumerate(mlp.weights[:prefix_layers]):
+            pre_mean = mean @ w
+            pre_cov = w.T @ cov @ w
+            if skew_matched and layer_idx == 1 and relu_kappa3_diag is not None:
+                pre_kappa3_diag = relu_kappa3_diag @ (w * w * w)
+            if layer_idx == 0:
+                mean, cov = _zero_mean_relu_mean_cov(pre_cov)
+                if skew_matched:
+                    var0 = fnp.maximum(fnp.diag(pre_cov), _MIN_VARIANCE)
+                    relu_kappa3_diag = _ZERO_MEAN_RELU_THIRD_CENTRAL_COEFF * var0 * fnp.sqrt(var0)
+            else:
+                mean, cov = _gaussian_relu_mean_cov(pre_mean, pre_cov)
+                relu_kappa3_diag = None
+            analytic_rows.append(mean)
 
     assert pre_mean is not None and pre_cov is not None
     n_blocks = max(n_samples // (2 * mlp.width), 1)
     signs = _hadamard_sign_half_blocks(mlp, n_blocks * 2 * mlp.width, rng)
-    centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
-    pre_half = signs @ centered_chol.T
-    pre = fnp.concatenate((pre_half, -pre_half), axis=0) + pre_mean[None, :]
+    if joint_k3_matched and z2_k3 is not None:
+        full_signs = fnp.concatenate((signs, -signs), axis=0)
+        centered_chol, gamma, u, v, _, _ = _joint_k3_transport(pre_cov, z2_k3)
+        pre = _apply_joint_k3_transport(full_signs, pre_mean, pre_cov, centered_chol, gamma, u, v)
+    else:
+        centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
+        pre_half = signs @ centered_chol.T
+        pre = fnp.concatenate((pre_half, -pre_half), axis=0) + pre_mean[None, :]
     if skew_matched and prefix_layers == 2 and pre_kappa3_diag is not None:
         var = fnp.maximum(fnp.diag(pre_cov), _MIN_VARIANCE)
         std = fnp.sqrt(var)
@@ -1995,6 +2120,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     float,
     int | None,
     bool,
+    bool,
     _HadamardPosthocConfig,
 ]:
     strassen_levels = 1
@@ -2008,6 +2134,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     antithetic_fraction = 1.0
     hybrid_prefix_layers = None
     hybrid_skew_matched = False
+    hybrid_joint_k3_matched = False
     scale_cap = None
     kurtosis_gate = None
     gaussian_pull = 0.0
@@ -2030,6 +2157,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             antithetic_fraction,
             hybrid_prefix_layers,
             hybrid_skew_matched,
+            hybrid_joint_k3_matched,
             _HadamardPosthocConfig(),
         )
     for token in suffix.split("_"):
@@ -2047,6 +2175,9 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             antithetic_fraction = 0.0
         elif token == "anti50":
             antithetic_fraction = 0.5
+        elif token.startswith("hybx"):
+            hybrid_prefix_layers = max(int(token[len("hybx") :]), 1)
+            hybrid_joint_k3_matched = True
         elif token.startswith("hybs"):
             hybrid_prefix_layers = max(int(token[len("hybs") :]), 1)
             hybrid_skew_matched = True
@@ -2089,6 +2220,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         antithetic_fraction,
         hybrid_prefix_layers,
         hybrid_skew_matched,
+        hybrid_joint_k3_matched,
         _HadamardPosthocConfig(
             scale_cap=scale_cap,
             kurtosis_gate=kurtosis_gate,
@@ -2203,6 +2335,7 @@ class Estimator(BaseEstimator):
                 antithetic_fraction,
                 hybrid_prefix_layers,
                 hybrid_skew_matched,
+                hybrid_joint_k3_matched,
                 posthoc,
             ) = _parse_hadamard_tokens(mode)
             if hybrid_prefix_layers is not None:
@@ -2214,6 +2347,7 @@ class Estimator(BaseEstimator):
                         budget,
                         strassen_levels,
                         hybrid_prefix_layers,
+                        hybrid_joint_k3_matched,
                     )
                 )
                 return _hybrid_analytic_prefix_hadamard_means(
@@ -2224,6 +2358,7 @@ class Estimator(BaseEstimator):
                     _DEEP_VARIANCE_MATCH_STRENGTH if variance_strength is None else variance_strength,
                     strassen_levels,
                     hybrid_skew_matched,
+                    hybrid_joint_k3_matched,
                 )
             n_samples = (
                 n_blocks * 2 * mlp.width
