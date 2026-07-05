@@ -10,9 +10,11 @@ are likely to be retried.
 The current grader shape is width 256, depth 32, with a `2.72e11` FLOP/MLP
 budget and a score-efficient target just under `2.72e10` effective FLOPs.
 
-For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
-Walsh-Hadamard sign cubature with 16 blocks. After the first linear/ReLU layer,
-the estimator linearly recolors the first hidden activation ensemble so its
+For depth-32 contest MLPs, unforced `predict()` normally uses randomized
+antithetic Walsh-Hadamard sign cubature with 16 blocks; this temporary grader
+A/B candidate forces 32 blocks to measure the grader-side truth floor. After
+the first linear/ReLU layer, the estimator linearly recolors the first hidden
+activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
 Hadamard block for the matmul, then reconstructs the negative-half ReLU
@@ -40,6 +42,8 @@ variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
 variance route with chi-radial first-layer scaling, explicit block counts,
 Strassen propagation matmuls, and split-block Hadamard row subsets; the
 promoted depth-32 default is equivalent to `hadamard_st3_b16`.
+This temporary grader A/B candidate is equivalent to `hadamard_st3_b32` until
+the owner records the grader result and reverts the default.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -1173,6 +1177,29 @@ after losing or becoming irrelevant to the current scorer frontier.
   not an implementation issue. Local route bias `~0` also implies the Fly-side
   `F + bias ~ 0.31e-6` from the paired probe is mostly Fly-truth MC noise.
   Screen artifacts live under `paired_fly_logs/offline_screen/`.
+- **Grader A/B candidate: default 32 blocks for truth-floor measurement.** On
+  2026-07-05, the deep unforced default was temporarily forced from the
+  adaptive 16-block `hadamard_st3_b16` route to the explicit
+  `hadamard_st3_b32` route. The motivation is to measure
+  `F_grader = 2*MSE32 - MSE16` against the existing grader datum
+  (`2.411e-7` adjusted / `~2.3e-6` MSE for the 16-block default), separating
+  grader truth-floor compression from genuine estimator variance. If the
+  grader residual stays roughly proportional, the expected grader MSE is about
+  `1.1e-6`-`1.2e-6`, with adjusted score roughly neutral around `2.4e-7`
+  despite the doubled route wall.
+
+  The scorer-path proof used the full-100 JSON Fly window needed by this
+  2x-wall route:
+  `paired_fly_logs/default_b32_ab_20260705.log`. The plain default, with no
+  `--mode`, returned 100/100 clean: `1.488e-6` mean final-layer MSE,
+  `3.038e-7` adjusted, `5.185e10` raw FLOPs, `5.563e10` effective compute, and
+  no failures. This matches the prior explicit `hadamard_st3_b32` probe in
+  FLOPs and MSE band.
+
+  Caveat: grader wall behavior at the 2x route wall remains unverified, though
+  the combined grader budget has large margin at `5.2e10` raw FLOPs. Plan:
+  owner submits this build, records grader MSE, then reverts the default to the
+  adaptive 16-block route regardless of outcome.
 
 ## Benchmarking Notes
 
