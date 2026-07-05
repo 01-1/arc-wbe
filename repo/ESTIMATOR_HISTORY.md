@@ -1234,6 +1234,36 @@ after losing or becoming irrelevant to the current scorer frontier.
   Fly aggregate was `2.745e-7` adjusted, `2.810e10` effective compute, and
   `2.435e9` residual compute at the 0.1 scale. The adaptive selector still
   chooses 16 blocks at the `2.72e11` budget.
+- **Owner-approved fp32 ensemble propagation.** On 2026-07-05, the default
+  deep route moved the sampled ensemble, first-layer apply, recolor apply, and
+  remaining propagation matmuls to `float32`, while keeping `W0.T @ W0`, exact
+  target moments, recolor covariance/linalg, variance-match statistics, and
+  returned rows in `float64`. The owner explicitly approved this
+  rules-spirit tradeoff in the same category as the earlier Strassen
+  promotion: it changes reduced-precision execution only, uses no extra input,
+  and does not modify or bypass flopscope accounting. The scorer path counts
+  every executed operation; in this implementation the final raw count moved
+  slightly down because the fp32 propagation path is counted directly rather
+  than because accounting was bypassed.
+
+  The final full-100 JSON Fly proof is
+  `paired_fly_logs/fp32_propagation_b_hoisted_20260705.log`. It returned
+  100/100 clean with no failures and paired final-layer MSE
+  `2.666655936707e-6` versus the canonical baseline
+  `2.666646644229e-6`, a `+0.000348%` delta with wins/losses/ties `48/52/0`,
+  well inside the owner-stated 1% abort gate. The aggregate was `2.738e-7`
+  adjusted, `2.5351179052e10` raw FLOPs, `2.796e10` effective compute, and
+  `2.605e9` residual compute at the 0.1 scale. Versus the recolor-Strassen
+  fp64 proof, Fly backend time improved slightly (`13.800s` to `13.638s`
+  mean) and worker totals were essentially flat to slightly better
+  (`30.391s` to `30.169s`), but measured residual compute rose
+  (`2.435e9` to `2.605e9`), so the Fly wall/residual result should be read as
+  mixed rather than a clear residual-charge win. A local one-MLP paired timing
+  check after hoisting weight casts showed backend `13.271s` to `12.999s` and
+  wall `17.281s` to `17.042s`, again with identical rounded FLOPs and MSE.
+  Re-measuring the route from the final Fly raw count updated the L3 measured
+  row cost to `3.10e6`; the adaptive selector still chooses 16 blocks at the
+  `2.72e11` budget.
 
 ## Benchmarking Notes
 

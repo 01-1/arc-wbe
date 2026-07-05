@@ -34,7 +34,7 @@ _DEEP_HADAMARD_MAX_BLOCKS = 32
 _DEEP_BLOCK_FIXED_OVERHEAD = 1.09
 _DEEP_BLOCK_COST_SAFETY = 1.03
 _DEEP_MEASURED_ROW_FLOPS = {
-    3: 3.17e6,
+    3: 3.10e6,
     4: 2.94e6,
 }
 _DEEP_RESIDUAL_BLOCK_SAFETY = {
@@ -2020,42 +2020,48 @@ def _hadamard_first_cov_recolored_means(
     posthoc: _HadamardPosthocConfig | None = None,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
+    weights_f32 = [w.astype(fnp.float32) for w in mlp.weights]
     initial_samples = n_samples
     if mirror_layer is not None:
         initial_samples = max((n_samples // (4 * mlp.width)) * (2 * mlp.width), 2 * mlp.width)
     w0 = mlp.weights[0]
+    w0_f32 = weights_f32[0]
     n_blocks = max(initial_samples // (2 * mlp.width), 1)
     antithetic_blocks = max(min(int(round(n_blocks * antithetic_fraction)), n_blocks), 0)
     y_parts = []
     if antithetic_blocks:
-        x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor)
-        pre_half = _strassen_matmul(x_half, w0, strassen_levels)
+        x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor).astype(fnp.float32)
+        pre_half = _strassen_matmul(x_half, w0_f32, strassen_levels)
         if radial_chi:
-            scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
+            scales = fnp.array(_chi_stratified_radial_scales(mlp.width), dtype=fnp.float32)
             n_scale_blocks = x_half.shape[0] // mlp.width
             pre_half = pre_half * fnp.concatenate((scales,) * n_scale_blocks)[:, None]
         y_parts.append(fnp.maximum(pre_half, 0.0))
         y_parts.append(fnp.maximum(-pre_half, 0.0))
     fresh_half_blocks = 2 * (n_blocks - antithetic_blocks)
     if fresh_half_blocks:
-        x_fresh = _hadamard_sign_fresh_half_blocks(mlp, fresh_half_blocks, rng)
-        pre_fresh = _strassen_matmul(x_fresh, w0, strassen_levels)
+        x_fresh = _hadamard_sign_fresh_half_blocks(mlp, fresh_half_blocks, rng).astype(fnp.float32)
+        pre_fresh = _strassen_matmul(x_fresh, w0_f32, strassen_levels)
         if radial_chi:
-            scales = fnp.array(_chi_stratified_radial_scales(mlp.width))
+            scales = fnp.array(_chi_stratified_radial_scales(mlp.width), dtype=fnp.float32)
             pre_fresh = pre_fresh * fnp.concatenate((scales,) * fresh_half_blocks)[:, None]
         y_parts.append(fnp.maximum(pre_fresh, 0.0))
     y = fnp.concatenate(tuple(y_parts), axis=0)
 
     target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
-    sample_mean = fnp.mean(y, axis=0)
+    sample_mean = fnp.mean(y, axis=0).astype(fnp.float64)
     centered = y - sample_mean[None, :]
-    sample_cov = _strassen_matmul(centered.T, centered, strassen_levels) / float(centered.shape[0])
+    sample_cov = (
+        _strassen_matmul(centered.T.astype(fnp.float32), centered.astype(fnp.float32), strassen_levels)
+        / float(centered.shape[0])
+    ).astype(fnp.float64)
     jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
     eye = _eye(mlp.width)
     sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
     target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
     recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
-    x = _strassen_matmul(centered, recolor, strassen_levels) + target_mean[None, :]
+    x = _strassen_matmul(centered.astype(fnp.float32), recolor.astype(fnp.float32), strassen_levels)
+    x = x + target_mean.astype(fnp.float32)[None, :]
 
     cv3_s_blocks = None
     if final_cv3:
@@ -2073,31 +2079,31 @@ def _hadamard_first_cov_recolored_means(
             cv3_s_blocks = fnp.mean(normalized, axis=1)
 
     posthoc = posthoc or _HadamardPosthocConfig()
-    rows = [target_mean]
+    rows = [target_mean.astype(fnp.float64)]
     final_pre = None
-    for layer_idx, w in enumerate(mlp.weights[1:], start=1):
-        pre = _strassen_matmul(x, w, strassen_levels)
+    for layer_idx, (w, w_prop) in enumerate(zip(mlp.weights[1:], weights_f32[1:]), start=1):
+        pre = _strassen_matmul(x, w_prop, strassen_levels)
         final_pre = pre
         x = fnp.maximum(pre, 0.0)
         if layer_idx <= exact_recolor_layers:
             target_pre_mean = target_mean @ w
             target_pre_cov = w.T @ target_cov @ w
             target_mean, target_cov = _gaussian_relu_mean_cov(target_pre_mean, target_pre_cov)
-            sample_mean = fnp.mean(x, axis=0)
+            sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
             centered_layer = x - sample_mean[None, :]
-            sample_cov = (centered_layer.T @ centered_layer) / float(centered_layer.shape[0])
+            sample_cov = (centered_layer.T.astype(fnp.float64) @ centered_layer.astype(fnp.float64)) / float(centered_layer.shape[0])
             jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
             sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
             target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
             recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
-            x = centered_layer @ recolor + target_mean[None, :]
+            x = centered_layer.astype(fnp.float32) @ recolor.astype(fnp.float32) + target_mean.astype(fnp.float32)[None, :]
         if variance_match_start_layer <= layer_idx < variance_match_start_layer + variance_match_layers:
-            pre_mean = fnp.mean(pre, axis=0)
+            pre_mean = fnp.mean(pre, axis=0).astype(fnp.float64)
             pre_centered = pre - pre_mean[None, :]
-            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
-            sample_mean = fnp.mean(x, axis=0)
+            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0).astype(fnp.float64))
+            sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
             centered_layer = x - sample_mean[None, :]
-            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0).astype(fnp.float64), _MIN_VARIANCE)
             strength = variance_match_strength
             if layer_idx == 1 and posthoc.kurtosis_gate is not None:
                 pre_z = pre_centered / fnp.sqrt(fnp.maximum(fnp.mean(pre_centered * pre_centered, axis=0), _MIN_VARIANCE))[None, :]
@@ -2107,17 +2113,17 @@ def _hadamard_first_cov_recolored_means(
             if layer_idx == 1 and posthoc.scale_cap is not None:
                 cap = posthoc.scale_cap
                 scale = fnp.maximum(fnp.minimum(scale, cap), 1.0 / cap)
-            x = centered_layer * scale[None, :] + sample_mean[None, :]
+            x = centered_layer * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
         if posthoc.second_variance_strength is not None and layer_idx == 2:
-            pre_mean = fnp.mean(pre, axis=0)
+            pre_mean = fnp.mean(pre, axis=0).astype(fnp.float64)
             pre_centered = pre - pre_mean[None, :]
-            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0))
-            sample_mean = fnp.mean(x, axis=0)
+            target_var = _gaussian_relu_variance(pre_mean, fnp.mean(pre_centered * pre_centered, axis=0).astype(fnp.float64))
+            sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
             centered_layer = x - sample_mean[None, :]
-            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0).astype(fnp.float64), _MIN_VARIANCE)
             scale = 1.0 + posthoc.second_variance_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
-            x = centered_layer * scale[None, :] + sample_mean[None, :]
-        rows.append(fnp.mean(x, axis=0))
+            x = centered_layer * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
+        rows.append(fnp.mean(x, axis=0).astype(fnp.float64))
         if mirror_layer is not None and layer_idx == mirror_layer:
             mirror_mean = rows[-1]
             x = fnp.concatenate((x, 2.0 * mirror_mean[None, :] - x), axis=0)
