@@ -2104,6 +2104,7 @@ def _hadamard_first_cov_recolored_means(
             sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
             centered_layer = x - sample_mean[None, :]
             sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0).astype(fnp.float64), _MIN_VARIANCE)
+            centered_apply = x - sample_mean.astype(fnp.float32)[None, :]
             strength = variance_match_strength
             if layer_idx == 1 and posthoc.kurtosis_gate is not None:
                 pre_z = pre_centered / fnp.sqrt(fnp.maximum(fnp.mean(pre_centered * pre_centered, axis=0), _MIN_VARIANCE))[None, :]
@@ -2113,7 +2114,7 @@ def _hadamard_first_cov_recolored_means(
             if layer_idx == 1 and posthoc.scale_cap is not None:
                 cap = posthoc.scale_cap
                 scale = fnp.maximum(fnp.minimum(scale, cap), 1.0 / cap)
-            x = centered_layer * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
+            x = centered_apply * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
         if posthoc.second_variance_strength is not None and layer_idx == 2:
             pre_mean = fnp.mean(pre, axis=0).astype(fnp.float64)
             pre_centered = pre - pre_mean[None, :]
@@ -2122,7 +2123,8 @@ def _hadamard_first_cov_recolored_means(
             centered_layer = x - sample_mean[None, :]
             sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0).astype(fnp.float64), _MIN_VARIANCE)
             scale = 1.0 + posthoc.second_variance_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
-            x = centered_layer * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
+            centered_apply = x - sample_mean.astype(fnp.float32)[None, :]
+            x = centered_apply * scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None, :]
         rows.append(fnp.mean(x, axis=0).astype(fnp.float64))
         if mirror_layer is not None and layer_idx == mirror_layer:
             mirror_mean = rows[-1]

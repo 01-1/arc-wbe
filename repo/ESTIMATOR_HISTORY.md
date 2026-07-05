@@ -1317,6 +1317,24 @@ after losing or becoming irrelevant to the current scorer frontier.
   scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None,
   :]` at `estimator.py:2116` preserves the promoted dtype, so layer 2 onward
   runs fp64 on the real code path.
+  The leak was fixed by keeping fp64 centered arrays for the variance-match
+  statistics but applying the scale to an fp32-centered copy before writing
+  `x` back. A `sys.settrace` dtype assertion on the real default selector
+  verified that the propagated ensemble is `float32` at every reported layer
+  0-31 for a width-256/depth-32 MLP; the same harness also covered a tiny
+  width-8/depth-4 direct call. Reported rows stayed `float64`.
+  `python -m py_compile estimator.py` passed. A local one-MLP paired timing
+  check against the leaking HEAD showed true-fp32 wall behavior improving on
+  this machine: backend `15.271s -> 12.132s`, wall `19.809s -> 16.621s`,
+  with unchanged displayed raw MSE. The full-100 JSON Fly proof in
+  `paired_fly_logs/fp32_dtype_leak_fix_20260705.log` returned 100/100 clean
+  with no failures, raw FLOPs still `2.535e10`-class, and paired mean MSE
+  `2.666750357e-6` versus canonical `2.666646644e-6` (`+0.0039%`, well under
+  the 1% gate). Compared with
+  `paired_fly_logs/fp32_propagation_b_hoisted_20260705.log`, Fly backend mean
+  improved `13.638s -> 9.220s`, worker total `30.169s -> 25.743s`, and
+  residual compute `2.605e9 -> 2.280e9`; aggregate score moved
+  `2.738e-7 -> 2.715e-7` with effective compute `2.796e10 -> 2.763e10`.
 
   Campaign verdict: every internally generable mechanism family for the
   `~1.55x` gap is now closed by measurement: truth floor, anchored CVs at
