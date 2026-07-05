@@ -28,8 +28,6 @@ if hasattr(flops, "configure"):
 _MIN_VARIANCE = 1e-30
 _DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 16
-# Temporary grader A/B truth-floor measurement; revert after owner records it.
-_GRADER_AB_FORCE_BLOCKS = 32
 _DEEP_STRASSEN_LEVELS = 3
 _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
 _DEEP_HADAMARD_MAX_BLOCKS = 32
@@ -2200,19 +2198,6 @@ def _hadamard_sample_count_for_budget(
     return min(rows, max_rows)
 
 
-def _grader_ab_sample_count_for_blocks(mlp: MLP, budget: int, blocks: int) -> int:
-    rows_per_block = 2 * mlp.width
-    measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(_DEEP_STRASSEN_LEVELS)
-    if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
-        per_block_cost = rows_per_block * measured_row_cost
-    else:
-        plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
-        strassen_discount = (7.0 / 8.0) ** max(_DEEP_STRASSEN_LEVELS, 0)
-        per_block_cost = mlp.depth * plain_layer_cost * strassen_discount
-    budget_blocks = max(int(budget // per_block_cost), 1)
-    return min(blocks, budget_blocks) * rows_per_block
-
-
 def _parse_hadamard_tokens(mode: str) -> tuple[
     int,
     int | None,
@@ -2384,18 +2369,11 @@ class Estimator(BaseEstimator):
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default"):
             if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
-                if os.environ.get("WHEST_EXPERIMENT_SAMPLES") or os.environ.get("WHEST_HADAMARD_BLOCKS"):
-                    n_samples = _hadamard_sample_count_for_budget(
-                        mlp,
-                        budget,
-                        _DEEP_STRASSEN_LEVELS,
-                    )
-                else:
-                    n_samples = _grader_ab_sample_count_for_blocks(
-                        mlp,
-                        budget,
-                        _GRADER_AB_FORCE_BLOCKS,
-                    )
+                n_samples = _hadamard_sample_count_for_budget(
+                    mlp,
+                    budget,
+                    _DEEP_STRASSEN_LEVELS,
+                )
                 return _hadamard_first_cov_recolored_means(
                     mlp,
                     n_samples,

@@ -10,11 +10,10 @@ are likely to be retried.
 The current grader shape is width 256, depth 32, with a `2.72e11` FLOP/MLP
 budget and a score-efficient target just under `2.72e10` effective FLOPs.
 
-For depth-32 contest MLPs, unforced `predict()` normally uses randomized
-antithetic Walsh-Hadamard sign cubature with 16 blocks; this temporary grader
-A/B candidate forces 32 blocks to measure the grader-side truth floor. After
-the first linear/ReLU layer, the estimator linearly recolors the first hidden
-activation ensemble so its
+For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
+Walsh-Hadamard sign cubature with adaptive budget selection that gives
+16 blocks at the current grader shape. After the first linear/ReLU layer, the
+estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
 Hadamard block for the matmul, then reconstructs the negative-half ReLU
@@ -42,8 +41,6 @@ variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
 variance route with chi-radial first-layer scaling, explicit block counts,
 Strassen propagation matmuls, and split-block Hadamard row subsets; the
 promoted depth-32 default is equivalent to `hadamard_st3_b16`.
-This temporary grader A/B candidate is equivalent to `hadamard_st3_b32` until
-the owner records the grader result and reverts the default.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -1196,10 +1193,28 @@ after losing or becoming irrelevant to the current scorer frontier.
   no failures. This matches the prior explicit `hadamard_st3_b32` probe in
   FLOPs and MSE band.
 
-  Caveat: grader wall behavior at the 2x route wall remains unverified, though
-  the combined grader budget has large margin at `5.2e10` raw FLOPs. Plan:
-  owner submits this build, records grader MSE, then reverts the default to the
-  adaptive 16-block route regardless of outcome.
+  Owner-reported grader result, 2026-07-05: the 32-block A/B build scored
+  `2.647e-7` adjusted / `1.30e-6` final-layer MSE / `5.18e10` raw FLOPs /
+  `5.54e10` effective compute. Derived from those numbers, the grader residual
+  is `~3.6e9` versus `~2.6e9` for the 16-block default: proportional scaling,
+  with no deep-Strassen-style residual pathology at the 2x route wall. The
+  baseline 16-block grader MSE derived from the documented datum
+  (`2.411e-7` adjusted at `2.86e10` effective, multiplier `0.1051`) is
+  `MSE16 ~= 2.293e-6`. The resulting truth-floor estimate is
+  `F_grader = 2*1.30e-6 - 2.293e-6 ~= 3.1e-7`, with uncertainty roughly
+  `+/-1e-7` from three-digit grader rounding plus run noise; this is consistent
+  with the paired Fly-side estimate `3.094e-7 +/- 2.05e-7`.
+
+  The grader MSE ratio was `1.30/2.293 = 0.567`, close to Fly's `0.558`.
+  Interpretation: grader truth noise matches the Fly-like floor, and the
+  grader-side variance component of the default is `~1.98e-6`. A `1.6e-7`
+  adjusted score at the compute floor needs total MSE `<= 1.6e-6`, i.e. a
+  `~1.55x` variance cut. The public floor-cluster edge over the current route
+  is `~1.5x`-`2.1x` in variance. Score-flatness above the floor is
+  grader-confirmed: `2.647e-7` at double compute versus `2.411e-7`.
+
+  The default was reverted in the same follow-up commit to the adaptive
+  16-block route regardless of outcome.
 
 ## Benchmarking Notes
 
