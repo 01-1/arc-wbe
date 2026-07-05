@@ -1107,6 +1107,72 @@ after losing or becoming irrelevant to the current scorer frontier.
   does not justify re-opening the low-rank ordering as a promotion path. A
   cleaner paired rerun would be needed only to put an exact clean mean on the
   artifacted Fly output; the methodology datum already agrees with Gate 1.
+- **Truth-floor/bias split via paired 32-block probe.** On 2026-07-04, a
+  full-100 JSON Fly run of `hadamard_st3_b32` was paired per MLP against the
+  determinism-gated `default_a` baseline rows (canonical mean
+  `2.666646644e-6`) to test whether the public-leaderboard
+  `1.25e-7`-`1.63e-7` cluster could be truth-floor compression rather than
+  genuine estimator variance reduction. The log is
+  `paired_fly_logs/b32_full_json.log`. Harness knobs were measurement-only, not
+  grader-rule changes: `WALL_TIME=120`, worker
+  `--residual-wall-time-multiplier 0.1`, `--min-results 100`,
+  `--max-result-seconds 150`, and no `--summary-only`, because the 2x-wall
+  route would otherwise trip the 60s worker limit and the local
+  residual-threshold artifact. MSE pairing is unaffected.
+
+  All 100 rows returned with no failures: `1.488001495e-6` mean final-layer
+  MSE, `3.047e-7` adjusted, `5.563e10` effective compute, `5.185e10` raw
+  FLOPs, and `3.779e9` residual at the 0.1 scale. The paired MSE ratio was
+  `0.5580` versus the `0.5` pure-variance prediction. Under
+  `MSE = V/blocks + F`, the paired estimate is
+  `F + bias = 2*MSE32 - MSE16 = 3.094e-7 +/- 2.05e-7` (1 s.e.), so about
+  88% (`~2.357e-6`) of the default's `2.666646644e-6` is genuine estimator
+  variance.
+
+  Verdict: the Fly-side reachable-MSE floor for this route family is
+  `~0.3e-6`, far below the `~1.6e-6` needed for a `1.6e-7` adjusted score, so
+  the leaderboard cluster is not truth-floor compression on a Fly-like truth.
+  Reaching it requires a genuine `~1.7x` variance-per-FLOP mechanism. The b32
+  adjusted score (`3.047e-7`, worse than the default) re-confirms that extra
+  blocks above the score floor do not buy adjusted score. The grader-side floor
+  remains unmeasured; the same `2*MSE32 - MSE16` arithmetic applies to a
+  one-off grader A/B of a 32-block build if wanted.
+- **Offline anchored-CV ceiling screen: negative.** On 2026-07-05, an offline
+  screen measured the actual ceiling of the anchored-control-variate family
+  after every reported-row correction (cv3, gp/ew, trimming, QCV) had failed on
+  the scorer. The family was limited to features computable inside `predict()`
+  with exactly known expectations, regressed against final-layer error. The
+  harness was a plain-numpy replica of the default deep route (16 blocks,
+  first-layer exact recolor, `1.5x` first-successor variance match), validated
+  against the submission logic with post-recolor covariance relative error
+  `~1.05e-7` and single-seed final MSEs in-band.
+
+  The screen used three private He-initialized width-256/depth-32 MLPs
+  (generator seeds 11/22/33, `local_engine.build_mlp` convention), local MC
+  ground truth with 400k antithetic samples per MLP, and `R=100` estimator
+  seeds per MLP. This was legitimate offline research on private MLPs and own
+  truth only; nothing enters the submitted estimator. Features were layer-1
+  diagonal third- and fourth-moment residuals against exact zero-mean Gaussian
+  ReLU targets (cv3-class and its k4 analog), first-successor gate-rate
+  residual against the Gaussian closure, row-radius-variance residual against
+  the closure value, plus a generous ceiling adding the top-8 cross-seed
+  principal components of the full 256-dim k3/k4 residual vectors with 5-fold
+  cross-validation.
+
+  Result: honest scalar-feature pooled adjusted R^2 `0.0049` (per-MLP
+  `-0.0024` / `0.0012` / `0.0091`); generous cross-validated R^2 pooled
+  `-0.0494` and negative for all three MLPs, i.e. pure overfitting; net
+  route-bias MSE indistinguishable from zero (`-1.38e-7` net of truth-noise and
+  seed-variance terms); between-block/within decomposition ratio `0.851`, so
+  blocks behave near-independently; and per-seed sanity MSE `3.87e-6` on the
+  local MLP distribution.
+
+  Verdict: the anchored-CV family is closed at a measured ceiling of `~0.5%` of
+  final-error variance versus the `~40%` a `1.6e-7`-relevant mechanism would
+  need. This retroactively explains the cv3 scorer loss as a family property,
+  not an implementation issue. Local route bias `~0` also implies the Fly-side
+  `F + bias ~ 0.31e-6` from the paired probe is mostly Fly-truth MC noise.
+  Screen artifacts live under `paired_fly_logs/offline_screen/`.
 
 ## Benchmarking Notes
 
