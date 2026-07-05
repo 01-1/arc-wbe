@@ -1543,7 +1543,7 @@ def _gaussian_relu_mean_cov(
 
 
 def _strassen_matmul_batched(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray:
-    """Batched-leaf rectangular-by-square Strassen matmul for propagation."""
+    """Batched-leaf rectangular Strassen matmul for eligible shapes."""
     if levels <= 0:
         return a @ b
     rows, inner = a.shape
@@ -1551,7 +1551,6 @@ def _strassen_matmul_batched(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp
     divisor = 1 << levels
     if (
         inner != b_rows
-        or inner != cols
         or rows % divisor
         or inner % divisor
         or cols % divisor
@@ -2050,13 +2049,13 @@ def _hadamard_first_cov_recolored_means(
     target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
     sample_mean = fnp.mean(y, axis=0)
     centered = y - sample_mean[None, :]
-    sample_cov = (centered.T @ centered) / float(centered.shape[0])
+    sample_cov = _strassen_matmul(centered.T, centered, strassen_levels) / float(centered.shape[0])
     jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
     eye = _eye(mlp.width)
     sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
     target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
     recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
-    x = centered @ recolor + target_mean[None, :]
+    x = _strassen_matmul(centered, recolor, strassen_levels) + target_mean[None, :]
 
     cv3_s_blocks = None
     if final_cv3:

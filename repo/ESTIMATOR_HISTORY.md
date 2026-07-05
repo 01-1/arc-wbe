@@ -1215,6 +1215,25 @@ after losing or becoming irrelevant to the current scorer frontier.
 
   The default was reverted in the same follow-up commit to the adaptive
   16-block route regardless of outcome.
+- **Recolor matmuls through L3 Strassen.** On 2026-07-05, the default
+  first-layer recolor path moved its two large recolor matmuls onto the same
+  L3 batched-leaf Strassen helper already used for propagation. The helper's
+  entry guard now requires only conformability plus divisibility and the
+  existing leaf-width floor, instead of incorrectly requiring the rectangular
+  Gram inner dimension to equal the output columns. The exact-recolor
+  diagnostic branch is unchanged.
+
+  Local plain-NumPy equivalence checks on the exact recolor shapes passed:
+  `256x8192 @ 8192x256` had `4.413e-15` relative error, and
+  `8192x256 @ 256x256` had `1.827e-15` relative error. The fixed full-100
+  JSON Fly proof against `paired_fly_logs/default_a_full_json.log` saved as
+  `paired_fly_logs/recolor_strassen_a_20260705.log` returned 100/100 clean
+  with no failures. Raw FLOPs fell from the canonical `2.599e10` default to
+  `2.5665143852e10`; paired final-layer MSE was exactly unchanged at
+  `2.666646644229e-6` (`0.000000%` delta, wins/losses/ties `0/0/100`). The
+  Fly aggregate was `2.745e-7` adjusted, `2.810e10` effective compute, and
+  `2.435e9` residual compute at the 0.1 scale. The adaptive selector still
+  chooses 16 blocks at the `2.72e11` budget.
 
 ## Benchmarking Notes
 
