@@ -1264,6 +1264,68 @@ after losing or becoming irrelevant to the current scorer frontier.
   Re-measuring the route from the final Fly raw count updated the L3 measured
   row cost to `3.10e6`; the adaptive selector still chooses 16 blocks at the
   `2.72e11` budget.
+- **Fingerprint theory pass and mechanism-gate closeout.** With the
+  truth-floor at `~0.31e-6` on both Fly and grader, reaching the public
+  leaderboard cluster (`1.25e-7`-`1.63e-7`) requires about a `~1.55x`
+  estimator-variance cut, not a truth-floor or arithmetic nibble. A
+  2026-07-05 theory pass enumerated and gated the remaining internal
+  candidate mechanisms; artifacts are in
+  `paired_fly_logs/fingerprint_theory/`.
+
+  Direct offline screens killed exactly-unbiased randomized late smoothing
+  (seed-variance ratio `1.063x` worse, MSE `3.56x` worse) and late
+  deterministic shrinkage (variance worse, MSE `241x`-`543x` from
+  catastrophic bias). Deep post-ReLU skew is essential, matching the
+  mirror/restart history. Last-gate Rao-Blackwellization was capped at
+  `~1.2x` by layerwise-profile arithmetic and was not pursued.
+
+  Alias-design gate, candidate high-order-even OA/sign-schedule cubature:
+  **DEAD**. The pre-registered gate was `>= 0.35` pooled cross-validated
+  R^2; all sketch families were negative: q4 unweighted `-0.076`, q4
+  downstream-weighted `-0.055`, q6 `-0.056`, all-alias `-0.172`. A
+  planted-signal positive control recovered `0.487` of a designed `0.50`, so
+  this was a powered negative rather than low test power. Degree-4 sketches
+  covered `~46%` of the XOR-closed quadruple space.
+
+  Cheap-suffix telescope gate, candidate pathwise multi-level CV: **DEAD**
+  after corrected allocation arithmetic. Shared-snapshot diagonal-Gaussian
+  closure suffixes had high pathwise correlations, rho^2 `0.59`/`0.69`/`0.80`
+  at branch layers 16/20/24, with controls passing; rank-r and projected-width
+  suffixes were all `<0.26`. The initial "survives" verdict used the anchored
+  CV cost formula, which assumes a known cheap-level expectation. The honest
+  two-level telescope pays the sampled-prefix cost (`K/32`) at the coarse
+  level. With optimal-beta allocation, the best achievable factors are
+  `~0.99x`-`1.00x` of baseline at every K: exact break-even. The clean finding
+  is `rho^2(K) ~= K/32` at all three branch layers, i.e. the
+  variance-injection profile over depth is cost-uniform, the MLMC no-go
+  condition. This closes the multi-resolution-over-depth family, for any
+  telescope/allocation split, and retroactively explains the late-pruning and
+  mirror reinvestment failures.
+
+  Owner-reported trims grader datum for `ffeb092` plus `2b33896`:
+  `2.436e-7` adjusted / `2.30e-6` MSE / `2.53e10` raw / `2.88e10` effective.
+  MSE and raw transferred as designed (prediction-neutral, Strassen cut real),
+  but derived residual rose from `~2.6e9` to `~3.45e9`, absorbing the
+  multiplier gain; score moved `2.411e-7 -> 2.436e-7`, inside
+  single-submission noise, especially since grader residual-per-raw had
+  already varied `0.070`-`0.100` across prior submissions. Verdict: trims are
+  grader-neutral; keep them because predictions are bit-identical and residual
+  may revert, but stop spending submissions on micro-trims. fp32 dtype audit:
+  leak found in the layer-1 variance-match path. `centered_layer = x -
+  sample_mean[None, :]` at `estimator.py:2105` uses fp64 `sample_mean`,
+  promoting the fp32 ensemble; `x = centered_layer *
+  scale.astype(fnp.float32)[None, :] + sample_mean.astype(fnp.float32)[None,
+  :]` at `estimator.py:2116` preserves the promoted dtype, so layer 2 onward
+  runs fp64 on the real code path.
+
+  Campaign verdict: every internally generable mechanism family for the
+  `~1.55x` gap is now closed by measurement: truth floor, anchored CVs at
+  `~0.5%` ceiling, alias designs, smoothing, late shrinkage,
+  Rao-Blackwell arithmetic, depth telescopes, and arithmetic trims. The
+  remaining levers are external leaderboard metadata (per-entry FLOPs/MSE at
+  different budgets, variance scaling with rows) or a genuinely novel per-row
+  idea outside these families. The current default stands at grader
+  `2.436e-7`, with `~2.4e-7` as the realistic plateau.
 
 ## Benchmarking Notes
 
