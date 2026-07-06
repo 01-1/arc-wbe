@@ -1416,6 +1416,48 @@ after losing or becoming irrelevant to the current scorer frontier.
   external: cluster all-layer MSEs if visible, public writeups/shared
   baselines, and organizer/forum information. Current default (`77efc40`)
   stands at grader `2.412e-7`.
+- **2026-07-06 mechanism gates: evaluation and analytic lanes closed.**
+  Evaluation-based lane closed by spectrum. For the antithetic-Hadamard
+  design, NNGP average-case `err^2` versus N showed equal weights within
+  `0.8%` of BQ-optimal at every N from `2048` to `32768`, and was near-flat in
+  N (`1.196e-4 -> 1.109e-4`). At `N=8192`, the kernel spectrum has top
+  eigenvalue `0.975` followed by a `~1.35e-5` bulk with tail exponent
+  `beta ~= 0.73-0.98 ~= 1`, not the fast spectral decay required for
+  quadrature superconvergence. Evaluation-based error is therefore stuck at
+  `~c/N`. The empirical `1/N` anchor cross-check says the real route's
+  `~2.0e-6` at `8192` rows implies `~0.53e-6` at entry 1's `~30k`
+  evaluations, still `5x`-`50x` above entry 1's `<=0.1e-6` budget. Verdict:
+  entry 1 is not evaluation-based quadrature; weighting is also permanently
+  closed.
+
+  Analytic cumulant lane bias-floored. A pure analytic ladder (exact Gaussian
+  pair closure plus Edgeworth ReLU marginals) with one-loop diagonal cumulant
+  propagation measured K=2 `1.21e-4`, +diagonal-k3 `1.23e-4`, +diagonal-k4
+  `1.20e-4`, and both `1.23e-4`: no material gain over K=2. Cumulant
+  validation localizes the failure to propagation, not closure: analytic
+  versus empirical preactivation k4 correlation falls from `0.50` at layer 2
+  to `-0.01` at layer 8, so the diagonal independence propagation
+  `(W**4).T @ g4` is gone by layer 8. This matches the earlier joint-K3 (`r1`)
+  result improving K=2 only `~2.6x` (`4.7e-5`): the cumulant series is slowly
+  convergent and joint-structure-limited. The combined implication is that the
+  best achievable analytic bias (`~2.4e-5`-class even extrapolating joint-k4)
+  is worse than the shipping sampler's `~2.3e-6` MSE, so the analytic lane
+  explains neither entry 1 nor an improvement to our own route.
+
+  Standing synthesis: both principled lanes are now closed with structural, not
+  merely empirical, evidence: sampling by flat kernel spectrum plus
+  design-optimality, analytics by joint-propagation collapse. Approximate and
+  low-rank propagation and hybrids/telescopes were already closed by chaotic
+  decorrelation and `rho^2 ~= K/32`. The floor-cluster entries (`~1.5e-6` MSE)
+  sit `~1.5x` below our route but above both lanes' reach; entry 1
+  (`~0.01e-6` estimator error at `1.25e11`) is `~50x` below achievable
+  sampling and `~4700x` below achievable analytics at feasible cost. No
+  in-house construction explains the cluster. Remaining discriminating levers
+  are external only: the cluster entries' all-layer, per-depth MSE profiles
+  (samplers `~flat` in depth, closures grow with depth), public
+  writeups/shared baselines, and organizer/forum information. Current default
+  (`77efc40`) stands at grader `2.412e-7`; internal mechanism search is closed
+  pending external information.
 
 ## Benchmarking Notes
 
