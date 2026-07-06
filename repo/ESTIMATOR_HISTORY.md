@@ -1344,6 +1344,28 @@ after losing or becoming irrelevant to the current scorer frontier.
   different budgets, variance scaling with rows) or a genuinely novel per-row
   idea outside these families. The current default stands at grader
   `2.436e-7`, with `~2.4e-7` as the realistic plateau.
+- **NNGP cubature-optimality gate: DEAD.** On 2026-07-05, a final
+  offline gate scored the current 8192-point design (16 randomized
+  antithetic Hadamard sign blocks, equal weights) against Bayesian-quadrature
+  optimality under the depth-32 arc-cosine NNGP kernel, the
+  average-case-exact error model for the He-initialized contest MLP prior.
+  The kernel was validated against 200 self-generated He MLPs: fixed sign
+  pairs were within `0.2%`-`2.3%`, while random pairs reached `~12.6%`,
+  consistent with finite-width noise.
+
+  Equal weights are BQ-optimal on the current point set to relative std
+  `1.6e-9`; the within-block orthogonal/equal-norm symmetry forces this
+  exactly. A same-point BQ solve gained only `1.007x`, and the best
+  alternative point family (multi-radius signs) gained only `1.008x` in
+  average-case `err^2`. The pre-registered `>= 1.3x` gate failed by a wide
+  margin.
+
+  Verdict: the current design is near BQ-optimal for the true MLP prior. This
+  upgrades the design graveyard (chirps, permutations, balanced signs, radii,
+  splits) from empirical losses to a model-backed optimality statement, and
+  rules out cubature point/weight design as the leaderboard cluster's
+  mechanism. Artifacts are under
+  `paired_fly_logs/fingerprint_theory/`.
 
 ## Benchmarking Notes
 
