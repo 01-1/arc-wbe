@@ -1552,6 +1552,53 @@ after losing or becoming irrelevant to the current scorer frontier.
   verdicts stand, but small-margin and absolute-level conclusions carry
   `~+/-2x` distribution uncertainty).
 
+- **2026-07-06 floor-free leaderboard profile forensics redo.** This
+  supersedes the floor-anchored forensics read above and in
+  `leaderboard_forensics_20260706.md`. Method: top-5 per-layer MSE profiles
+  on the 50 public MLPs from `analysis/leaderboard-per-layer-mse/`, our
+  default per-layer profile from the fixed-100 Fly full-JSON log, and
+  reference shapes from 32 fresh local He MLPs at 8192 inputs each (raw-sample
+  use only). No estimator was run locally, and there is no floor anchoring:
+  every reported MSE is treated as the entry's own error against effectively
+  exact labels.
+
+  | Entry | Classification | Conf. | Final MSE mean / median [q10,q90] | Compute mean, CV | L31/L30 median | n_B/n_A | Edge |
+  |---|---|---|---:|---:|---:|---:|---:|
+  | andrew_epstein | growth-then-terminal-drop, final-layer refinement | medium | `3.67e-07` / `2.87e-07` [`1.67e-07`, `6.99e-07`] | `7.06e10`, CV `0.145` | `0.0214` | `20.3` | `2.67x` |
+  | ionel_chiosa | placeholder hidden payload, final-layer-only effort | high | `3.20e-07` / `2.60e-07` [`1.50e-07`, `5.52e-07`] | `1.29e11`, CV `0.002` | n/a | n/a | `1.69x` |
+  | keenanpepper | decaying/contracting profile plus final-layer drop | medium | `9.23e-07` / `8.02e-07` [`5.04e-07`, `1.60e-06`] | `4.58e10`, CV `0.040` | `0.0403` | `26.8` | `1.64x` |
+  | thylinao | sampler-like hidden profile, no final discontinuity | medium | `1.57e-06` / `1.35e-06` [`7.22e-07`, `2.72e-06`] | `2.72e10`, CV `0.002` | `0.993` | `1.13` | `1.62x` |
+  | mliston | placeholder hidden payload, final-layer-only effort | high | `1.60e-06` / `1.42e-06` [`9.34e-07`, `2.49e-06`] | `2.72e10`, CV `0.001` | n/a | n/a | `1.60x` |
+
+  Structural conclusions: three of five entries (andrew, keenan,
+  ionel/mliston) show a large final-layer-specific mechanism, either
+  `n_B/n_A ~= 20-27x` or final-only placeholder payloads. Only the final layer
+  scores, so this is rational allocation. Keenan's hidden shape correlates
+  `0.982`/`0.988` with plain/antithetic sampler reference shapes; the hidden
+  profile alone is sampler-compatible, and the anomaly is the additional
+  `~25x` final-layer drop. Thylinao has a sampler-shaped profile with no final
+  discontinuity at exactly floor compute, yet a `1.62x` edge versus our route;
+  this is evidence that a shape-preserving variance-reduction route about
+  `1.6x` better than ours exists without any terminal-layer trick.
+  Keenan-thylinao per-MLP final-MSE correlation is `0.419`, consistent with
+  shared per-MLP difficulty and a sampler-family signature, while andrew is
+  near-uncorrelated with everyone, so his final error is not driven by per-MLP
+  activation variance. Ionel (`1.29e11` compute, `3.20e-07`) versus mliston
+  (`2.72e10`, `1.60e-06`), same code, gives MSE ratio `~5.0` at compute ratio
+  `~4.7`; their final-layer mechanism is itself pure variance, just with a
+  `~1.6-1.7x` better constant than ours.
+
+  Follow-up gates, ranked: (1) sampler/antithetic reproduction gate, requiring
+  participant code/writeups and not currently executable because writeups are
+  only available at competition end; (2) keenan state-propagation contraction
+  toy gate, executable offline; (3) andrew terminal-refinement gate, needing
+  external telemetry. None have been run, and no estimator change was made.
+  Artifacts are under `paired_fly_logs/fingerprint_theory/`, including
+  `profile_forensics_v2_20260706.md`,
+  `profile_forensics_v2_20260706_results.json`, and
+  `profile_forensics_v2_20260706.py`; those files are gitignored, so this
+  history entry is the durable record.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
