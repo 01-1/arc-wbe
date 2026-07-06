@@ -1366,6 +1366,56 @@ after losing or becoming irrelevant to the current scorer frontier.
   rules out cubature point/weight design as the leaderboard cluster's
   mechanism. Artifacts are under
   `paired_fly_logs/fingerprint_theory/`.
+- **Cluster-metadata round: cumulant and mixture lanes negative.** On
+  2026-07-05, owner-reported grader trim closeout covered three points:
+  leaking-fp32 resubmission `2.44e-7` / `2.30e-6` / `2.53e10` /
+  `2.88e10` adjusted / MSE / raw / effective; fp64 revert copy `2.45e-7` /
+  `2.30e-6` / `2.53e10` / `2.90e10`; and leak-fixed fp32 (`77efc40`)
+  `2.412e-7` / `2.30e-6` / `2.54e10` / `2.85e10`. The residual rise versus
+  the pre-trims `~2.6e9` replicated across all arms, including pure fp64
+  (`3.5`/`3.7`/`3.1e9`), so it is grader-side drift, not estimator code. fp32
+  is acquitted, the leak-fixed build is the standing default, and its score
+  matches the old default (`2.411e-7`). Verdict: the trim package is
+  grader-neutral; micro-trim work is closed.
+
+  Owner-provided leaderboard cluster metadata, rescaled to
+  e-7/e-6/e10/e10 score/MSE/raw/effective, was `1.512/0.320/12.5/12.9`
+  (near-constant per-MLP raw, one sealed-half MLP at `1.22e11`),
+  `1.576/1.57/2.61/2.71`, `1.596/1.60/2.49-2.54/2.69` (per-MLP adaptive
+  raw), and `1.626/1.47/2.73/3.01`. All four check out against
+  `score = MSE * max(0.1, eff/2.72e11)`. With the measured truth floor
+  `~0.31e-6`, the 47%-budget entry's own estimator error is `<= ~0.1e-6`, a
+  near-exact method at `1.25e11` FLOPs, while the floor-group entries carry
+  `~1.2e-6` above the floor.
+
+  Cumulant-lane discriminator: **NEGATIVE**. Offline measurement of the real
+  `_factorized_k3_propagation` at depth 32 versus `>=400k`-sample local truth
+  gave pooled final-layer bias-MSE `4.69e-5` (truth noise `2.1e-7`) at raw
+  `2.307e11`, matmul-dominated by `2.252e11`. K=2
+  (`estimator_covariance.py`-class, `1.625e9` raw) measured `0.9e-4`-`1.7e-4`.
+  Convergence per cumulant order is only `~3x`, so no reachable K explains
+  `<=0.1e-6`; cumulant truncation cannot be the cluster mechanism.
+
+  Gaussian-sum mixture propagation: **NEGATIVE**. A plain-numpy Gaussian-sum
+  filter (M full-covariance components, exact nonzero-mean GL16 bivariate ReLU
+  closure, moment-preserving eigen-splits; M=1 anchor reproduced the K=2 bias
+  scale) showed bias flat in M: seed 11 `7.33e-5 -> 7.16e-5` for M=1 to 16,
+  seed 22 `1.62e-4 -> 1.62e-4`, pooled scaling exponent `~0.00` versus the
+  `>=1.2` gate; adaptive pre-ReLU splitting reached only `6.19e-5`. Closure
+  error is joint across coordinates and is not reduced by low-dimensional
+  splitting. Closure cost was also `8.6e7`/component/layer, putting M=16 at
+  `4.4e10` raw, above the floor-cluster point. Artifacts are in
+  `paired_fly_logs/fingerprint_theory/`.
+
+  Standing verdict: with sampling designs (BQ near-optimality),
+  corrections/CVs, depth telescopes, cumulant analytics, and mixture
+  propagation all closed by measurement, no in-house construction explains the
+  cluster. In particular, the near-exact 47%-budget entry beats the validated
+  NNGP average-case bound for `~30k` function evaluations by `~5x`-`50x`, so
+  it is not evaluation-based quadrature at face value. Remaining levers are
+  external: cluster all-layer MSEs if visible, public writeups/shared
+  baselines, and organizer/forum information. Current default (`77efc40`)
+  stands at grader `2.412e-7`.
 
 ## Benchmarking Notes
 
