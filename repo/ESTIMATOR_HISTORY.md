@@ -1458,6 +1458,51 @@ after losing or becoming irrelevant to the current scorer frontier.
   writeups/shared baselines, and organizer/forum information. Current default
   (`77efc40`) stands at grader `2.412e-7`; internal mechanism search is closed
   pending external information.
+- **Leaderboard forensics plus collapse/filament gates closed.** On
+  2026-07-06, owner-fetched public data under
+  `analysis/leaderboard-per-layer-mse/` gave an independent leaderboard
+  per-layer forensics check. Using ionel_chiosa's near-zero-own-error entry as
+  anchor, the extracted per-MLP truth-floor map has mean `F = 3.196e-7`,
+  sd `1.81e-7`, range `0.95e-7`-`8.78e-7`, which is `1.031x` our paired-probe
+  floor. Own-error separation is andrew_epstein `4.7e-8` (rank 1, score
+  `9.38e-8`, mean raw `6.25e10`, per-MLP adaptive
+  `5.4e10`-`9.5e10`), ionel `~0`, keenanpepper `6.0e-7`, thylinao `1.25e-6`,
+  and mliston `1.28e-6`. ionel+mliston are the same code with
+  BIT-IDENTICAL hidden-layer outputs (`max_abs_diff=0.0`), differing only in
+  the final-layer step (`~2.5e10` vs `1.25e11` total, own error `1.28e-6` vs
+  `~0`), a deterministic final-step refinement knob of order
+  `p >= 1.6-3.1`. Profile shapes separate: andrew grows to layer 26 then
+  sharply drops at the final layer; keenan is front-loaded (`1.24e-4` at
+  layer 2 decaying `134x` to final), a contraction signature; thylinao is
+  smooth/low and sampler-like. Nobody sits below the floor, excluding
+  truth-correlated methods.
+
+  Deep-collapse structure is confirmed, while two exploit constructions were
+  falsified. Input-fluctuation covariance collapses with depth: PR effective
+  rank `106 -> ~2-3` by layer 31, top-2 share `69-77%`, and mean input-input
+  cosine `0.975-0.988`; the residual off the top-4 latent is Gaussian to
+  three decimals (skew `0.002`, excess kurtosis `-0.05`). But a
+  sampled-latent conditional-Gaussian readout gives `~1.0x` versus plain
+  averaging by construction: the latent carries the dominant variance share,
+  and a sampled latent density cannot beat sampling. That gate-design lesson
+  is now recorded. The deterministic filament-grid propagation test, using G
+  narrow Gaussians along the collapse coordinate from a near-perfect
+  400k-sample initialization at layers 16/24 with GL16 closure, floors at
+  `1.30e-5` (K=24), flat in G (`p ~= 0.00007`); r=2 latent reaches only
+  `4.9-8.5e-6`. Error enters immediately after the branch layer:
+  per-node residual closure error recurs every layer, and each added latent
+  dimension only halves it. This is the exponential-nodes curse, same as the
+  input-space Gaussian-sum failure. Filament-grid mechanisms are closed.
+
+  Standing conclusion: the top entries' near-exact final-layer machinery
+  (andrew `4.7e-8`, ionel `~0`) remains outside every family this campaign can
+  construct: evaluation-based (spectrum-capped `~0.5e-6` at their FLOPs),
+  cumulant, mixture (input-space and collapse-aligned), anchored-CV, and
+  telescope. The floor-group own-error band `1.25-1.28e-6` across two
+  different method shapes is also unexplained. Remaining levers are phase-end
+  write-ups/organizer information and the offered baked-label reconciliation
+  check on public mini MLPs. Current default (`77efc40`) stands at grader
+  `2.412e-7`.
 
 ## Benchmarking Notes
 
