@@ -1599,6 +1599,54 @@ after losing or becoming irrelevant to the current scorer frontier.
   `profile_forensics_v2_20260706.py`; those files are gitignored, so this
   history entry is the durable record.
 
+- **2026-07-06 Fly truth bank built; readout-smoothing gate DEAD; keenan
+  contraction gate INCONCLUSIVE.** Infrastructure (commits `152b0ec`,
+  `ff9208d`, owner-run): `make fly-truth` + `make truth-bank` built
+  `analysis/truth_bank/` — 100 fresh research seeds (not grader instances),
+  one Fly Machine each running antithetic MC (samples/MLP min `712,704`,
+  mean `~1.64e6`, max `2,850,816`; mean `6.88e12` FLOPs/MLP; truth-error
+  floor `~2.6e-8`, below the 4e15-FLOP label-quality target but adequate
+  here with explicit floor subtraction), per-layer means `(100, 32, 256)`
+  plus weight SHA256 checksums with verified deterministic local rebuild.
+  `make fly-bank` runs gate entrypoints machine-side against the bank;
+  research gates now execute on Fly with local aggregation only.
+
+  Readout-smoothing gate (Gaussian plug-in analytic `E[ReLU]` readout from
+  per-unit `(mu, sigma)` versus direct ReLU sample averaging;
+  orchestrator-proposed candidate for the floor group's `~1.6x`
+  shape-preserving edge): **DEAD**, all three pre-registered premises failed
+  on 92/100 bank MLPs (8 Machines timed out). P1 FAIL: layer-31
+  pre-activation marginals are non-Gaussian (abs-skew median `0.4317`, q90
+  `0.6237`; excess kurtosis median `0.3767` [`0.1363`, `0.7534`]) — deep
+  collapse makes them mixture-like. P2 FAIL: final-layer smoothed/direct MSE
+  ratio is above 1 and grows with n (iid medians `1.020`/`1.109`/`1.199` at
+  n=1024/4096/8192; antithetic `1.025`/`1.099`/`1.204`), the classic
+  bias-dominated signature. P3 FAIL: layer-31 plug-in bias^2 is `1.090e-6`
+  after floor subtraction while saved variance is negative (`-1.043e-6`);
+  the plug-in's bias alone is roughly half our route's total final-layer
+  MSE. Verdict: readout smoothing cannot be the floor group's mechanism and
+  must not be added to the estimator.
+
+  Keenan state-propagation contraction gate: **INCONCLUSIVE** on the full
+  100 (checksums 100/100; four Fly 503s retried on a subset bank). Q1 PASS
+  and notable: mean-relevant injected error contracts at median
+  `0.943`/layer, numerically matching keenan's measured hidden-profile decay
+  (`e^-0.0609 ~= 0.941`) — the contraction physics is real and at the right
+  scale. Q2/Q3 degenerate: the only toy inside keenan's slope band
+  (plain particles n=512, slope median `-0.0767` [`-0.1059`, `-0.0379`]) is
+  indistinguishable from the plain-sampler shape (corr `0.995`, residual log
+  RMS `0.119`), while the shape-distinct rank-2 reprojection toy misses the
+  band (slope `-0.0006`). Conclusion: the depth-profile shape cannot
+  discriminate state propagation from plain sampling, so keenan's hidden
+  profile identifies no mechanism; the discriminating anomaly remains his
+  terminal `~25x` drop, which no propagated-state toy reproduced and which
+  still requires an explicit final-layer allocation/refinement/readout
+  switch. No estimator change from either gate. Artifacts (gitignored;
+  this entry is the durable record):
+  `paired_fly_logs/fingerprint_theory/readout_smoothing_gate_20260706.md`
+  and `keenan_contraction_gate_20260706.md` with results JSON, Fly JSONL,
+  machine entrypoints, and aggregators alongside.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
