@@ -1504,6 +1504,54 @@ after losing or becoming irrelevant to the current scorer frontier.
   check on public mini MLPs. Current default (`77efc40`) stands at grader
   `2.412e-7`.
 
+- **CORRECTION: no truth floor; block-independent component is statistically
+  zero.** Owner-provided factual correction, 2026-07-06: the Fly dataset
+  ground-truth labels are `4.24e15`-FLOP Monte-Carlo runs (`~1e9` samples,
+  noise `~1e-11`-class), i.e. effectively exact; grader truth is similarly
+  long-run (360s). There is no `~0.31e-6` truth-noise floor. The "truth floor"
+  interpretation in the 2026-07-04/05/06 entries is RETRACTED.
+
+  The decisive measurement is a `hadamard_st3_b8` full-100 paired Fly probe:
+  `5.418e-6` mean final-layer MSE, `1.274e10` raw, 100/100 clean, log
+  `paired_fly_logs/b8_full_json.log`. It completed a 3-point per-MLP
+  block-scaling fit (b=8/16/32 on the same fixed 100 MLPs): the
+  block-independent component is `C = 0.11e-6 +/- 0.17e-6` (s.e.), median
+  `0.19e-6`, with `43/100` MLPs fitting NEGATIVE C. Verdict: no significant
+  block-independent error; the route's MSE is pure `V/b` to measurement
+  precision, with mean `V ~= 4.22e-5` per block-unit.
+
+  Methodological failure, recorded plainly: the original
+  `F+B = 3.09e-7 +/- 2.05e-7` was a 1.5-sigma two-point extrapolation that
+  was treated as an established constant; the grader A/B "confirmation"
+  carried `+/-~1e-7`; the leaderboard "confirmation" via ionel_chiosa was
+  circular (his own error was assumed zero to define the floor map).
+  Consequently RETRACTED: the per-MLP `F_i` map, the own-error table (andrew
+  `4.7e-8`, ionel `~0`, etc.), the `p>=1.6-3.1` final-step refinement-knob
+  inference, and the "not evaluation-based / near-exact analytic entry"
+  conclusions in the forensics entry. Still VALID from that entry: the profile
+  shapes, the bit-identical ionel+mliston hidden outputs (same code, budget
+  knob), the per-MLP adaptive compute signatures, and all raw data under
+  `analysis/leaderboard-per-layer-mse/`.
+
+  Corrected competitor read: at face-value MSE with exact truth, ionel/mliston
+  scale as pure `1/N` sampling (`1.60e-6 -> 0.32e-6` for `5x` compute); the
+  floor group (thylinao/mliston/keenan/ionel) shares a uniform `~1.7x`
+  variance-per-FLOP edge over our route at matched compute; andrew_epstein is
+  `~3x` (`3.67e-7` at `6.25e10` raw vs our scaled `~1.11e-6`). The in-house
+  lane closures (design/BQ optimality, anchored-CV ceiling, telescopes,
+  cumulant and mixture lanes) stand as measurements; the `~1.7x` mechanism
+  remains unidentified. Hidden-layer profile shapes remain the main
+  unexploited discriminating evidence.
+
+  Methodology directives (owner, 2026-07-06), recorded as standing policy:
+  all estimator evaluation runs on Fly against the fixed 100-MLP dataset with
+  paired per-MLP comparisons -- never locally; local sample generation is
+  reserved for gates that genuinely need raw activation samples; offline gates
+  must use n >= 20 MLPs with per-MLP spread reported and fresh seeds per gate
+  (the prior offline gates reused 3 fixed seeds -- their large-margin kill
+  verdicts stand, but small-margin and absolute-level conclusions carry
+  `~+/-2x` distribution uncertainty).
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
