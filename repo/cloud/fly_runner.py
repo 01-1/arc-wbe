@@ -147,6 +147,8 @@ def _redact_command(cmd: list[str]) -> list[str]:
             redacted[index + 1] = "<estimator-url>"
         elif part == "--script-url":
             redacted[index + 1] = "<script-url>"
+        elif part == "--bank-url":
+            redacted[index + 1] = "<bank-url>"
     return redacted
 
 
@@ -238,6 +240,11 @@ def _research_script_key(args: argparse.Namespace, digest: str, source: Path) ->
     return f"{prefix}/{digest}/{source.name}"
 
 
+def _bank_object_key(args: argparse.Namespace, digest: str, source: Path) -> str:
+    prefix = args.bank_object_prefix.rstrip("/")
+    return f"{prefix}/{digest}/{source.name}"
+
+
 def _object_bucket(args: argparse.Namespace) -> str:
     bucket = args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")
     if not bucket:
@@ -277,6 +284,18 @@ def _research_script_endpoint(args: argparse.Namespace) -> str | None:
     return args.research_script_object_endpoint_url or _object_endpoint(args)
 
 
+def _bank_bucket(args: argparse.Namespace) -> str:
+    if args.bank_object_bucket:
+        return args.bank_object_bucket
+    if args.dry_run and not (args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")):
+        return "dry-run-bucket"
+    return _object_bucket(args)
+
+
+def _bank_endpoint(args: argparse.Namespace) -> str | None:
+    return args.bank_object_endpoint_url or _object_endpoint(args)
+
+
 def _object_url(args: argparse.Namespace, key: str) -> str:
     if not args.object_base_url:
         raise SystemExit("--object-base-url is required so workers can read uploaded archives")
@@ -300,6 +319,14 @@ def _research_script_object_url(args: argparse.Namespace, key: str) -> str:
         raise SystemExit(
             "--research-script-object-base-url or --object-base-url is required so workers can read the script"
         )
+    base = base_url.rstrip("/")
+    return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
+
+
+def _bank_object_url(args: argparse.Namespace, key: str) -> str:
+    base_url = args.bank_object_base_url or args.object_base_url
+    if not base_url:
+        raise SystemExit("--bank-object-base-url or --object-base-url is required so workers can read the bank")
     base = base_url.rstrip("/")
     return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
 
@@ -526,6 +553,23 @@ def _research_script_url(args: argparse.Namespace) -> str:
     return _research_script_object_url(args, key)
 
 
+def _bank_url(args: argparse.Namespace) -> str:
+    if args.bank_url:
+        return args.bank_url
+    bank = args.bank.resolve()
+    if not bank.is_file():
+        raise SystemExit(f"--bank must be a file: {bank}")
+    digest = _file_sha256(bank)[:16]
+    key = _bank_object_key(args, digest, bank)
+    bucket = _bank_bucket(args)
+    endpoint = _bank_endpoint(args)
+    if args.upload_bank:
+        _upload_file(args, bank, key, bucket=bucket, endpoint=endpoint)
+    if args.presign_urls:
+        return _presign_url(args, key, bucket=bucket, endpoint=endpoint)
+    return _bank_object_url(args, key)
+
+
 def _truth_seed_for_index(args: argparse.Namespace, index: int) -> int:
     label = f"{args.truth_seed_label}:{index}".encode("utf-8")
     seed = int.from_bytes(hashlib.sha256(label).digest()[:8], "big") & ((1 << 63) - 1)
@@ -579,6 +623,7 @@ def _prepare_context(args: argparse.Namespace) -> Path:
     scripts_dir.mkdir()
     for name in (
         "cloud_whest_common.py",
+        "fly_bank_gate_entrypoint.py",
         "fly_object_entrypoint.py",
         "fly_truth_entrypoint.py",
         "remote_whest_run.py",
@@ -634,6 +679,7 @@ def _entrypoint_args(
     dataset_url: str | None,
     estimator_url: str | None,
     script_url: str | None,
+    bank_url: str | None,
     index: int,
     done_sentinel: str,
 ) -> list[str]:
@@ -661,6 +707,29 @@ def _entrypoint_args(
                 str(args.truth_min_pairs),
             ]
         )
+    elif args.task == "bank":
+        if script_url is None or estimator_url is None or bank_url is None:
+            raise SystemExit("--task bank requires research script, estimator, and bank URLs")
+        cmd.extend(
+            [
+                "--script-url",
+                script_url,
+                "--estimator-url",
+                estimator_url,
+                "--bank-url",
+                bank_url,
+                "--shard-index",
+                str(index),
+                "--shard-count",
+                str(args.n_mlps),
+                "--flop-budget",
+                str(args.flop_budget),
+                "--setup-seed",
+                str(args.bank_setup_seed),
+            ]
+        )
+        if args.mode:
+            cmd.extend(["--mode", args.mode])
     else:
         if dataset_url is None or estimator_url is None:
             raise SystemExit("--task whest requires dataset and estimator URLs")
@@ -708,6 +777,7 @@ def _machine_command(
     dataset_url: str | None,
     estimator_url: str | None,
     script_url: str | None,
+    bank_url: str | None,
     index: int,
     run_id: str,
     machine_name: str,
@@ -740,6 +810,7 @@ def _machine_command(
             dataset_url=dataset_url,
             estimator_url=estimator_url,
             script_url=script_url,
+            bank_url=bank_url,
             index=index,
             done_sentinel=done_sentinel,
         ),
@@ -788,6 +859,7 @@ def _run_machine_api(
     dataset_url: str | None,
     estimator_url: str | None,
     script_url: str | None,
+    bank_url: str | None,
     index: int,
     machine_name: str,
     done_sentinel: str,
@@ -806,6 +878,7 @@ def _run_machine_api(
                     dataset_url=dataset_url,
                     estimator_url=estimator_url,
                     script_url=script_url,
+                    bank_url=bank_url,
                     index=index,
                     done_sentinel=done_sentinel,
                 )
@@ -1159,6 +1232,44 @@ def _print_whest_aggregate(args: argparse.Namespace, whest_results: list[dict[st
             )
         )
         return
+    if args.task == "bank":
+        bank_results = [result for result in whest_results if result.get("task") == "bank"]
+        if not bank_results:
+            print("Bank aggregate: no results")
+            return
+        records = [
+            record
+            for result in bank_results
+            for record in result.get("records", [])
+            if isinstance(record, dict)
+        ]
+        failures = [
+            failure
+            for result in bank_results
+            for failure in result.get("failures", [])
+            if isinstance(failure, dict)
+        ]
+        all_mses = [
+            float(record["all_layers_mse"])
+            for record in records
+            if isinstance(record.get("all_layers_mse"), (int, float))
+        ]
+        final_mses = [
+            float(record["final_layer_mse"])
+            for record in records
+            if isinstance(record.get("final_layer_mse"), (int, float))
+        ]
+        print(
+            "\n".join(
+                [
+                    f"Bank aggregate ({len(bank_results)} returned shards)",
+                    f"records={len(records)} failures={len(failures)}",
+                    f"all_layers_mse_mean={sum(all_mses) / len(all_mses):.6e}" if all_mses else "all_layers_mse_mean=n/a",
+                    f"final_layer_mse_mean={sum(final_mses) / len(final_mses):.6e}" if final_mses else "final_layer_mse_mean=n/a",
+                ]
+            )
+        )
+        return
     if not whest_results:
         print("WhestBench aggregate: no results")
         return
@@ -1217,6 +1328,7 @@ def _run_machine(
     dataset_urls: list[str],
     estimator_url: str | None,
     script_url: str | None,
+    bank_url: str | None,
     run_id: str,
     index: int,
 ) -> tuple[int, int, str, float | None, float | None, float | None]:
@@ -1229,6 +1341,7 @@ def _run_machine(
         dataset_url=dataset_urls[index] if dataset_urls else None,
         estimator_url=estimator_url,
         script_url=script_url,
+        bank_url=bank_url,
         index=index,
         run_id=run_id,
         machine_name=machine_name,
@@ -1245,6 +1358,7 @@ def _run_machine(
                 dataset_url=dataset_urls[index] if dataset_urls else None,
                 estimator_url=estimator_url,
                 script_url=script_url,
+                bank_url=bank_url,
                 index=index,
                 machine_name=machine_name,
                 done_sentinel=done_sentinel,
@@ -1323,6 +1437,7 @@ def _run_machines(
     dataset_urls: list[str],
     estimator_url: str | None,
     script_url: str | None,
+    bank_url: str | None,
 ) -> None:
     if args.skip_run:
         return
@@ -1344,7 +1459,7 @@ def _run_machines(
 
         def run_after_start(index: int) -> tuple[int, int, str, float | None, float | None, float | None]:
             start_event.wait()
-            return _run_machine(args, image, dataset_urls, estimator_url, script_url, run_id, index)
+            return _run_machine(args, image, dataset_urls, estimator_url, script_url, bank_url, run_id, index)
 
         futures = {
             pool.submit(run_after_start, index): index
@@ -1481,7 +1596,7 @@ def _run_machines(
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, help="Existing Fly app used for registry and Machines.")
-    parser.add_argument("--task", choices=("whest", "truth"), default="whest")
+    parser.add_argument("--task", choices=("whest", "truth", "bank"), default="whest")
     parser.add_argument("--n-mlps", type=int, default=100)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--source-dataset", default=DEFAULT_SOURCE_DATASET)
@@ -1516,15 +1631,22 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--research-script-url")
     parser.add_argument("--research-script-object-prefix", default="whest/research-scripts")
     parser.add_argument("--research-script-object-bucket")
+    parser.add_argument("--bank", type=Path, default=REPO_ROOT / "analysis" / "truth_bank" / "truth_bank.npz")
+    parser.add_argument("--bank-url")
+    parser.add_argument("--bank-object-prefix", default="whest/research-banks")
+    parser.add_argument("--bank-object-bucket")
     parser.add_argument("--object-base-url")
     parser.add_argument("--estimator-object-base-url")
     parser.add_argument("--research-script-object-base-url")
+    parser.add_argument("--bank-object-base-url")
     parser.add_argument("--object-endpoint-url")
     parser.add_argument("--estimator-object-endpoint-url")
     parser.add_argument("--research-script-object-endpoint-url")
+    parser.add_argument("--bank-object-endpoint-url")
     parser.add_argument("--upload", action="store_true", help="Upload one-MLP archives with aws s3 cp.")
     parser.add_argument("--upload-estimator", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--upload-research-script", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--upload-bank", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--estimator-url")
     parser.add_argument(
         "--estimator-url-cache",
@@ -1556,6 +1678,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--truth-chunk-pairs", type=int, default=1024)
     parser.add_argument("--truth-min-pairs", type=int, default=1024)
     parser.add_argument("--truth-seed-label", default="arc-whest-fly-truth-bank-20260706-v1")
+    parser.add_argument("--bank-setup-seed", type=int, default=0)
     parser.add_argument("--format", choices=("plain", "json", "rich"), default="plain")
     parser.add_argument("--detail", choices=("raw", "full"), default="raw")
     parser.add_argument("--summary-only", action="store_true", help="Print compact per-machine status and final timing summary.")
@@ -1602,6 +1725,7 @@ def main(argv: list[str] | None = None) -> int:
     dataset_urls: list[str] = []
     estimator_url: str | None = None
     script_url: str | None = None
+    bank_url: str | None = None
     if args.task == "truth":
         step_started_at = time.monotonic()
         print("Preparing research script URL...", flush=True)
@@ -1609,6 +1733,26 @@ def main(argv: list[str] | None = None) -> int:
         prepare_timings["prepare_research_script_url_s"] = time.monotonic() - step_started_at
         prepare_timings["prepare_dataset_urls_s"] = 0.0
         prepare_timings["prepare_estimator_url_s"] = 0.0
+        print(
+            f"Research script URL ready ({prepare_timings['prepare_research_script_url_s']:.3f}s)",
+            flush=True,
+        )
+    elif args.task == "bank":
+        step_started_at = time.monotonic()
+        print("Preparing estimator URL...", flush=True)
+        estimator_url = _estimator_url(args)
+        prepare_timings["prepare_estimator_url_s"] = time.monotonic() - step_started_at
+        print(f"Estimator URL ready ({prepare_timings['prepare_estimator_url_s']:.3f}s)", flush=True)
+        step_started_at = time.monotonic()
+        print("Preparing truth bank URL...", flush=True)
+        bank_url = _bank_url(args)
+        prepare_timings["prepare_bank_url_s"] = time.monotonic() - step_started_at
+        print(f"Truth bank URL ready ({prepare_timings['prepare_bank_url_s']:.3f}s)", flush=True)
+        step_started_at = time.monotonic()
+        print("Preparing research script URL...", flush=True)
+        script_url = _research_script_url(args)
+        prepare_timings["prepare_research_script_url_s"] = time.monotonic() - step_started_at
+        prepare_timings["prepare_dataset_urls_s"] = 0.0
         print(
             f"Research script URL ready ({prepare_timings['prepare_research_script_url_s']:.3f}s)",
             flush=True,
@@ -1642,6 +1786,17 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                 }
             )
+        elif args.task == "bank":
+            payload.update(
+                {
+                    "estimator_url": estimator_url,
+                    "bank_url": bank_url,
+                    "script_url": script_url,
+                    "bank_path": str(args.bank),
+                    "bank_setup_seed": args.bank_setup_seed,
+                    "shard_count": args.n_mlps,
+                }
+            )
         else:
             payload.update(
                 {
@@ -1667,7 +1822,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Fly image: {image}", flush=True)
     if args.build_only:
         return 0
-    _run_machines(args, image, dataset_urls, estimator_url, script_url)
+    _run_machines(args, image, dataset_urls, estimator_url, script_url, bank_url)
     return 0
 
 

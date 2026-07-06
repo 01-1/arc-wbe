@@ -1,4 +1,4 @@
-.PHONY: demo-cast demo-cast-headless install test lint help shadow-snapshot shadow-watch shadow-status random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry fly-truth fly-truth-dry truth-bank full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help shadow-snapshot shadow-watch shadow-status random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry fly-truth fly-truth-dry truth-bank fly-bank fly-bank-dry full e v local
 
 HF_HOME ?= /i/e/.cache/huggingface
 HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
@@ -62,6 +62,12 @@ FLY_TRUTH_CHUNK_PAIRS ?= 1024
 FLY_TRUTH_MIN_PAIRS ?= 1024
 FLY_TRUTH_SEED_LABEL ?= arc-whest-fly-truth-bank-20260706-v1
 FLY_TRUTH_FLAGS ?= --task truth --research-script $(FLY_TRUTH_SCRIPT) --no-upload-estimator --result-jsonl $(FLY_TRUTH_JSONL) --truth-target-seconds $(FLY_TRUTH_TARGET_SECONDS) --truth-chunk-pairs $(FLY_TRUTH_CHUNK_PAIRS) --truth-min-pairs $(FLY_TRUTH_MIN_PAIRS) --truth-seed-label $(FLY_TRUTH_SEED_LABEL) --min-results $(FLY_MLPS) --max-result-seconds $(FLY_TRUTH_MAX_RESULT_SECONDS) --result-wait-timeout $(FLY_TRUTH_MAX_RESULT_SECONDS)
+FLY_BANK_SCRIPT ?= scripts/fly_bank_gate_entrypoint.py
+FLY_BANK_NPZ ?= analysis/truth_bank/truth_bank.npz
+FLY_BANK_JSONL ?= analysis/truth_bank/bank_predictions.jsonl
+FLY_BANK_MAX_RESULT_SECONDS ?= 420
+FLY_BANK_SETUP_SEED ?= 0
+FLY_BANK_FLAGS ?= --task bank --research-script $(FLY_BANK_SCRIPT) --bank $(FLY_BANK_NPZ) --result-jsonl $(FLY_BANK_JSONL) --bank-setup-seed $(FLY_BANK_SETUP_SEED) --min-results $(FLY_MLPS) --max-result-seconds $(FLY_BANK_MAX_RESULT_SECONDS) --result-wait-timeout $(FLY_BANK_MAX_RESULT_SECONDS)
 
 random-mini-dataset: $(RANDOM_MINI_METADATA)
 
@@ -236,6 +242,28 @@ truth-bank:
    --output-dir analysis/truth_bank \
    --expected-count $(FLY_MLPS)
 
+fly-bank:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
+   --image-label $(FLY_IMAGE_LABEL) --estimator $(FLY_ESTIMATOR) \
+   $(FLY_RUN_FLAGS) \
+   $(FLY_BANK_FLAGS)
+
+fly-bank-dry:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
+   --image-label $(FLY_IMAGE_LABEL) --estimator $(FLY_ESTIMATOR) \
+   $(FLY_RUN_FLAGS) \
+   $(FLY_BANK_FLAGS) --dry-run
+
 p:
 	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --targeted-min-call-ms $(MIN_CALL_MS)
 
@@ -284,6 +312,8 @@ help:
 	@echo "  fly-truth               generate fresh-seed Fly truth-bank raw JSONL"
 	@echo "  fly-truth-dry           print Fly truth-bank commands without running them"
 	@echo "  truth-bank              assemble analysis/truth_bank from Fly truth JSONL"
+	@echo "  fly-bank                run estimator against the truth bank on Fly and return predictions"
+	@echo "  fly-bank-dry            print Fly bank-gate commands without running them"
 	@echo "  demo-cast               record asciinema cast for README opener (needs a TTY)"
 	@echo "  demo-cast-headless      build the cast without a TTY (CI / agent sandboxes)"
 

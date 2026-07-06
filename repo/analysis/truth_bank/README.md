@@ -48,3 +48,25 @@ make fly-truth-dry FLY_APP=whest-timing-20260627 FLY_MLPS=100
 make fly-truth FLY_APP=whest-timing-20260627 FLY_MLPS=100
 make truth-bank FLY_MLPS=100
 ```
+
+## Fly Bank Gate
+
+Run the current estimator against this bank on Fly and collect both predictions
+and metrics:
+
+```bash
+make fly-bank-dry FLY_APP=whest-timing-20260627 FLY_MLPS=100
+make fly-bank FLY_APP=whest-timing-20260627 FLY_MLPS=100 \
+  FLY_IMAGE_LABEL=whest-bank-gate-$(date +%Y%m%d%H%M%S)
+```
+
+The target uploads only:
+
+- `$(FLY_ESTIMATOR)` (default `estimator.py`)
+- `scripts/fly_bank_gate_entrypoint.py`
+- `analysis/truth_bank/truth_bank.npz`
+
+Results are written to `analysis/truth_bank/bank_predictions.jsonl`. Each line is
+one Fly shard result. Its `records` array includes `bank_index`, `seed`,
+`prediction` (shape `32 x 256`), `all_layers_mse`, `final_layer_mse`,
+`flops_used`, and `wall_time_s`.

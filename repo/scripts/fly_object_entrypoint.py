@@ -22,12 +22,16 @@ JSON_CHUNK_SIZE = 4000
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", choices=("whest", "truth"), default="whest")
+    parser.add_argument("--task", choices=("whest", "truth", "bank"), default="whest")
     parser.add_argument("--dataset-url")
     parser.add_argument("--estimator-url")
     parser.add_argument("--script-url")
+    parser.add_argument("--bank-url")
     parser.add_argument("--mlp-index", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--shard-index", type=int)
+    parser.add_argument("--shard-count", type=int)
+    parser.add_argument("--setup-seed", type=int, default=0)
     parser.add_argument("--truth-width", type=int, default=256)
     parser.add_argument("--truth-depth", type=int, default=32)
     parser.add_argument("--truth-target-seconds", type=float, default=60.0)
@@ -49,6 +53,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--task whest requires --dataset-url and --estimator-url")
     if args.task == "truth" and (not args.script_url or args.mlp_index is None or args.seed is None):
         parser.error("--task truth requires --script-url, --mlp-index, and --seed")
+    if args.task == "bank" and (
+        not args.script_url
+        or not args.estimator_url
+        or not args.bank_url
+        or args.shard_index is None
+        or args.shard_count is None
+    ):
+        parser.error("--task bank requires --script-url, --estimator-url, --bank-url, --shard-index, and --shard-count")
     return args
 
 
@@ -148,6 +160,37 @@ def main(argv: list[str] | None = None) -> int:
                 "--min-pairs",
                 str(args.truth_min_pairs),
             ]
+        elif args.task == "bank":
+            script = work / "bank_gate_entrypoint.py"
+            estimator = work / "estimator.py"
+            bank = work / "truth_bank.npz"
+            step_started_at = time.monotonic()
+            _download(args.script_url, script)
+            timings["worker_download_script_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            _download(args.estimator_url, estimator)
+            timings["worker_download_estimator_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            _download(args.bank_url, bank)
+            timings["worker_download_bank_s"] = time.monotonic() - step_started_at
+            cmd = [
+                sys.executable,
+                str(script),
+                "--estimator",
+                str(estimator),
+                "--bank",
+                str(bank),
+                "--shard-index",
+                str(args.shard_index),
+                "--shard-count",
+                str(args.shard_count),
+                "--flop-budget",
+                str(args.flop_budget),
+                "--setup-seed",
+                str(args.setup_seed),
+            ]
+            if args.mode:
+                cmd.extend(["--mode", args.mode])
         else:
             archive = work / "dataset.tar.gz"
             estimator = work / "estimator.py"
@@ -202,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         timings["worker_task_s"] = time.monotonic() - step_started_at
         timings["worker_total_s"] = time.monotonic() - started_at
-        if args.task == "truth":
+        if args.task in ("truth", "bank"):
             payload = _json_object_from_output(proc.stdout)
             if isinstance(payload, dict):
                 payload.update(timings)
