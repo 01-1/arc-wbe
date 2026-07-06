@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -144,6 +145,8 @@ def _redact_command(cmd: list[str]) -> list[str]:
             redacted[index + 1] = "<dataset-url>"
         elif part == "--estimator-url":
             redacted[index + 1] = "<estimator-url>"
+        elif part == "--script-url":
+            redacted[index + 1] = "<script-url>"
     return redacted
 
 
@@ -230,6 +233,11 @@ def _estimator_key(args: argparse.Namespace, digest: str) -> str:
     return f"{prefix}/{digest}/estimator.py"
 
 
+def _research_script_key(args: argparse.Namespace, digest: str, source: Path) -> str:
+    prefix = args.research_script_object_prefix.rstrip("/")
+    return f"{prefix}/{digest}/{source.name}"
+
+
 def _object_bucket(args: argparse.Namespace) -> str:
     bucket = args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")
     if not bucket:
@@ -257,6 +265,18 @@ def _estimator_endpoint(args: argparse.Namespace) -> str | None:
     return args.estimator_object_endpoint_url or _object_endpoint(args)
 
 
+def _research_script_bucket(args: argparse.Namespace) -> str:
+    if args.research_script_object_bucket:
+        return args.research_script_object_bucket
+    if args.dry_run and not (args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")):
+        return "dry-run-bucket"
+    return _object_bucket(args)
+
+
+def _research_script_endpoint(args: argparse.Namespace) -> str | None:
+    return args.research_script_object_endpoint_url or _object_endpoint(args)
+
+
 def _object_url(args: argparse.Namespace, key: str) -> str:
     if not args.object_base_url:
         raise SystemExit("--object-base-url is required so workers can read uploaded archives")
@@ -269,6 +289,16 @@ def _estimator_object_url(args: argparse.Namespace, key: str) -> str:
     if not base_url:
         raise SystemExit(
             "--estimator-object-base-url or --object-base-url is required so workers can read estimator.py"
+        )
+    base = base_url.rstrip("/")
+    return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
+
+
+def _research_script_object_url(args: argparse.Namespace, key: str) -> str:
+    base_url = args.research_script_object_base_url or args.object_base_url
+    if not base_url:
+        raise SystemExit(
+            "--research-script-object-base-url or --object-base-url is required so workers can read the script"
         )
     base = base_url.rstrip("/")
     return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
@@ -479,6 +509,33 @@ def _estimator_url(args: argparse.Namespace) -> str:
     return _estimator_object_url(args, key)
 
 
+def _research_script_url(args: argparse.Namespace) -> str:
+    if args.research_script_url:
+        return args.research_script_url
+    script = args.research_script.resolve()
+    if not script.is_file():
+        raise SystemExit(f"--research-script must be a file: {script}")
+    digest = _file_sha256(script)[:16]
+    key = _research_script_key(args, digest, script)
+    bucket = _research_script_bucket(args)
+    endpoint = _research_script_endpoint(args)
+    if args.upload_research_script:
+        _upload_file(args, script, key, bucket=bucket, endpoint=endpoint)
+    if args.presign_urls:
+        return _presign_url(args, key, bucket=bucket, endpoint=endpoint)
+    return _research_script_object_url(args, key)
+
+
+def _truth_seed_for_index(args: argparse.Namespace, index: int) -> int:
+    label = f"{args.truth_seed_label}:{index}".encode("utf-8")
+    seed = int.from_bytes(hashlib.sha256(label).digest()[:8], "big") & ((1 << 63) - 1)
+    forbidden = {11, 22, 33}
+    while seed in forbidden:
+        label = f"{args.truth_seed_label}:rehash:{index}:{seed}".encode("utf-8")
+        seed = int.from_bytes(hashlib.sha256(label).digest()[:8], "big") & ((1 << 63) - 1)
+    return seed
+
+
 def _upload_archives(args: argparse.Namespace, archive_root: Path, fingerprint: str) -> None:
     if not args.upload:
         return
@@ -523,10 +580,13 @@ def _prepare_context(args: argparse.Namespace) -> Path:
     for name in (
         "cloud_whest_common.py",
         "fly_object_entrypoint.py",
+        "fly_truth_entrypoint.py",
         "remote_whest_run.py",
         "whest_with_residual_multiplier.py",
     ):
-        shutil.copy2(REPO_ROOT / "scripts" / name, scripts_dir / name)
+        source = REPO_ROOT / "scripts" / name
+        if source.is_file():
+            shutil.copy2(source, scripts_dir / name)
     shutil.copy2(REPO_ROOT / "cloud" / "fly-whest.Dockerfile", context / "Dockerfile")
     (context / "fly.toml").write_text(
         f'app = "{args.app}"\nprimary_region = "{args.region}"\n',
@@ -571,38 +631,73 @@ def _build_image(args: argparse.Namespace, context: Path, image_label: str) -> s
 def _entrypoint_args(
     args: argparse.Namespace,
     *,
-    dataset_url: str,
-    estimator_url: str,
+    dataset_url: str | None,
+    estimator_url: str | None,
+    script_url: str | None,
+    index: int,
     done_sentinel: str,
 ) -> list[str]:
-    cmd = [
-        "--dataset-url",
-        dataset_url,
-        "--estimator-url",
-        estimator_url,
-        "--split",
-        args.split,
-        "--flop-budget",
-        str(args.flop_budget),
-        "--wall-time-limit",
-        str(args.wall_time_limit),
-        "--residual-wall-time-multiplier",
-        str(args.residual_wall_time_multiplier),
-        "--max-threads",
-        str(args.max_threads),
-        "--runner",
-        args.worker_runner,
-        "--format",
-        args.format,
-        "--detail",
-        args.detail,
+    cmd = ["--task", args.task]
+    if args.task == "truth":
+        if script_url is None:
+            raise SystemExit("--task truth requires a research script URL")
+        cmd.extend(
+            [
+                "--script-url",
+                script_url,
+                "--mlp-index",
+                str(index),
+                "--seed",
+                str(_truth_seed_for_index(args, index)),
+                "--truth-width",
+                str(args.truth_width),
+                "--truth-depth",
+                str(args.truth_depth),
+                "--truth-target-seconds",
+                str(args.truth_target_seconds),
+                "--truth-chunk-pairs",
+                str(args.truth_chunk_pairs),
+                "--truth-min-pairs",
+                str(args.truth_min_pairs),
+            ]
+        )
+    else:
+        if dataset_url is None or estimator_url is None:
+            raise SystemExit("--task whest requires dataset and estimator URLs")
+        cmd.extend(
+            [
+                "--dataset-url",
+                dataset_url,
+                "--estimator-url",
+                estimator_url,
+                "--split",
+                args.split,
+                "--flop-budget",
+                str(args.flop_budget),
+                "--wall-time-limit",
+                str(args.wall_time_limit),
+                "--residual-wall-time-multiplier",
+                str(args.residual_wall_time_multiplier),
+                "--max-threads",
+                str(args.max_threads),
+                "--runner",
+                args.worker_runner,
+                "--format",
+                args.format,
+                "--detail",
+                args.detail,
+            ]
+        )
+        if args.mode:
+            cmd.extend(["--mode", args.mode])
+    cmd.extend(
+        [
         "--done-sentinel",
         done_sentinel,
         "--linger-after-result",
         str(args.linger_after_result),
-    ]
-    if args.mode:
-        cmd.extend(["--mode", args.mode])
+        ]
+    )
     return cmd
 
 
@@ -610,8 +705,9 @@ def _machine_command(
     args: argparse.Namespace,
     *,
     image: str,
-    dataset_url: str,
-    estimator_url: str,
+    dataset_url: str | None,
+    estimator_url: str | None,
+    script_url: str | None,
     index: int,
     run_id: str,
     machine_name: str,
@@ -643,6 +739,8 @@ def _machine_command(
             args,
             dataset_url=dataset_url,
             estimator_url=estimator_url,
+            script_url=script_url,
+            index=index,
             done_sentinel=done_sentinel,
         ),
     ]
@@ -687,8 +785,10 @@ def _run_machine_api(
     args: argparse.Namespace,
     *,
     image: str,
-    dataset_url: str,
-    estimator_url: str,
+    dataset_url: str | None,
+    estimator_url: str | None,
+    script_url: str | None,
+    index: int,
     machine_name: str,
     done_sentinel: str,
 ) -> tuple[subprocess.CompletedProcess[str], float | None]:
@@ -705,6 +805,8 @@ def _run_machine_api(
                     args,
                     dataset_url=dataset_url,
                     estimator_url=estimator_url,
+                    script_url=script_url,
+                    index=index,
                     done_sentinel=done_sentinel,
                 )
             },
@@ -788,6 +890,7 @@ def _wait_for_log_sentinel(
 
     sentinel_bytes = f"{done_sentinel} returncode=".encode("utf-8")
     result_json_bytes = b"WHEST_RESULT_JSON "
+    result_json_b64_done_bytes = b"WHEST_RESULT_JSON_B64_DONE "
     fly_exit_bytes = b"Main child exited normally with code:"
     proc = subprocess.Popen(
         cmd,
@@ -818,6 +921,8 @@ def _wait_for_log_sentinel(
                 or sentinel_bytes in combined_tail
                 or result_json_bytes in chunk
                 or result_json_bytes in combined_tail
+                or result_json_b64_done_bytes in chunk
+                or result_json_b64_done_bytes in combined_tail
                 or fly_exit_bytes in chunk
                 or fly_exit_bytes in combined_tail
             ):
@@ -853,7 +958,7 @@ def _wait_for_log_sentinel(
 
 
 def _sentinel_returncode(output: str, done_sentinel: str) -> int:
-    if "WHEST_RESULT_JSON " in output:
+    if "WHEST_RESULT_JSON " in output or "WHEST_RESULT_JSON_B64_DONE " in output:
         return 0
     for line in output.splitlines():
         marker = "returncode="
@@ -915,16 +1020,40 @@ def _extract_json_objects(output: str) -> list[dict[str, object]]:
 
 def _whest_results_from_output(output: str) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
+    b64_chunks: dict[int, str] = {}
+    b64_expected: int | None = None
     for raw_line in output.splitlines():
         line = _clean_fly_log_content(raw_line)
         marker = "WHEST_RESULT_JSON "
         if marker not in line:
+            chunk_marker = "WHEST_RESULT_JSON_B64_CHUNK "
+            done_marker = "WHEST_RESULT_JSON_B64_DONE "
+            if chunk_marker in line:
+                parts = line.split(chunk_marker, 1)[1].strip().split(" ", 1)
+                if len(parts) == 2:
+                    try:
+                        b64_chunks[int(parts[0])] = parts[1].strip()
+                    except ValueError:
+                        pass
+            elif done_marker in line:
+                try:
+                    b64_expected = int(line.split(done_marker, 1)[1].strip().split()[0])
+                except ValueError:
+                    pass
             continue
         text = line.split(marker, 1)[1].strip()
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
             continue
+        if isinstance(parsed, dict):
+            results.append(parsed)
+    if b64_expected is not None and len(b64_chunks) >= b64_expected:
+        try:
+            encoded = "".join(b64_chunks[index] for index in range(b64_expected))
+            parsed = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        except (KeyError, ValueError, json.JSONDecodeError):
+            parsed = None
         if isinstance(parsed, dict):
             results.append(parsed)
     for obj in _extract_json_objects(output):
@@ -1005,6 +1134,31 @@ def _scaled_whest_values(
 
 
 def _print_whest_aggregate(args: argparse.Namespace, whest_results: list[dict[str, object]]) -> None:
+    if args.task == "truth":
+        truth_results = [result for result in whest_results if result.get("task") == "truth"]
+        if not truth_results:
+            print("Truth aggregate: no results")
+            return
+        samples = [int(result["sample_count"]) for result in truth_results if isinstance(result.get("sample_count"), int)]
+        wall_times = [
+            float(result["wall_time_s"])
+            for result in truth_results
+            if isinstance(result.get("wall_time_s"), (int, float))
+        ]
+        flops = [int(result["flops"]) for result in truth_results if isinstance(result.get("flops"), int)]
+        print(
+            "\n".join(
+                [
+                    f"Truth aggregate ({len(truth_results)} returned MLPs)",
+                    f"sample_count_min={min(samples) if samples else 'n/a'}",
+                    f"sample_count_max={max(samples) if samples else 'n/a'}",
+                    f"sample_count_mean={sum(samples) / len(samples):.3f}" if samples else "sample_count_mean=n/a",
+                    f"wall_time_mean_s={sum(wall_times) / len(wall_times):.3f}" if wall_times else "wall_time_mean_s=n/a",
+                    f"flops_mean={sum(flops) / len(flops):.3e}" if flops else "flops_mean=n/a",
+                ]
+            )
+        )
+        return
     if not whest_results:
         print("WhestBench aggregate: no results")
         return
@@ -1061,7 +1215,8 @@ def _run_machine(
     args: argparse.Namespace,
     image: str,
     dataset_urls: list[str],
-    estimator_url: str,
+    estimator_url: str | None,
+    script_url: str | None,
     run_id: str,
     index: int,
 ) -> tuple[int, int, str, float | None, float | None, float | None]:
@@ -1071,8 +1226,9 @@ def _run_machine(
     machine_cmd = _machine_command(
         args,
         image=image,
-        dataset_url=dataset_urls[index],
+        dataset_url=dataset_urls[index] if dataset_urls else None,
         estimator_url=estimator_url,
+        script_url=script_url,
         index=index,
         run_id=run_id,
         machine_name=machine_name,
@@ -1086,8 +1242,10 @@ def _run_machine(
             started, launch_elapsed = _run_machine_api(
                 args,
                 image=image,
-                dataset_url=dataset_urls[index],
+                dataset_url=dataset_urls[index] if dataset_urls else None,
                 estimator_url=estimator_url,
+                script_url=script_url,
+                index=index,
                 machine_name=machine_name,
                 done_sentinel=done_sentinel,
             )
@@ -1159,7 +1317,13 @@ def _run_machine(
     return index, 0, output, result_elapsed, launch_elapsed, log_elapsed
 
 
-def _run_machines(args: argparse.Namespace, image: str, dataset_urls: list[str], estimator_url: str) -> None:
+def _run_machines(
+    args: argparse.Namespace,
+    image: str,
+    dataset_urls: list[str],
+    estimator_url: str | None,
+    script_url: str | None,
+) -> None:
     if args.skip_run:
         return
     run_started_at = time.monotonic()
@@ -1168,6 +1332,10 @@ def _run_machines(args: argparse.Namespace, image: str, dataset_urls: list[str],
     launch_times: list[tuple[int, float]] = []
     log_times: list[tuple[int, float]] = []
     whest_results: list[dict[str, object]] = []
+    result_jsonl = args.result_jsonl
+    if result_jsonl is not None:
+        result_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        result_jsonl.write_text("", encoding="utf-8")
     stopped_early = False
     pool = ThreadPoolExecutor(max_workers=args.launch_concurrency)
     pending: set[object] = set()
@@ -1176,7 +1344,7 @@ def _run_machines(args: argparse.Namespace, image: str, dataset_urls: list[str],
 
         def run_after_start(index: int) -> tuple[int, int, str, float | None, float | None, float | None]:
             start_event.wait()
-            return _run_machine(args, image, dataset_urls, estimator_url, run_id, index)
+            return _run_machine(args, image, dataset_urls, estimator_url, script_url, run_id, index)
 
         futures = {
             pool.submit(run_after_start, index): index
@@ -1217,7 +1385,12 @@ def _run_machines(args: argparse.Namespace, image: str, dataset_urls: list[str],
             if log_elapsed is not None:
                 log_times.append((index, log_elapsed))
             if returncode == 0:
-                whest_results.extend(_whest_results_from_output(output))
+                parsed_results = _whest_results_from_output(output)
+                whest_results.extend(parsed_results)
+                if result_jsonl is not None and parsed_results:
+                    with result_jsonl.open("a", encoding="utf-8") as handle:
+                        for result in parsed_results:
+                            handle.write(json.dumps(result, sort_keys=True) + "\n")
             if args.summary_only and returncode == 0:
                 if args.progress:
                     print(
@@ -1308,6 +1481,7 @@ def _run_machines(args: argparse.Namespace, image: str, dataset_urls: list[str],
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, help="Existing Fly app used for registry and Machines.")
+    parser.add_argument("--task", choices=("whest", "truth"), default="whest")
     parser.add_argument("--n-mlps", type=int, default=100)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--source-dataset", default=DEFAULT_SOURCE_DATASET)
@@ -1338,12 +1512,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--object-prefix", default="whest/fly-mlps")
     parser.add_argument("--estimator-object-prefix", default="whest/estimators")
     parser.add_argument("--estimator-object-bucket")
+    parser.add_argument("--research-script", type=Path, default=REPO_ROOT / "scripts" / "fly_truth_entrypoint.py")
+    parser.add_argument("--research-script-url")
+    parser.add_argument("--research-script-object-prefix", default="whest/research-scripts")
+    parser.add_argument("--research-script-object-bucket")
     parser.add_argument("--object-base-url")
     parser.add_argument("--estimator-object-base-url")
+    parser.add_argument("--research-script-object-base-url")
     parser.add_argument("--object-endpoint-url")
     parser.add_argument("--estimator-object-endpoint-url")
+    parser.add_argument("--research-script-object-endpoint-url")
     parser.add_argument("--upload", action="store_true", help="Upload one-MLP archives with aws s3 cp.")
     parser.add_argument("--upload-estimator", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--upload-research-script", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--estimator-url")
     parser.add_argument(
         "--estimator-url-cache",
@@ -1369,12 +1550,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="WhestBench runner used inside each one-MLP Fly worker.",
     )
     parser.add_argument("--mode")
+    parser.add_argument("--truth-width", type=int, default=256)
+    parser.add_argument("--truth-depth", type=int, default=32)
+    parser.add_argument("--truth-target-seconds", type=float, default=60.0)
+    parser.add_argument("--truth-chunk-pairs", type=int, default=1024)
+    parser.add_argument("--truth-min-pairs", type=int, default=1024)
+    parser.add_argument("--truth-seed-label", default="arc-whest-fly-truth-bank-20260706-v1")
     parser.add_argument("--format", choices=("plain", "json", "rich"), default="plain")
     parser.add_argument("--detail", choices=("raw", "full"), default="raw")
     parser.add_argument("--summary-only", action="store_true", help="Print compact per-machine status and final timing summary.")
     parser.add_argument("--progress", action="store_true", help="Print one status line per completed Fly machine.")
     parser.add_argument("--quiet-commands", action="store_true", help="Do not echo fly/aws commands before running them.")
     parser.add_argument("--no-timing-summary", action="store_true", help="Suppress detailed timing summary.")
+    parser.add_argument("--result-jsonl", type=Path, help="Write one parsed WHEST_RESULT_JSON object per line.")
     parser.add_argument("--min-results", type=int, help="Stop once this many MLPs have returned results.")
     parser.add_argument("--max-result-seconds", type=float, help="Stop waiting for results after this many seconds.")
     parser.add_argument(
@@ -1386,6 +1574,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.n_mlps <= 0:
         raise SystemExit("--n-mlps must be positive")
+    if args.task == "truth":
+        if args.truth_width <= 0 or args.truth_depth <= 0:
+            raise SystemExit("--truth-width and --truth-depth must be positive")
+        if args.truth_target_seconds <= 0:
+            raise SystemExit("--truth-target-seconds must be positive")
+        if args.truth_chunk_pairs <= 0 or args.truth_min_pairs <= 0:
+            raise SystemExit("--truth-chunk-pairs and --truth-min-pairs must be positive")
     if args.min_results is not None and not (0 < args.min_results <= args.n_mlps):
         raise SystemExit("--min-results must be between 1 and --n-mlps")
     if args.residual_compute_scale is not None and args.residual_compute_scale <= 0:
@@ -1400,31 +1595,62 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(list(sys.argv[1:] if argv is None else argv))
     image_label = args.image_label or "whest-runner"
     prepare_timings: dict[str, float] = {}
-    print(f"Preparing Fly run: app={args.app} mlps={args.n_mlps} region={args.region}", flush=True)
-    step_started_at = time.monotonic()
-    print("Preparing dataset URLs...", flush=True)
-    fingerprint, dataset_urls = _prepare_dataset_urls(args)
-    prepare_timings["prepare_dataset_urls_s"] = time.monotonic() - step_started_at
     print(
-        f"Fly dataset fingerprint: {fingerprint} ({prepare_timings['prepare_dataset_urls_s']:.3f}s)",
+        f"Preparing Fly run: task={args.task} app={args.app} mlps={args.n_mlps} region={args.region}",
         flush=True,
     )
-    step_started_at = time.monotonic()
-    print("Preparing estimator URL...", flush=True)
-    estimator_url = _estimator_url(args)
-    prepare_timings["prepare_estimator_url_s"] = time.monotonic() - step_started_at
-    print(f"Estimator URL ready ({prepare_timings['prepare_estimator_url_s']:.3f}s)", flush=True)
-    if args.dry_run:
+    dataset_urls: list[str] = []
+    estimator_url: str | None = None
+    script_url: str | None = None
+    if args.task == "truth":
+        step_started_at = time.monotonic()
+        print("Preparing research script URL...", flush=True)
+        script_url = _research_script_url(args)
+        prepare_timings["prepare_research_script_url_s"] = time.monotonic() - step_started_at
+        prepare_timings["prepare_dataset_urls_s"] = 0.0
+        prepare_timings["prepare_estimator_url_s"] = 0.0
         print(
-            json.dumps(
+            f"Research script URL ready ({prepare_timings['prepare_research_script_url_s']:.3f}s)",
+            flush=True,
+        )
+    else:
+        step_started_at = time.monotonic()
+        print("Preparing dataset URLs...", flush=True)
+        fingerprint, dataset_urls = _prepare_dataset_urls(args)
+        prepare_timings["prepare_dataset_urls_s"] = time.monotonic() - step_started_at
+        print(
+            f"Fly dataset fingerprint: {fingerprint} ({prepare_timings['prepare_dataset_urls_s']:.3f}s)",
+            flush=True,
+        )
+        step_started_at = time.monotonic()
+        print("Preparing estimator URL...", flush=True)
+        estimator_url = _estimator_url(args)
+        prepare_timings["prepare_estimator_url_s"] = time.monotonic() - step_started_at
+        print(f"Estimator URL ready ({prepare_timings['prepare_estimator_url_s']:.3f}s)", flush=True)
+    if args.dry_run:
+        payload: dict[str, object] = {"task": args.task}
+        if args.task == "truth":
+            payload.update(
+                {
+                    "script_url": script_url,
+                    "truth_width": args.truth_width,
+                    "truth_depth": args.truth_depth,
+                    "truth_target_seconds": args.truth_target_seconds,
+                    "truth_seed_label": args.truth_seed_label,
+                    "truth_seeds_first_5": [
+                        _truth_seed_for_index(args, index) for index in range(min(5, args.n_mlps))
+                    ],
+                }
+            )
+        else:
+            payload.update(
                 {
                     "dataset_urls": dataset_urls[: min(3, len(dataset_urls))],
                     "dataset_url_count": len(dataset_urls),
                     "estimator_url": estimator_url,
-                },
-                indent=2,
+                }
             )
-        )
+        print(json.dumps(payload, indent=2))
     image = f"registry.fly.io/{args.app}:{image_label}"
     if not args.skip_build:
         step_started_at = time.monotonic()
@@ -1441,7 +1667,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Fly image: {image}", flush=True)
     if args.build_only:
         return 0
-    _run_machines(args, image, dataset_urls, estimator_url)
+    _run_machines(args, image, dataset_urls, estimator_url, script_url)
     return 0
 
 

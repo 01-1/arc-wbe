@@ -1,4 +1,4 @@
-.PHONY: demo-cast demo-cast-headless install test lint help shadow-snapshot shadow-watch shadow-status random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry full e v local
+.PHONY: demo-cast demo-cast-headless install test lint help shadow-snapshot shadow-watch shadow-status random-mini-dataset mini mini-subprocess mini-mode mini-local-mode mini-r1 mini-simple mini-aug mini-mixed mini-aug-local mini-mixed-local compare-residual-pairs modal-small fly fly-mode fly-large fly-large-build fly-large-fast fly-large-dry fly-truth fly-truth-dry truth-bank full e v local
 
 HF_HOME ?= /i/e/.cache/huggingface
 HF_DATASETS_CACHE ?= $(HF_HOME)/datasets
@@ -54,6 +54,14 @@ FLY_WORKER_RUNNER ?= local
 FLY_RESIDUAL_COMPUTE_SCALE ?= 0.1
 FLY_RUN_FLAGS ?= --launch-method api --detach-launch --ignore-destroy-time --summary-only --quiet-commands --no-timing-summary --format json --worker-runner $(FLY_WORKER_RUNNER) --presign-urls --presign-expires-in 604800 --linger-after-result 0 --min-results $(FLY_MIN_RESULTS) --max-result-seconds $(FLY_MAX_RESULT_SECONDS) --residual-compute-scale $(FLY_RESIDUAL_COMPUTE_SCALE)
 FLY_UPLOAD_FLAGS ?=
+FLY_TRUTH_SCRIPT ?= scripts/fly_truth_entrypoint.py
+FLY_TRUTH_JSONL ?= analysis/truth_bank/raw_results.jsonl
+FLY_TRUTH_TARGET_SECONDS ?= 60
+FLY_TRUTH_MAX_RESULT_SECONDS ?= 420
+FLY_TRUTH_CHUNK_PAIRS ?= 1024
+FLY_TRUTH_MIN_PAIRS ?= 1024
+FLY_TRUTH_SEED_LABEL ?= arc-whest-fly-truth-bank-20260706-v1
+FLY_TRUTH_FLAGS ?= --task truth --research-script $(FLY_TRUTH_SCRIPT) --no-upload-estimator --result-jsonl $(FLY_TRUTH_JSONL) --truth-target-seconds $(FLY_TRUTH_TARGET_SECONDS) --truth-chunk-pairs $(FLY_TRUTH_CHUNK_PAIRS) --truth-min-pairs $(FLY_TRUTH_MIN_PAIRS) --truth-seed-label $(FLY_TRUTH_SEED_LABEL) --min-results $(FLY_MLPS) --max-result-seconds $(FLY_TRUTH_MAX_RESULT_SECONDS) --result-wait-timeout $(FLY_TRUTH_MAX_RESULT_SECONDS)
 
 random-mini-dataset: $(RANDOM_MINI_METADATA)
 
@@ -200,6 +208,34 @@ fly-large-dry:
    --residual-wall-time-multiplier $(RESIDUAL_WALL_TIME_MULTIPLIER) \
    --dry-run
 
+fly-truth:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
+   --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_RUN_FLAGS) \
+   $(FLY_TRUTH_FLAGS)
+
+fly-truth-dry:
+	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
+	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
+   --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
+   --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
+   --image-label $(FLY_IMAGE_LABEL) \
+   $(FLY_RUN_FLAGS) \
+   $(FLY_TRUTH_FLAGS) --dry-run
+
+truth-bank:
+	$(UV) run python scripts/assemble_truth_bank.py \
+   --input-jsonl $(FLY_TRUTH_JSONL) \
+   --output-dir analysis/truth_bank \
+   --expected-count $(FLY_MLPS)
+
 p:
 	UV_CACHE_DIR=/i/e/.uv-cache uv run python scripts/profile_residual_tree.py --targeted-min-call-ms $(MIN_CALL_MS)
 
@@ -245,6 +281,9 @@ help:
 	@echo "  fly-mode                run Fly with MODE=<mode> through the fast path"
 	@echo "  fly-large-fast          run Fly Machines from the prebuilt image and existing object-store archives"
 	@echo "  fly-large-dry           print Fly commands without running them"
+	@echo "  fly-truth               generate fresh-seed Fly truth-bank raw JSONL"
+	@echo "  fly-truth-dry           print Fly truth-bank commands without running them"
+	@echo "  truth-bank              assemble analysis/truth_bank from Fly truth JSONL"
 	@echo "  demo-cast               record asciinema cast for README opener (needs a TTY)"
 	@echo "  demo-cast-headless      build the cast without a TTY (CI / agent sandboxes)"
 

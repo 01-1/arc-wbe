@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Download one one-MLP dataset archive, then run WhestBench."""
+"""Download one one-MLP dataset archive, then run WhestBench or a research task."""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import shutil
 import subprocess
@@ -16,12 +17,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_RESIDUAL_FLOPS_PER_SECOND = 100_000_000_000.0
+JSON_CHUNK_SIZE = 4000
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-url", required=True)
-    parser.add_argument("--estimator-url", required=True)
+    parser.add_argument("--task", choices=("whest", "truth"), default="whest")
+    parser.add_argument("--dataset-url")
+    parser.add_argument("--estimator-url")
+    parser.add_argument("--script-url")
+    parser.add_argument("--mlp-index", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--truth-width", type=int, default=256)
+    parser.add_argument("--truth-depth", type=int, default=32)
+    parser.add_argument("--truth-target-seconds", type=float, default=60.0)
+    parser.add_argument("--truth-chunk-pairs", type=int, default=1024)
+    parser.add_argument("--truth-min-pairs", type=int, default=1024)
     parser.add_argument("--split", default="mini")
     parser.add_argument("--flop-budget", type=int, default=272_000_000_000)
     parser.add_argument("--wall-time-limit", type=float, default=60.0)
@@ -33,7 +44,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--detail", choices=("raw", "full"), default="raw")
     parser.add_argument("--done-sentinel")
     parser.add_argument("--linger-after-result", type=float, default=0.0)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.task == "whest" and (not args.dataset_url or not args.estimator_url):
+        parser.error("--task whest requires --dataset-url and --estimator-url")
+    if args.task == "truth" and (not args.script_url or args.mlp_index is None or args.seed is None):
+        parser.error("--task truth requires --script-url, --mlp-index, and --seed")
+    return args
 
 
 def _download(url: str, output: Path) -> None:
@@ -94,6 +110,14 @@ def _copy_one_mlp_fields(result: dict[str, object]) -> dict[str, object]:
     return compact
 
 
+def _print_chunked_result(payload: dict[str, object]) -> None:
+    encoded = base64.b64encode(json.dumps(payload, sort_keys=True).encode("utf-8")).decode("ascii")
+    chunks = [encoded[index : index + JSON_CHUNK_SIZE] for index in range(0, len(encoded), JSON_CHUNK_SIZE)]
+    for index, chunk in enumerate(chunks):
+        print(f"WHEST_RESULT_JSON_B64_CHUNK {index} {chunk}", flush=True)
+    print(f"WHEST_RESULT_JSON_B64_DONE {len(chunks)}", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(list(sys.argv[1:] if argv is None else argv))
     returncode = 1
@@ -101,48 +125,72 @@ def main(argv: list[str] | None = None) -> int:
     started_at = time.monotonic()
     try:
         work = Path(tempfile.mkdtemp(prefix="whest-fly-"))
-        archive = work / "dataset.tar.gz"
-        estimator = work / "estimator.py"
-        dataset_root = work / "dataset"
-        dataset_root.mkdir()
-        step_started_at = time.monotonic()
-        _download(args.dataset_url, archive)
-        timings["worker_download_dataset_s"] = time.monotonic() - step_started_at
-        step_started_at = time.monotonic()
-        _download(args.estimator_url, estimator)
-        timings["worker_download_estimator_s"] = time.monotonic() - step_started_at
-        step_started_at = time.monotonic()
-        dataset = _extract(archive, dataset_root)
-        timings["worker_extract_dataset_s"] = time.monotonic() - step_started_at
+        if args.task == "truth":
+            script = work / "truth_entrypoint.py"
+            step_started_at = time.monotonic()
+            _download(args.script_url, script)
+            timings["worker_download_script_s"] = time.monotonic() - step_started_at
+            cmd = [
+                sys.executable,
+                str(script),
+                "--mlp-index",
+                str(args.mlp_index),
+                "--seed",
+                str(args.seed),
+                "--width",
+                str(args.truth_width),
+                "--depth",
+                str(args.truth_depth),
+                "--target-seconds",
+                str(args.truth_target_seconds),
+                "--chunk-pairs",
+                str(args.truth_chunk_pairs),
+                "--min-pairs",
+                str(args.truth_min_pairs),
+            ]
+        else:
+            archive = work / "dataset.tar.gz"
+            estimator = work / "estimator.py"
+            dataset_root = work / "dataset"
+            dataset_root.mkdir()
+            step_started_at = time.monotonic()
+            _download(args.dataset_url, archive)
+            timings["worker_download_dataset_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            _download(args.estimator_url, estimator)
+            timings["worker_download_estimator_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            dataset = _extract(archive, dataset_root)
+            timings["worker_extract_dataset_s"] = time.monotonic() - step_started_at
 
-        cmd = [
-            sys.executable,
-            "scripts/remote_whest_run.py",
-            "--estimator",
-            str(estimator),
-            "--dataset",
-            str(dataset),
-            "--split",
-            args.split,
-            "--runner",
-            args.runner,
-            "--n-mlps",
-            "1",
-            "--flop-budget",
-            str(args.flop_budget),
-            "--wall-time-limit",
-            str(args.wall_time_limit),
-            "--residual-wall-time-multiplier",
-            str(args.residual_wall_time_multiplier),
-            "--max-threads",
-            str(args.max_threads),
-            "--format",
-            args.format,
-            "--detail",
-            args.detail,
-        ]
-        if args.mode:
-            cmd.extend(["--mode", args.mode])
+            cmd = [
+                sys.executable,
+                "scripts/remote_whest_run.py",
+                "--estimator",
+                str(estimator),
+                "--dataset",
+                str(dataset),
+                "--split",
+                args.split,
+                "--runner",
+                args.runner,
+                "--n-mlps",
+                "1",
+                "--flop-budget",
+                str(args.flop_budget),
+                "--wall-time-limit",
+                str(args.wall_time_limit),
+                "--residual-wall-time-multiplier",
+                str(args.residual_wall_time_multiplier),
+                "--max-threads",
+                str(args.max_threads),
+                "--format",
+                args.format,
+                "--detail",
+                args.detail,
+            ]
+            if args.mode:
+                cmd.extend(["--mode", args.mode])
         step_started_at = time.monotonic()
         proc = subprocess.run(
             cmd,
@@ -152,9 +200,16 @@ def main(argv: list[str] | None = None) -> int:
             stderr=subprocess.STDOUT,
             check=False,
         )
-        timings["worker_whestbench_s"] = time.monotonic() - step_started_at
+        timings["worker_task_s"] = time.monotonic() - step_started_at
         timings["worker_total_s"] = time.monotonic() - started_at
-        if args.format == "json":
+        if args.task == "truth":
+            payload = _json_object_from_output(proc.stdout)
+            if isinstance(payload, dict):
+                payload.update(timings)
+                _print_chunked_result(payload)
+            else:
+                print(proc.stdout, end="")
+        elif args.format == "json":
             payload = _json_object_from_output(proc.stdout)
             result = payload.get("results") if isinstance(payload, dict) else None
             if isinstance(result, dict):
