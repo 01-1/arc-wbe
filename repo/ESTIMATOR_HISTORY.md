@@ -500,6 +500,22 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   readout gate, so it was not duplicated here. No estimator mode was added, no
   Fly run was launched, and default behavior is unchanged. See
   `ARC-estimation-research/terminal_mechanism_closeout_20260707.md`.
+- **2026-07-07 mechanistic L2 sketching closeout.** A read-only audit checked
+  whether deduction-projection / mechanistic `L^2` ideas still offered a
+  distinct path after the diagonal tail-coordinate and low-rank full-kernel
+  downstream projection gates. No target-scale legal mechanism survived.
+  Diagonal tail ranking was tied with local error ranking, and the full-kernel
+  masked-Jacobian ranking also failed (`1.006` median low-rank/local
+  reduction ratio, best layer `1.084`, below the `1.35` trigger). A true
+  subspace or ridge-projected correction would still need a correction vector:
+  using truth-labeled residuals would be research-only and illegal for
+  submission, while using current-route sample/moment residuals collapses to
+  the killed coordinate-ranking, H2/CV3/anchored-control, block-predictability,
+  final-pull, or analytic moment-correction families. The abstraction remains
+  useful for future fundamentally new state carriers, but not as another
+  weighting/sketch of existing residuals. No estimator mode was added and no
+  Fly run was launched. See
+  `ARC-estimation-research/l2_sketching_closeout_20260707.md`.
 - **Structured compression.** Whole-group and boundary-group compression looked
   like small local wins, but one structured-cap default was not grader-safe
   because group ordering extracted host Python floats from flopscope remote
