@@ -296,12 +296,13 @@ def _all_terms_iso_k3():
 
 
 @cache
-def _terms_iso_k3():
+def _terms_iso_k3(augment_extra: bool = False):
     terms = []
     for int_part, vec_part, count in _all_terms_iso_k3():
+        is_augment_extra = int_part in ((3, 1), (2, 1, 1))
         if (
             len(int_part) > 3
-            or int_part in ((3, 1), (2, 1, 1))
+            or (is_augment_extra != augment_extra)
             or int_part == (1, 1, 1)
             or (int_part, set(vec_part)) == ((2, 1, 1), {(1, 1, 1)})
         ):
@@ -325,7 +326,15 @@ def _terms_iso_k3():
 @cache
 def _terms_iso_k3_grouped():
     grouped = defaultdict(list)
-    for term in _terms_iso_k3():
+    for term in _terms_iso_k3(False):
+        grouped[term[0]].append(term)
+    return tuple((int_part, tuple(terms)) for int_part, terms in grouped.items())
+
+
+@cache
+def _terms_iso_k3_augment_extra_grouped():
+    grouped = defaultdict(list)
+    for term in _terms_iso_k3(True):
         grouped[term[0]].append(term)
     return tuple((int_part, tuple(terms)) for int_part, terms in grouped.items())
 
@@ -1121,7 +1130,28 @@ def _dst_sub(a: _DSTensor, b: _DSTensor) -> _DSTensor:
     return _DSTensor(slices, n=a.n, d=a.d, autozero=True)
 
 
-def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
+def _norm_ratio(value, baseline) -> float:
+    value_norm = float(fnp.linalg.norm(value))
+    baseline_norm = float(fnp.linalg.norm(baseline))
+    return value_norm / max(baseline_norm, 1e-30)
+
+
+def _factored_third_all_distinct_factors(tensor: "_FactoredThird") -> tuple[fnp.ndarray, fnp.ndarray, fnp.ndarray]:
+    a, b, c = tensor.factors
+    rep_a, rep_b, rep_c = _FactoredThird.from_dstensor(tensor.get_repeated()).factors
+    return (
+        fnp.concatenate((a, -rep_a), axis=1),
+        fnp.concatenate((b, rep_b), axis=1),
+        fnp.concatenate((c, rep_c), axis=1),
+    )
+
+
+def _factored_nonlin_k3_r1_fast(
+    wk: dict[int, object],
+    augment: bool = False,
+    diag_rows: list[dict[str, float]] | None = None,
+    layer_idx: int | None = None,
+) -> dict[int, object]:
     width = wk[1].n
     mean = wk[1].core
     var = fnp.maximum(fnp.diag(wk[2].core), _MIN_VARIANCE)
@@ -1223,6 +1253,22 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
             acc = term if acc is None else acc + term
         p_slices[int_part] = _symmetrize(acc, vec=int_part)
 
+    aug_p_slices = {}
+    if diag_rows is not None or augment:
+        for int_part, terms in _terms_iso_k3_augment_extra_grouped():
+            acc = None
+            for _, vec_part, count, k_vec, dim, coef, factors in terms:
+                term = eval_term(vec_part, dim, coef, factors)
+                if term is None:
+                    continue
+                term = term * wick_term_view(int_part, k_vec, dim, count)
+                acc = term if acc is None else acc + term
+            if acc is not None:
+                aug_p_slices[int_part] = _symmetrize(acc, vec=int_part)
+    if augment:
+        for int_part, value in aug_p_slices.items():
+            p_slices[int_part] = p_slices.get(int_part, 0.0) + value
+
     w1 = wick(1, 1)
     w2 = wick(2, 1)
     w3 = wick(3, 1)
@@ -1266,22 +1312,105 @@ def _factored_nonlin_k3_r1_fast(wk: dict[int, object]) -> dict[int, object]:
         + w4[:, None] * w2[None, :] * wk_22
     ).T
 
+    k211_dslice_increments = [_dslice_21_diag_middle(fac1a, diag2, fac3a), _dslice_21_diag_middle(fac1b, diag2, fac3b)]
+    k211_diag_increments = [_diag_diag_middle(fac1a, diag2, fac3a), _diag_diag_middle(fac1b, diag2, fac3b)]
     p111.add_factor_groups(
         [(fac1a, fac2a, fac3a), (fac1b, fac2b, fac3b)],
-        [_dslice_21_diag_middle(fac1a, diag2, fac3a), _dslice_21_diag_middle(fac1b, diag2, fac3b)],
-        [_diag_diag_middle(fac1a, diag2, fac3a), _diag_diag_middle(fac1b, diag2, fac3b)],
+        k211_dslice_increments,
+        k211_diag_increments,
     )
 
+    if augment and 4 in wk:
+        core = wk[4].core
+        metric = wk[4].metric
+        metric_diag = fnp.diag(metric)
+        eye = _eye(width)
+        ones = _ones(width)
+
+        fac1 = w2[:, None] * fnp.diag(core)[:, None] * ones[None, :]
+        fac2 = w1[:, None] * metric
+        fac3 = (w1[:, None] * eye) / 4.0
+        p111.add_factors((fac1, fac2, fac3))
+
+        fac1 = w1[:, None] * core
+        fac2 = w2[:, None] * eye
+        fac3 = w1[:, None] * metric
+        p111.add_factors((fac1, fac2, fac3))
+
+        fac1 = w1[:, None] * core
+        fac2 = w1[:, None] * eye
+        fac3 = (w2[:, None] * metric_diag[:, None] * ones[None, :]) / 4.0
+        p111.add_factors((fac1, fac2, fac3))
+
     p_ds = _DSTower.from_slices(p_slices, autozero=True)
-    k_ds = _ds_pk_to_k(p_ds, strict=True)
+    k_ds = _ds_pk_to_k(p_ds, strict=not augment)
+    p111_repeated = p111.get_repeated()
     if 3 in k_ds:
-        k_ds[3] = _dst_sub(k_ds[3], p111.get_repeated())
+        k_ds[3] = _dst_sub(k_ds[3], p111_repeated)
+    k211_contrib = None
+    local_k4 = _ds_harmonic_proj_r1(k_ds[4])
+    if diag_rows is not None or augment:
+        local_k4_core = local_k4.core
+        aug_k4_core = fnp.zeros_like(local_k4_core)
+        if aug_p_slices and not augment:
+            aug_p_ds = _DSTower.from_slices(aug_p_slices, autozero=True)
+            aug_k_ds = _ds_pk_to_k(aug_p_ds, strict=False)
+            if 4 in aug_k_ds:
+                aug_k4_core = _ds_harmonic_proj_r1(aug_k_ds[4]).core
+
+        n = width
+        k211_from_p111 = fnp.zeros_like(local_k4_core)
+        a, b, c = _factored_third_all_distinct_factors(p111)
+        p1 = p_ds[1].slices[(1,)]
+        k211_from_p111 = _symmetrize(
+            ((p1[:, None] * a).sum(axis=0) * b) @ c.T
+            + ((p1[:, None] * b).sum(axis=0) * c) @ a.T
+            + ((p1[:, None] * c).sum(axis=0) * a) @ b.T
+        ) / 3.0
+        k211_from_p111 = k211_from_p111 * (-2.0 * 6.0 * 2.0 / (2.0 * n + 8.0))
+
+        k211_from_p211 = fnp.zeros_like(local_k4_core)
+        if 3 in wk:
+            a, b, c = _factored_third_all_distinct_factors(wk[3])
+            w1p1 = wick(1, 1)
+            w1p2 = wick(1, 2)
+            k211_from_p211 = _symmetrize(
+                ((w1p2[:, None] * a).sum(axis=0) * w1p1[:, None] * b) @ (w1p1[:, None] * c).T
+                + ((w1p2[:, None] * b).sum(axis=0) * w1p1[:, None] * c) @ (w1p1[:, None] * a).T
+                + ((w1p2[:, None] * c).sum(axis=0) * w1p1[:, None] * a) @ (w1p1[:, None] * b).T
+            ) / 3.0
+            k211_from_p211 = k211_from_p211 * (6.0 * 2.0 / (2.0 * n + 8.0))
+        k211_contrib = k211_from_p111 + k211_from_p211
+    if augment and k211_contrib is not None:
+        local_k4.core = local_k4.core + k211_contrib
+    if diag_rows is not None:
+        omitted_core = aug_k4_core + k211_contrib
+        row = {
+            "layer": float(-1 if layer_idx is None else layer_idx),
+            "aug31_rel_local4": _norm_ratio(aug_p_slices.get((3, 1), 0.0), local_k4_core),
+            "aug211_rel_local4": _norm_ratio(aug_p_slices.get((2, 1, 1), 0.0), local_k4_core),
+            "augproj_rel_local4": _norm_ratio(aug_k4_core, local_k4_core),
+            "k211_p111_rel_local4": _norm_ratio(k211_from_p111, local_k4_core),
+            "k211_p211_rel_local4": _norm_ratio(k211_from_p211, local_k4_core),
+            "k211_total_rel_local4": _norm_ratio(k211_contrib, local_k4_core),
+            "omitted_total_rel_local4": _norm_ratio(omitted_core, local_k4_core),
+            "local4_norm": float(fnp.linalg.norm(local_k4_core)),
+        }
+        diag_rows.append(row)
+        print(
+            "K3_AUG_DIAG "
+            + " ".join(
+                f"{key}={value:.6e}" if key != "layer" else f"layer={int(value)}"
+                for key, value in row.items()
+            ),
+            flush=True,
+        )
 
     return {
         1: _HTensor(k_ds[1].to_tensor(), r=0),
         2: _HTensor(k_ds[2].to_tensor(), r=0),
         3: p111 + _FactoredThird.from_dstensor(k_ds[3]),
-        4: _ds_harmonic_proj_r1(k_ds[4]),
+        4: local_k4,
     }
 
 def _relu_mean_from_cumulant_diags(
@@ -1331,7 +1460,7 @@ def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> 
     return _relu_mean_from_cumulant_diags(mean, var, k3_diag, k4_diag)
 
 
-def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
+def _factorized_k3_propagation(mlp: MLP, diag_mode: bool = False, augment: bool = False) -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
     This ports the upstream factorized K=3 path into the narrower whestbench
@@ -1349,6 +1478,7 @@ def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
         }
 
         rows = []
+        diag_rows = [] if diag_mode else None
         for layer_idx, w_mat in enumerate(mlp.weights):
             if layer_idx == mlp.depth - 1:
                 rows.append(_final_r1_relu_mean_from_tower(tower, w_mat))
@@ -1356,7 +1486,7 @@ def _factorized_k3_propagation(mlp: MLP) -> fnp.ndarray:
             wk = {}
             for degree, value in tower.items():
                 wk[degree] = value.contract_w(w_mat)
-            tower = _factored_nonlin_k3_r1_fast(wk)
+            tower = _factored_nonlin_k3_r1_fast(wk, augment=augment, diag_rows=diag_rows, layer_idx=layer_idx)
             rows.append(tower[1].core)
 
         return fnp.stack(rows, axis=0)
@@ -2392,6 +2522,10 @@ class Estimator(BaseEstimator):
             return _factorized_k3_propagation(mlp)
         if mode == "r1":
             return _factorized_k3_propagation(mlp)
+        if mode == "k3_aug_diag":
+            return _factorized_k3_propagation(mlp, diag_mode=True)
+        if mode == "k3_aug":
+            return _factorized_k3_propagation(mlp, augment=True)
         if mode == "hadamard_first_cov":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))

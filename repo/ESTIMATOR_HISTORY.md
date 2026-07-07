@@ -45,23 +45,40 @@ Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
 
-On 2026-07-07, an isolated `augk3` worktree tested the upstream-audit
-candidate to measure the omitted augmented K=3 degree-4 state, namely the
-`(3,1)`/`(2,1,1)` power-cumulant slices plus `K211` feedback, before any
-promotion attempt. The diagnostic was implemented behind a temporary
-`k3_aug_diag` mode and run with `make fly-mode MODE=k3_aug_diag` on the fixed
-100 Fly MLPs from the isolated worktree. It failed before emitting layerwise
-magnitudes: the first 80 returned Machines all exited `247` after Linux OOM
-killed the Python process around `1.80e6` to `1.86e6` anon-RSS pages, and the
-Fly aggregate had no WhestBench results. Because the straightforward augmented
-state materialization cannot fit the current Fly runner memory envelope, Stage
-B was not run and no paired `r1` versus augmented scoring comparison was
-attempted. The temporary estimator mode was removed rather than leaving a
-known-OOM diagnostic path. Treat the upstream augmented-K3 port as killed for
-the current local K=3 route unless a future design derives a streaming or
-factored trace diagnostic that never materializes the degree-4 augmented
-slices. Artifact note: failed Fly estimator object hash prefix
-`cec6f54ef304ec8c`; run stopped at `min_results=80` with `failed_mlps=80`.
+Superseded note for the 2026-07-07 augmented-K3 OOM gate: the original
+`k3_aug_diag` failure reflected the Fly runner's default `shared-cpu-8x`
+2048 MB Machine memory floor, not the challenge evaluation environment. The
+grader allows 64 GB, and the runner now has an opt-in `FLY_VM_MEMORY_MB`
+launch-time override while keeping ordinary runs at 2048 MB. A rebuilt Stage A
+diagnostic measures the omitted upstream augmented K=3 degree-4 state, namely
+the `(3,1)`/`(2,1,1)` power-cumulant slices plus `K211` feedback into the
+degree-4 `r=1` core, behind `k3_aug_diag` using only the passed MLP object.
+The first corrected 16 GB Fly rerun launched successfully with
+`memory_mb=16384` and failed by the 60-second predictor wall-clock limit, not
+OOM, before the original end-of-run diagnostic print emitted magnitudes. The
+streaming rerun also hit the 60-second predictor wall-clock limit on the first
+80 returned Machines, but it emitted layerwise rows before failure. The
+augmented projection alone was already about `6.6x` to `7.2x` the local
+degree-4 `r=1` core at layer 0, about `8x` to `10x` by layer 1, and commonly
+above `20x` by layers 4-6; the total omitted core including K211 feedback was
+similarly material, around `6.2x` to `6.8x` at layer 0 and tens of times the
+local core by the later emitted rows. The individual `(3,1)` and `(2,1,1)`
+power-cumulant slice norms were much larger than the local core norm, while
+K211-total feedback was smaller than the augmented projection but still often
+order-one to several times the local core. Because the state is clearly
+material but the straightforward diagnostic cannot complete within the current
+60-second scorer wall-clock path even at 16 GB, Stage B proceeds only as a
+mode-gated Fly comparison; a timeout there should be treated as a charged-path
+economics kill, not a memory kill. Stage B then compared `r1` against the
+mode-gated `k3_aug` port on the same fixed 100 Fly MLPs with full per-MLP JSON
+requested. Baseline `r1` returned all 100 rows, scoring `9.093e-1`
+mean adjusted/final-layer MSE with `2.307e11` raw FLOPs per MLP and all rows
+over combined effective budget. The augmented mode returned zero rows:
+100/100 Machines failed in `predict()` at the 60-second wall-clock limit
+(`matmul`/`multiply`/`add`), again with `memory_mb=16384` and no OOM signal.
+No paired score delta is computable. Verdict: the omitted augmented state is
+large, but the straightforward upstream augmented degree-4/K211 port is killed
+for the current Fly/scorer path by wall-clock economics; do not promote.
 
 ## Winning Checkpoints
 
