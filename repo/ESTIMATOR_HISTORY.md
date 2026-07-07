@@ -2164,6 +2164,38 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   averaged over sampled latents. No `estimator.py` change, no mode-gated
   candidate, and no final `make fly`.
 
+- **2026-07-07 Keenan contraction follow-up CLOSED.** A focused read-only
+  pass revisited Keenan's hidden-profile contraction clue and the unexplained
+  terminal drop after the terminal closeout, spline conditional readout, block
+  predictability, low-rank projection, final-PC reflection, and H2 CV results.
+  The durable Keenan gate result remains valid: injected mean-relevant hidden
+  errors contract at about `0.943` per layer, matching Keenan's public hidden
+  slope (`e^-0.0609 ~= 0.941`). But the same gate already showed that this is
+  non-discriminating: the only toy inside the slope band was plain particles
+  with sampler-shape correlation `0.995`, while the shape-distinct
+  state-reprojection toy missed the band.
+
+  No new Fly-bank gate was launched because every currently available
+  terminal-only variant collapses to a killed family. Extra terminal effort on
+  the current particle law is block-count economics / placeholder allocation /
+  mirroring, already far from target. Collapsed-latent conditional laws were
+  neutral in both hard-cell and smooth spline/polynomial gates, with the
+  smooth gate's best aggregate at mean ratio `0.99965x`, median `1.00067x`,
+  q10 `0.98663x` versus the `>=1.35x` / `>=1.20x` / `>=0.90x` promotion bar.
+  Terminal Gaussian/Edgeworth smoothing is bias-dominated, reflection imposes
+  an unproven empirical symmetry, block observables give only `~1.00x`
+  weighting ratios, and downstream projection signals are too weak to select
+  target-scale corrections.
+
+  Verdict: the contraction physics is real but explains ordinary hidden
+  sampler-profile decay, not Keenan's roughly `25x` terminal discontinuity.
+  The terminal drop would require either a better shape-preserving sampler
+  constant, a genuinely new lower-variance terminal conditional law, or
+  external participant information. No such label-free rule is present in the
+  current estimator path, so no `estimator.py` change, no mode-gated
+  candidate, and no final `make fly` were warranted. Report:
+  `ARC-estimation-research/keenan_contraction_closeout_20260707.md`.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
