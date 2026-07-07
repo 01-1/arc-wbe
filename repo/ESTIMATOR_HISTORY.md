@@ -1887,6 +1887,31 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   noise unless a future paired full-JSON run shows a per-MLP MSE win large
   enough to offset its higher multiplier.
 
+- **2026-07-07 final-PC penultimate reflection DEAD.** A focused
+  final-layer allocation worker tested a scratch rank-limited terminal
+  reflection, then removed the mode after the negative result. The candidate
+  differed from the killed full `mirror30`: instead of mirroring every
+  penultimate activation coordinate around the layer-30 sample mean and then
+  spending the final matmul on the doubled cloud, it eigendecomposed the
+  empirical layer-30 covariance and reflected only the top one or two
+  principal directions immediately before the final matmul. The intended
+  mechanism was to exploit the known deep-collapse latent while leaving the
+  residual penultimate geometry untouched.
+
+  Fly scorer smokes were clean but decisively below the frontier.
+  `make fly-mode MODE=hadamard_st3_b16_fpcm1` returned 80 MLPs with no
+  failures at `3.430e-7` adjusted / `3.138e-6` final-layer MSE /
+  `3.002e10` effective / `2.734e10` raw FLOPs. Increasing the reflected
+  subspace worsened the miss: `hadamard_st3_b16_fpcm2` returned 80 clean MLPs
+  at `3.823e-7` adjusted / `3.433e-6` final-layer MSE / `2.964e10`
+  effective / `2.735e10` raw FLOPs. The extra terminal work did not reduce
+  final MSE; it introduced the same bias/geometry damage pattern as broader
+  penultimate mirroring, only more selectively. Verdict: no promotion, scratch
+  mode removed, default unchanged. This closes rank-limited PCA reflection as
+  a plausible final-only allocation route unless a future mechanism can prove
+  an unbiased symmetry for the collapsed latent rather than imposing an
+  empirical one.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
