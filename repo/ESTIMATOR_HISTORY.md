@@ -53,9 +53,12 @@ launch-time override while keeping ordinary runs at 2048 MB. A rebuilt Stage A
 diagnostic measures the omitted upstream augmented K=3 degree-4 state, namely
 the `(3,1)`/`(2,1,1)` power-cumulant slices plus `K211` feedback into the
 degree-4 `r=1` core, behind `k3_aug_diag` using only the passed MLP object.
-The corrected 16 GB Fly rerun is pending in an isolated worktree and should
-replace this paragraph with the observed layerwise magnitudes and Stage B
-decision.
+The first corrected 16 GB Fly rerun launched successfully with
+`memory_mb=16384` and failed by the 60-second predictor wall-clock limit, not
+OOM, before the original end-of-run diagnostic print emitted magnitudes. The
+diagnostic now streams one layer row as soon as each omitted-state calculation
+finishes; replace this sentence with the streamed Stage A magnitudes and
+Stage B decision after the rerun.
 
 ## Winning Checkpoints
 

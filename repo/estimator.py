@@ -1354,18 +1354,25 @@ def _factored_nonlin_k3_r1_fast(
             k211_from_p211 = k211_from_p211 * (6.0 * 2.0 / (2.0 * n + 8.0))
         k211_contrib = k211_from_p111 + k211_from_p211
         omitted_core = aug_k4_core + k211_contrib
-        diag_rows.append(
-            {
-                "layer": float(-1 if layer_idx is None else layer_idx),
-                "aug31_rel_local4": _norm_ratio(aug_p_slices.get((3, 1), 0.0), local_k4_core),
-                "aug211_rel_local4": _norm_ratio(aug_p_slices.get((2, 1, 1), 0.0), local_k4_core),
-                "augproj_rel_local4": _norm_ratio(aug_k4_core, local_k4_core),
-                "k211_p111_rel_local4": _norm_ratio(k211_from_p111, local_k4_core),
-                "k211_p211_rel_local4": _norm_ratio(k211_from_p211, local_k4_core),
-                "k211_total_rel_local4": _norm_ratio(k211_contrib, local_k4_core),
-                "omitted_total_rel_local4": _norm_ratio(omitted_core, local_k4_core),
-                "local4_norm": float(fnp.linalg.norm(local_k4_core)),
-            }
+        row = {
+            "layer": float(-1 if layer_idx is None else layer_idx),
+            "aug31_rel_local4": _norm_ratio(aug_p_slices.get((3, 1), 0.0), local_k4_core),
+            "aug211_rel_local4": _norm_ratio(aug_p_slices.get((2, 1, 1), 0.0), local_k4_core),
+            "augproj_rel_local4": _norm_ratio(aug_k4_core, local_k4_core),
+            "k211_p111_rel_local4": _norm_ratio(k211_from_p111, local_k4_core),
+            "k211_p211_rel_local4": _norm_ratio(k211_from_p211, local_k4_core),
+            "k211_total_rel_local4": _norm_ratio(k211_contrib, local_k4_core),
+            "omitted_total_rel_local4": _norm_ratio(omitted_core, local_k4_core),
+            "local4_norm": float(fnp.linalg.norm(local_k4_core)),
+        }
+        diag_rows.append(row)
+        print(
+            "K3_AUG_DIAG "
+            + " ".join(
+                f"{key}={value:.6e}" if key != "layer" else f"layer={int(value)}"
+                for key, value in row.items()
+            ),
+            flush=True,
         )
 
     return {
@@ -1451,16 +1458,6 @@ def _factorized_k3_propagation(mlp: MLP, diag_mode: bool = False) -> fnp.ndarray
             tower = _factored_nonlin_k3_r1_fast(wk, diag_rows=diag_rows, layer_idx=layer_idx)
             rows.append(tower[1].core)
 
-        if diag_rows is not None:
-            for row in diag_rows:
-                print(
-                    "K3_AUG_DIAG "
-                    + " ".join(
-                        f"{key}={value:.6e}" if key != "layer" else f"layer={int(value)}"
-                        for key, value in row.items()
-                    ),
-                    flush=True,
-                )
         return fnp.stack(rows, axis=0)
     finally:
         if was_gc_enabled:
