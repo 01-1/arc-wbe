@@ -1624,10 +1624,10 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   `~1.6-1.7x` better constant than ours.
 
   Follow-up gates, ranked: (1) sampler/antithetic reproduction gate, requiring
-  participant code/writeups, which are not available and are not known to be
-  forthcoming at any point (correction 2026-07-07: an earlier version of this
-  entry asserted writeups become available at competition end; that was an
-  unverified assumption, not a known competition policy); (2) keenan
+  participant code/writeups, which are expected only at competition end and
+  therefore cannot inform any in-competition work — of post-mortem interest
+  only, not an actionable lever, and it should not be carried in status
+  ledgers as a pending item (owner correction 2026-07-07); (2) keenan
   state-propagation contraction
   toy gate, executable offline; (3) andrew terminal-refinement gate, needing
   external telemetry. None have been run, and no estimator change was made.
