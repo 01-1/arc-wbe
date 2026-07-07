@@ -69,7 +69,16 @@ order-one to several times the local core. Because the state is clearly
 material but the straightforward diagnostic cannot complete within the current
 60-second scorer wall-clock path even at 16 GB, Stage B proceeds only as a
 mode-gated Fly comparison; a timeout there should be treated as a charged-path
-economics kill, not a memory kill.
+economics kill, not a memory kill. Stage B then compared `r1` against the
+mode-gated `k3_aug` port on the same fixed 100 Fly MLPs with full per-MLP JSON
+requested. Baseline `r1` returned all 100 rows, scoring `9.093e-1`
+mean adjusted/final-layer MSE with `2.307e11` raw FLOPs per MLP and all rows
+over combined effective budget. The augmented mode returned zero rows:
+100/100 Machines failed in `predict()` at the 60-second wall-clock limit
+(`matmul`/`multiply`/`add`), again with `memory_mb=16384` and no OOM signal.
+No paired score delta is computable. Verdict: the omitted augmented state is
+large, but the straightforward upstream augmented degree-4/K211 port is killed
+for the current Fly/scorer path by wall-clock economics; do not promote.
 
 ## Winning Checkpoints
 
