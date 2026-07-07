@@ -486,6 +486,20 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   economics already fence off the nearby legal variants. Searches for a public
   thylinao/writeup/code clue found no estimator source. See
   `ARC-estimation-research/external_sampler_writeup_scout_20260707.md`.
+- **2026-07-07 terminal mechanism closeout.** A read-only closeout inventoried
+  the remaining final-readout space while the spline conditional readout gate
+  was active in another worker. No distinct target-scale mechanism remained:
+  terminal Gaussian/readout smoothing, final Gaussian/Edgeworth/sample-cumulant
+  pulls, final-preactivation reflection, penultimate/full/PC mirroring,
+  within-predict H2/CV3/anchored controls, block weighting/allocation, and
+  augmented final-only readout are already killed or guarded by measured
+  negative gates. Collapse/filament evidence confirms low-dimensional terminal
+  structure but also shows that sampled-latent conditioning and deterministic
+  grids do not beat plain averaging without a new conditional law; the only
+  plausible non-duplicate lane is the separately active spline conditional
+  readout gate, so it was not duplicated here. No estimator mode was added, no
+  Fly run was launched, and default behavior is unchanged. See
+  `ARC-estimation-research/terminal_mechanism_closeout_20260707.md`.
 - **Structured compression.** Whole-group and boundary-group compression looked
   like small local wins, but one structured-cap default was not grader-safe
   because group ordering extracted host Python floats from flopscope remote
