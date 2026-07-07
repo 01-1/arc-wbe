@@ -1647,6 +1647,56 @@ after losing or becoming irrelevant to the current scorer frontier.
   and `keenan_contraction_gate_20260706.md` with results JSON, Fly JSONL,
   machine entrypoints, and aggregators alongside.
 
+- **2026-07-07 tail-aware projection proxy gate DEAD.** Truth-bank
+  measurement gate for mechanistic `L^2` sketching / tail-aware projection
+  proxy from `ARC-estimation-research/estimator-useful-extract.md`: a cheap
+  suffix Hutchinson diagonal kernel was computed from the concrete remaining
+  weight matrices and ReLU masks, then used only to rank offline candidate
+  layer-mean correction coordinates. This differs from the rejected
+  downstream-aware variants: the prior next-weight-aware variance strength
+  reweighted a live estimator correction by one successor matrix's outgoing
+  energy, and the downstream covariance gauge rotated a first-layer transport
+  toward a next-weight metric; this gate did not change estimator behavior,
+  did not use a one-step-only proxy as the main test, and measured whether a
+  whole-suffix random-tail `L^2` kernel predicts final-layer value of observed
+  moment errors better than local error alone.
+
+  Method: preregistered before the run in
+  `paired_fly_logs/fingerprint_theory/tail_projection_proxy_gate_20260707.md`;
+  `make fly-bank` on the 100 Fly truth-bank MLPs, one Machine per shard,
+  checksum rebuild `100/100`, no missing rows. Each Machine sampled 1024
+  antithetic particles, tested layers `4,8,12,16,20,24,28,30`, compared
+  top-32 coordinate corrections ranked by local `e^2`, tail-aware
+  `e^2 diag(K_tail)`, and one-step successor energy, then returned compact
+  final-layer MSE deltas. Aggregation was local only, with the truth-bank
+  floor `~2.6e-8` subtracted from MSE levels before paired reductions.
+
+  Premises: P1 FAIL -- tail-aware top-32 was only essentially tied with local
+  error ranking, tail/local reduction ratio median `1.009` [`0.770`, `1.236`]
+  with win fraction `0.555` versus preregistered `>=1.10` and `>=0.60`;
+  absolute floor-subtracted reductions were tail median `1.291e-5`
+  [`2.622e-6`, `6.078e-5`] versus local median `1.301e-5`
+  [`2.374e-6`, `5.577e-5`]. P2 FAIL -- the tail score had some real
+  per-coordinate association with measured one-coordinate final-MSE
+  improvement, Spearman median `0.182` [`-0.012`, `0.384`], but added only
+  `0.011` median over local score versus required `>=0.05`. P3 FAIL -- the
+  whole-suffix proxy did not beat the rejected one-step-energy control:
+  tail/successor reduction ratio median `1.000` [`0.781`, `1.235`], win
+  fraction `0.515` versus required `>=1.05` and `>=0.55`; successor absolute
+  reduction median was `1.323e-5` [`2.021e-6`, `5.979e-5`].
+
+  Verdict: **DEAD** for estimator promotion. The suffix kernel is not useless
+  -- it slightly raises coordinate-level rank correlation -- but the gain is
+  too small and too inconsistent to justify spending estimator FLOPs or
+  replacing local moment-error selection. Follow-up justified only if a
+  genuinely different low-rank/full-kernel projection is tested, not another
+  diagonal tail-weighted coordinate gate. Artifacts are under
+  `paired_fly_logs/fingerprint_theory/tail_projection_proxy_gate_20260707.md`,
+  `tail_projection_proxy_gate_20260707_results.json`,
+  `tail_projection_proxy_gate_20260707_fly.jsonl`, and the corresponding
+  machine entrypoint/aggregator; these files are gitignored, so this entry is
+  the durable record. No estimator.py change.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
