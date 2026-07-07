@@ -2042,6 +2042,45 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   diagnostic because it documents that independent-base covariance reduction
   alone does not solve the joint-k3 transport-quality wall.
 
+- **2026-07-07 block predictability gate FAIL.** A pre-registered
+  Fly-payload truth-bank gate tested the scout-recommended hypothesis that
+  label-free MLP-derived block observables could predict blockwise final error
+  or useful covariance well enough for unequal block weighting/allocation or
+  paired-block control. Artifacts are under
+  `paired_fly_logs/fingerprint_theory/`: preregistration
+  `block_predictability_gate_20260707.md`, payload
+  `block_predictability_payload.py`, manifest, full JSONL
+  `block_predictability_gate_20260707.jsonl`, and aggregate
+  `block_predictability_gate_20260707_results.json`.
+
+  The gate ran with `make fly-payload`, `FLY_MLPS=100`,
+  `FLY_MIN_RESULTS=100`, and no failures after a 2-shard smoke. Each Machine
+  rebuilt one truth-bank MLP, generated eight independent legal 16-block
+  antithetic Hadamard ensembles, applied the current first-layer recolor and
+  first-successor variance match, and emitted per-block final means plus
+  label-free features: first-layer raw/recolored mean residuals, covariance
+  trace/diagonal residuals, first-successor variance-match energy, final block
+  radius/skew/kurtosis, and a downstream-weighted radius. Truth-bank final
+  means were used only as research labels for block squared error and
+  covariance measurement; no local estimator scoring was run and
+  `estimator.py` was not changed.
+
+  Pre-registered PASS required at least `1.30x` overall cross-validated
+  variance reduction from label-free weighting, with median per-MLP ratio at
+  least `1.20x` and q10 at least `0.95x`, or a paired-block combination with
+  `>=20%` mean final-MSE reduction, median at least `10%`, and q10 no worse
+  than `-5%`. Result over 100 MLPs / 12,800 block rows: log squared-error
+  prediction correlation was visible at `0.542`, but useful variance did not
+  follow. The weighting proxy gave mean/median/q10/q90 variance ratios
+  `1.001` / `1.000` / `0.994` / `1.009`, far below `1.30x`; the pairing
+  proxy gave mean/median/q10 reductions `2.9%` / `1.5%` / `0.04%`, far below
+  the `20%` bar. Verdict: FAIL; the block observables carry some difficulty
+  signal, but not one that converts into target-scale legal weighting or
+  pairing. Do not promote a block-weighted estimator from this gate. Treat the
+  shape-preserving sampler path as effectively closed pending external
+  code/writeups or a different mechanism, not merely a resampling of these
+  features.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
