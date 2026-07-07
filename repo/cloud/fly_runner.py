@@ -960,7 +960,7 @@ def _fly_api_token(args: argparse.Namespace) -> str:
     return lines[-1]
 
 
-def _guest_from_vm_size(vm_size: str) -> dict[str, object]:
+def _guest_from_vm_size(vm_size: str, memory_mb: int | None = None) -> dict[str, object]:
     match = re.fullmatch(r"(shared|performance)-cpu-(\d+)x", vm_size)
     if not match:
         raise SystemExit(f"--launch-method api only supports cpu vm sizes like shared-cpu-8x, got {vm_size!r}")
@@ -975,7 +975,7 @@ def _guest_from_vm_size(vm_size: str) -> dict[str, object]:
     return {
         "cpu_kind": cpu_kind,
         "cpus": cpus,
-        "memory_mb": memory_by_size.get(vm_size, max(256, cpus * 256)),
+        "memory_mb": memory_mb if memory_mb is not None else memory_by_size.get(vm_size, max(256, cpus * 256)),
     }
 
 
@@ -1012,7 +1012,7 @@ def _run_machine_api(
                     done_sentinel=done_sentinel,
                 )
             },
-            "guest": _guest_from_vm_size(args.vm_size),
+            "guest": _guest_from_vm_size(args.vm_size, args.vm_memory_mb),
             "auto_destroy": True,
             "restart": {"policy": "no"},
             "dns": {"skip_registration": True},
@@ -1753,6 +1753,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--region", default="ewr")
     parser.add_argument("--vm-size", default="shared-cpu-8x")
+    parser.add_argument("--vm-memory-mb", type=int, help="Override Fly Machine guest memory_mb at launch time.")
     parser.add_argument("--launch-concurrency", type=int, default=100)
     parser.add_argument("--machine-wait-timeout", default="10m")
     parser.add_argument("--machine-run-retries", type=int, default=3)

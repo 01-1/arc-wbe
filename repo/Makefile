@@ -32,6 +32,8 @@ FLY_APP ?= whest-timing-20260627
 FLY_MLPS ?= 100
 FLY_REGION ?= ewr
 FLY_VM_SIZE ?= shared-cpu-8x
+FLY_VM_MEMORY_MB ?=
+FLY_VM_MEMORY_FLAGS = $(if $(FLY_VM_MEMORY_MB),--vm-memory-mb $(FLY_VM_MEMORY_MB),)
 FLY_LAUNCH_CONCURRENCY ?= 100
 FLY_MIN_RESULTS ?= 80
 FLY_MAX_RESULT_SECONDS ?= 45
@@ -166,7 +168,7 @@ fly-large:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
    --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
@@ -179,7 +181,7 @@ fly-large-build:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_OBJECT_FLAGS) \
    --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
@@ -192,7 +194,7 @@ fly-large-fast:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	@timeout --foreground $(FLY_FAST_TIMEOUT) env PYTHONUNBUFFERED=1 AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
    --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
@@ -211,7 +213,7 @@ fly-large-dry:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) --seed $(MINI_RANDOM_SEED) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-prefix $(FLY_OBJECT_PREFIX) $(FLY_DATASET_FLAGS) $(FLY_OBJECT_FLAGS) \
    --estimator $(FLY_ESTIMATOR) --image-label $(FLY_IMAGE_LABEL) \
@@ -224,7 +226,7 @@ fly-truth:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) \
@@ -235,7 +237,7 @@ fly-truth-dry:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) \
@@ -252,7 +254,7 @@ fly-bank:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) --estimator $(FLY_ESTIMATOR) \
@@ -264,7 +266,7 @@ fly-bank-dry:
 	@test -n "$(FLY_APP)" || (echo "Set FLY_APP=<app-name>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) --estimator $(FLY_ESTIMATOR) \
@@ -277,7 +279,7 @@ fly-payload:
 	@test -n "$(FLY_PAYLOAD_MANIFEST)" || (echo "Set FLY_PAYLOAD_MANIFEST=<manifest.json>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) \
@@ -291,7 +293,7 @@ fly-payload-dry:
 	@test -n "$(FLY_PAYLOAD_MANIFEST)" || (echo "Set FLY_PAYLOAD_MANIFEST=<manifest.json>"; exit 1)
 	AWS_PROFILE=$(FLY_AWS_PROFILE) $(UV) run python cloud/fly_runner.py \
    --app $(FLY_APP) --n-mlps $(FLY_MLPS) \
-   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) \
+   --region $(FLY_REGION) --vm-size $(FLY_VM_SIZE) $(FLY_VM_MEMORY_FLAGS) \
    --launch-concurrency $(FLY_LAUNCH_CONCURRENCY) \
    --object-bucket $(FLY_OBJECT_BUCKET) --object-base-url https://whest-fly-runner-20260628.fly.storage.tigris.dev \
    --image-label $(FLY_IMAGE_LABEL) \
