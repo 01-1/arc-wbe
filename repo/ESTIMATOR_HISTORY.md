@@ -2109,6 +2109,45 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   code/writeups or a different mechanism, not merely a resampling of these
   features.
 
+- **2026-07-07 spline conditional readout gate FAIL.** A pre-registered
+  Fly-payload truth-bank gate tested the specific follow-up left open by the
+  collapse campaign: replace the failed hard-cell sampled-latent
+  conditional-Gaussian readout with cross-fitted smooth local
+  polynomial/spline conditional readouts before touching estimator behavior.
+  This gate was distinct from the killed Gaussian/Edgeworth final pulls,
+  final-preactivation reflection, penultimate/PC mirroring, and hard-cell
+  latent conditional model. Artifacts are under
+  `paired_fly_logs/fingerprint_theory/`: preregistration/report
+  `spline_conditional_readout_gate_20260707.md`, payload
+  `spline_conditional_readout_payload.py`, manifest, Fly JSONL
+  `spline_conditional_readout_gate_20260707_fly.jsonl`, and aggregate
+  `spline_conditional_readout_gate_20260707_results.json`.
+
+  Method: each of the 100 truth-bank Fly Machines rebuilt one bank MLP and
+  generated three independent legal current-route `hadamard_st3_b16`
+  ensembles, including first-layer covariance recolor and first-successor
+  variance match. It saved row activations at layers 24, 28, and 30 plus final
+  activations; formed sample-derived PCA latents with ranks `1,2,4`; and fit
+  four-fold row-cross-fitted readouts of final activations from those latents.
+  Families were quadratic polynomial, cubic polynomial, and an 8-knot
+  piecewise-constant spline surrogate, with ridge values `1e-3` and `1e-1`.
+  Truth-bank final means were used only after each label-free readout rule was
+  fixed, to measure final MSE. A first launch omitted `estimator.py` from the
+  generic payload file set and failed uniformly with `ModuleNotFoundError`;
+  the corrected Fly run returned `100/100` shards with zero failures.
+
+  Pre-registered PASS required mean final-MSE reduction at least `1.35x`,
+  median per-MLP ratio at least `1.20x`, q10 at least `0.90x`, and no obvious
+  tail blowup. Best result was layer 28 / rank 4 / quadratic polynomial /
+  ridge `0.1`: mean equal-row MSE `5.3008e-6`, mean conditional MSE
+  `5.3027e-6`, mean ratio `0.99965x`, median `1.00067x`, q10/q90
+  `0.98663x`/`1.00918x`, and zero tail blowups under the registered
+  `ratio < 0.80` rule. Verdict: FAIL. Smooth conditional readout is neutral,
+  not the missing `~1.5x` variance-per-FLOP mechanism; late collapsed latents
+  describe row variation but do not improve the final mean estimator when
+  averaged over sampled latents. No `estimator.py` change, no mode-gated
+  candidate, and no final `make fly`.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
