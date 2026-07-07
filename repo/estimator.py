@@ -1148,6 +1148,7 @@ def _factored_third_all_distinct_factors(tensor: "_FactoredThird") -> tuple[fnp.
 
 def _factored_nonlin_k3_r1_fast(
     wk: dict[int, object],
+    augment: bool = False,
     diag_rows: list[dict[str, float]] | None = None,
     layer_idx: int | None = None,
 ) -> dict[int, object]:
@@ -1253,7 +1254,7 @@ def _factored_nonlin_k3_r1_fast(
         p_slices[int_part] = _symmetrize(acc, vec=int_part)
 
     aug_p_slices = {}
-    if diag_rows is not None:
+    if diag_rows is not None or augment:
         for int_part, terms in _terms_iso_k3_augment_extra_grouped():
             acc = None
             for _, vec_part, count, k_vec, dim, coef, factors in terms:
@@ -1264,6 +1265,9 @@ def _factored_nonlin_k3_r1_fast(
                 acc = term if acc is None else acc + term
             if acc is not None:
                 aug_p_slices[int_part] = _symmetrize(acc, vec=int_part)
+    if augment:
+        for int_part, value in aug_p_slices.items():
+            p_slices[int_part] = p_slices.get(int_part, 0.0) + value
 
     w1 = wick(1, 1)
     w2 = wick(2, 1)
@@ -1316,15 +1320,39 @@ def _factored_nonlin_k3_r1_fast(
         k211_diag_increments,
     )
 
+    if augment and 4 in wk:
+        core = wk[4].core
+        metric = wk[4].metric
+        metric_diag = fnp.diag(metric)
+        eye = _eye(width)
+        ones = _ones(width)
+
+        fac1 = w2[:, None] * fnp.diag(core)[:, None] * ones[None, :]
+        fac2 = w1[:, None] * metric
+        fac3 = (w1[:, None] * eye) / 4.0
+        p111.add_factors((fac1, fac2, fac3))
+
+        fac1 = w1[:, None] * core
+        fac2 = w2[:, None] * eye
+        fac3 = w1[:, None] * metric
+        p111.add_factors((fac1, fac2, fac3))
+
+        fac1 = w1[:, None] * core
+        fac2 = w1[:, None] * eye
+        fac3 = (w2[:, None] * metric_diag[:, None] * ones[None, :]) / 4.0
+        p111.add_factors((fac1, fac2, fac3))
+
     p_ds = _DSTower.from_slices(p_slices, autozero=True)
-    k_ds = _ds_pk_to_k(p_ds, strict=True)
+    k_ds = _ds_pk_to_k(p_ds, strict=not augment)
     p111_repeated = p111.get_repeated()
     if 3 in k_ds:
         k_ds[3] = _dst_sub(k_ds[3], p111_repeated)
-    if diag_rows is not None:
-        local_k4_core = _ds_harmonic_proj_r1(k_ds[4]).core
+    k211_contrib = None
+    local_k4 = _ds_harmonic_proj_r1(k_ds[4])
+    if diag_rows is not None or augment:
+        local_k4_core = local_k4.core
         aug_k4_core = fnp.zeros_like(local_k4_core)
-        if aug_p_slices:
+        if aug_p_slices and not augment:
             aug_p_ds = _DSTower.from_slices(aug_p_slices, autozero=True)
             aug_k_ds = _ds_pk_to_k(aug_p_ds, strict=False)
             if 4 in aug_k_ds:
@@ -1353,6 +1381,9 @@ def _factored_nonlin_k3_r1_fast(
             ) / 3.0
             k211_from_p211 = k211_from_p211 * (6.0 * 2.0 / (2.0 * n + 8.0))
         k211_contrib = k211_from_p111 + k211_from_p211
+    if augment and k211_contrib is not None:
+        local_k4.core = local_k4.core + k211_contrib
+    if diag_rows is not None:
         omitted_core = aug_k4_core + k211_contrib
         row = {
             "layer": float(-1 if layer_idx is None else layer_idx),
@@ -1379,7 +1410,7 @@ def _factored_nonlin_k3_r1_fast(
         1: _HTensor(k_ds[1].to_tensor(), r=0),
         2: _HTensor(k_ds[2].to_tensor(), r=0),
         3: p111 + _FactoredThird.from_dstensor(k_ds[3]),
-        4: _ds_harmonic_proj_r1(k_ds[4]),
+        4: local_k4,
     }
 
 def _relu_mean_from_cumulant_diags(
@@ -1429,7 +1460,7 @@ def _final_r1_relu_mean_from_tower(tower: dict[int, object], w: fnp.ndarray) -> 
     return _relu_mean_from_cumulant_diags(mean, var, k3_diag, k4_diag)
 
 
-def _factorized_k3_propagation(mlp: MLP, diag_mode: bool = False) -> fnp.ndarray:
+def _factorized_k3_propagation(mlp: MLP, diag_mode: bool = False, augment: bool = False) -> fnp.ndarray:
     """K=3 factorized cumulant propagation for ReLU hidden layers.
 
     This ports the upstream factorized K=3 path into the narrower whestbench
@@ -1455,7 +1486,7 @@ def _factorized_k3_propagation(mlp: MLP, diag_mode: bool = False) -> fnp.ndarray
             wk = {}
             for degree, value in tower.items():
                 wk[degree] = value.contract_w(w_mat)
-            tower = _factored_nonlin_k3_r1_fast(wk, diag_rows=diag_rows, layer_idx=layer_idx)
+            tower = _factored_nonlin_k3_r1_fast(wk, augment=augment, diag_rows=diag_rows, layer_idx=layer_idx)
             rows.append(tower[1].core)
 
         return fnp.stack(rows, axis=0)
@@ -2493,6 +2524,8 @@ class Estimator(BaseEstimator):
             return _factorized_k3_propagation(mlp)
         if mode == "k3_aug_diag":
             return _factorized_k3_propagation(mlp, diag_mode=True)
+        if mode == "k3_aug":
+            return _factorized_k3_propagation(mlp, augment=True)
         if mode == "hadamard_first_cov":
             n_samples = _hadamard_sample_count_for_budget(mlp, budget)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))

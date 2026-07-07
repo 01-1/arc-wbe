@@ -56,9 +56,20 @@ degree-4 `r=1` core, behind `k3_aug_diag` using only the passed MLP object.
 The first corrected 16 GB Fly rerun launched successfully with
 `memory_mb=16384` and failed by the 60-second predictor wall-clock limit, not
 OOM, before the original end-of-run diagnostic print emitted magnitudes. The
-diagnostic now streams one layer row as soon as each omitted-state calculation
-finishes; replace this sentence with the streamed Stage A magnitudes and
-Stage B decision after the rerun.
+streaming rerun also hit the 60-second predictor wall-clock limit on the first
+80 returned Machines, but it emitted layerwise rows before failure. The
+augmented projection alone was already about `6.6x` to `7.2x` the local
+degree-4 `r=1` core at layer 0, about `8x` to `10x` by layer 1, and commonly
+above `20x` by layers 4-6; the total omitted core including K211 feedback was
+similarly material, around `6.2x` to `6.8x` at layer 0 and tens of times the
+local core by the later emitted rows. The individual `(3,1)` and `(2,1,1)`
+power-cumulant slice norms were much larger than the local core norm, while
+K211-total feedback was smaller than the augmented projection but still often
+order-one to several times the local core. Because the state is clearly
+material but the straightforward diagnostic cannot complete within the current
+60-second scorer wall-clock path even at 16 GB, Stage B proceeds only as a
+mode-gated Fly comparison; a timeout there should be treated as a charged-path
+economics kill, not a memory kill.
 
 ## Winning Checkpoints
 
