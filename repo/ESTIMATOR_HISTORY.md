@@ -1957,6 +1957,31 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   resizing this sketch. Default estimator unchanged; no `make fly` proof was
   run because no estimator candidate was promoted.
 
+- **2026-07-07 downstream-weighted Hermite H2 control variate NOT PROMOTED.**
+  Added a diagnostic `h2cv<N>` Hadamard token that builds one scalar,
+  zero-mean quadratic Hermite control from the first-layer preactivation
+  ensemble. The control is weighted by the first successor layer's outgoing
+  squared weight energy, has analytic Gaussian expectation zero, and estimates
+  the final-row coefficient label-free from within-predict covariance with the
+  final activation rows. This is distinct from the killed raw all-row QCV and
+  first-layer `cv3` probes: it is downstream-valued, scalar, and only corrects
+  the final reported mean rather than pulling every layer or adding raw
+  per-coordinate Hermite means.
+
+  Normal-window Fly summaries did not show a stable target-scale mechanism.
+  `hadamard_st3_b16_h2cv50` first looked mildly positive at `2.595e-7`
+  adjusted / `2.524e-6` final-layer MSE / `2.805e10` effective compute /
+  `2.540e10` raw FLOPs over 80 returned MLPs with no failures, but the
+  strength sweep and replicate collapsed back to the default frontier:
+  `h2cv25` scored `2.885e-7` / `2.746e-6` / `2.833e10`; `h2cv75` scored
+  `2.821e-7` / `2.730e-6` / `2.795e10`; `h2cv100` scored `2.793e-7` /
+  `2.691e-6` / `2.813e10`; and the `h2cv50` replicate scored `2.812e-7` /
+  `2.676e-6` / `2.851e10`, all over 80 returned MLPs with no failures.
+  Verdict: keep the mode as a documented diagnostic, but do not promote.
+  The first bounce did not reproduce, the curve is not monotone, and no run
+  approached the `1.6e-7` target or cleared the repository's `~15%` Fly-noise
+  rule against the current `st3_b16` frontier.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For

@@ -97,6 +97,7 @@ class _HadamardPosthocConfig:
     edgeworth_blend: float = 0.0
     trimmed_final: bool = False
     second_variance_strength: float | None = None
+    hermite2_cv_shrink: float = 0.0
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -2159,6 +2160,13 @@ def _hadamard_first_cov_recolored_means(
     n_blocks = max(initial_samples // (2 * mlp.width), 1)
     antithetic_blocks = max(min(int(round(n_blocks * antithetic_fraction)), n_blocks), 0)
     y_parts = []
+    h2_cv_parts = []
+    h2_cv_weight = None
+    h2_cv_std = None
+    if posthoc is not None and posthoc.hermite2_cv_shrink:
+        h2_cv_weight = fnp.sum(mlp.weights[1] * mlp.weights[1], axis=1)
+        h2_cv_weight = h2_cv_weight / fnp.maximum(fnp.mean(h2_cv_weight), _MIN_VARIANCE)
+        h2_cv_std = fnp.sqrt(fnp.maximum(fnp.diag(w0.T @ w0), _MIN_VARIANCE))
     if antithetic_blocks:
         x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor).astype(fnp.float32)
         pre_half = _strassen_matmul(x_half, w0_f32, strassen_levels)
@@ -2168,6 +2176,11 @@ def _hadamard_first_cov_recolored_means(
             pre_half = pre_half * fnp.concatenate((scales,) * n_scale_blocks)[:, None]
         y_parts.append(fnp.maximum(pre_half, 0.0))
         y_parts.append(fnp.maximum(-pre_half, 0.0))
+        if h2_cv_weight is not None and h2_cv_std is not None:
+            z = pre_half.astype(fnp.float64) / h2_cv_std[None, :]
+            h2_score = fnp.mean((z * z - 1.0) * h2_cv_weight[None, :], axis=1)
+            h2_cv_parts.append(h2_score.astype(fnp.float32))
+            h2_cv_parts.append(h2_score.astype(fnp.float32))
     fresh_half_blocks = 2 * (n_blocks - antithetic_blocks)
     if fresh_half_blocks:
         x_fresh = _hadamard_sign_fresh_half_blocks(mlp, fresh_half_blocks, rng).astype(fnp.float32)
@@ -2176,7 +2189,11 @@ def _hadamard_first_cov_recolored_means(
             scales = fnp.array(_chi_stratified_radial_scales(mlp.width), dtype=fnp.float32)
             pre_fresh = pre_fresh * fnp.concatenate((scales,) * fresh_half_blocks)[:, None]
         y_parts.append(fnp.maximum(pre_fresh, 0.0))
+        if h2_cv_weight is not None and h2_cv_std is not None:
+            z = pre_fresh.astype(fnp.float64) / h2_cv_std[None, :]
+            h2_cv_parts.append(fnp.mean((z * z - 1.0) * h2_cv_weight[None, :], axis=1).astype(fnp.float32))
     y = fnp.concatenate(tuple(y_parts), axis=0)
+    h2_cv_score = fnp.concatenate(tuple(h2_cv_parts), axis=0) if h2_cv_parts else None
 
     target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
     sample_mean = fnp.mean(y, axis=0).astype(fnp.float64)
@@ -2275,6 +2292,13 @@ def _hadamard_first_cov_recolored_means(
     if final_pre is not None and posthoc.edgeworth_blend:
         edgeworth_mean = _edgeworth_relu_mean(final_pre)
         rows[-1] = (1.0 - posthoc.edgeworth_blend) * rows[-1] + posthoc.edgeworth_blend * edgeworth_mean
+    if h2_cv_score is not None and posthoc.hermite2_cv_shrink:
+        score_mean = fnp.mean(h2_cv_score.astype(fnp.float64))
+        score_centered = h2_cv_score.astype(fnp.float64) - score_mean
+        denom = fnp.maximum(fnp.mean(score_centered * score_centered), _MIN_VARIANCE)
+        final_mean = rows[-1]
+        cov = fnp.mean(score_centered[:, None] * (x.astype(fnp.float64) - final_mean[None, :]), axis=0)
+        rows[-1] = final_mean - posthoc.hermite2_cv_shrink * cov * score_mean / denom
     if final_cv3 and cv3_s_blocks is not None:
         block_rows = 2 * mlp.width
         n_blocks = cv3_s_blocks.shape[0]
@@ -2372,6 +2396,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     edgeworth_blend = 0.0
     trimmed_final = False
     second_variance_strength = None
+    hermite2_cv_shrink = 0.0
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
@@ -2444,6 +2469,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             trimmed_final = True
         elif token.startswith("w2"):
             second_variance_strength = max(int(token[len("w2") :]) / 100.0, 0.0)
+        elif token.startswith("h2cv"):
+            hermite2_cv_shrink = max(int(token[len("h2cv") :]) / 100.0, 0.0)
         elif token == "l2x":
             exact_recolor_layers = 1
             variance_match_start_layer = 99
@@ -2479,6 +2506,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             edgeworth_blend=edgeworth_blend,
             trimmed_final=trimmed_final,
             second_variance_strength=second_variance_strength,
+            hermite2_cv_shrink=hermite2_cv_shrink,
         ),
     )
 
