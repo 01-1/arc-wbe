@@ -472,6 +472,20 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   shortcut features, or residual overlays against cached public-mini labels is
   not a legitimate estimator improvement. Those experiments were removed and
   should not be revived.
+- **2026-07-07 external sampler writeup scout.** Public-source searches found
+  no new legal target-scale sampler mechanism beyond lanes already weaker than
+  or killed by the local frontier. The main public challenge writeup found was
+  German Alfaro's folded-whitening antithetic Gaussian MC estimator, reporting
+  `3.357e-7` adjusted on the public split; that is legal in principle but
+  weaker than the current Hadamard/recolor/variance-match/Strassen route and
+  overlaps superseded Gaussian, antithetic, QMC, radial, MLMC, and control
+  variate probes. The ascender1729 NumPy/flopscope K=3 port is useful as an
+  implementation reference, but its documented final-layer k4 extrapolation
+  uses leave-one-net-out truth-labeled coefficient fitting and is therefore not
+  a submitted-estimator mechanism here; local final-only and augmented-K3
+  economics already fence off the nearby legal variants. Searches for a public
+  thylinao/writeup/code clue found no estimator source. See
+  `ARC-estimation-research/external_sampler_writeup_scout_20260707.md`.
 - **Structured compression.** Whole-group and boundary-group compression looked
   like small local wins, but one structured-cap default was not grader-safe
   because group ordering extracted host Python floats from flopscope remote
