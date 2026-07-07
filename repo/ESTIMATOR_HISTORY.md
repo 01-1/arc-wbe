@@ -1912,6 +1912,51 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   an unbiased symmetry for the collapsed latent rather than imposing an
   empirical one.
 
+- **2026-07-07 low-rank full-kernel downstream projection gate DEAD.**
+  A focused worker tested the distinct follow-up allowed by the killed
+  diagonal tail proxy: a low-rank sketch of the full downstream masked
+  Jacobian action over candidate layer-mean correction coordinates. For each
+  truth-bank MLP, a `make fly-payload` machine-side gate sampled 256
+  antithetic particles, measured layer mean errors against the Fly truth bank
+  at layers `8,12,16,20,24,28`, pushed 16 Rademacher final probes backward
+  through the concrete downstream ReLU-mask chain, and ranked coordinates by
+  `e_j^2 ||S J e_j||^2`. This is not the prior diagonal whole-suffix proxy:
+  it uses full downstream coordinate mixing through sampled masks before
+  ranking, and compares against both local `e_j^2` and diagonal-tail controls.
+
+  Preregistration and artifacts are under
+  `paired_fly_logs/fingerprint_theory/low_rank_projection_gate_20260707.md`,
+  with the Fly JSONL, results JSON, payload manifest, machine entrypoint, and
+  aggregator alongside. The exact run used `make fly-payload` with
+  `FLY_MLPS=100`, `FLY_MIN_RESULTS=100`, the gate script plus
+  `local_engine.py` and `analysis/truth_bank/truth_bank.npz` as payload files,
+  and returned 100/100 shards with zero failures. Aggregation was local only;
+  no estimator behavior changed, no local estimator scoring was run, and no
+  truth-bank floor subtraction was applied because this gate compares paired
+  correction reductions rather than absolute estimator MSE levels.
+
+  Premises: P1 FAIL -- the low-rank ranking did not beat local error ranking
+  at target scale, with overall low-rank/local reduction ratio median `1.006`
+  [`0.120`, `1.992`] and win fraction `0.508` versus required median
+  `>=1.20`, q10 `>=0.90`, and win fraction `>=0.62`. P2 was weak/mixed --
+  low-rank/diagonal median was `1.096` [`0.169`, `2.964`] with win fraction
+  `0.583`, barely above the point thresholds but irrelevant without P1/P4 and
+  with unstable tails from negative or near-zero measured reductions. P3 FAIL
+  -- Spearman association improved over the diagonal control by only `0.033`
+  median versus required `>=0.05`. P4 FAIL -- the best layer by median
+  low-rank/local ratio was layer 20 at `1.084`, far below the `1.35`
+  promotion trigger needed to justify a mode-gated estimator candidate toward
+  the missing `~1.5x` variance-per-FLOP mechanism.
+
+  Verdict: **DEAD** for estimator promotion. The full-kernel sketch has a
+  faint coordinate-association signal, but not a robust or target-scale
+  correction selector, and the measured correction reductions are often noisy,
+  negative, or near zero. Do not reopen the downstream-projection lane as a
+  low-rank masked-Jacobian coordinate-ranking variant unless a future proposal
+  changes the corrected statistic itself rather than merely resampling or
+  resizing this sketch. Default estimator unchanged; no `make fly` proof was
+  run because no estimator candidate was promoted.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
