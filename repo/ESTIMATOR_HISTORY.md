@@ -2276,6 +2276,24 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   estimator change and no final `make fly`; no action toward the `1.6e-7`
   target follows.
 
+- **2026-07-07 remaining-lane audit: no autonomous target-scale lane left.**
+  A final independent read-only audit covered the surviving sampler, terminal,
+  mechanistic `L^2`, Keenan contraction, large-kernel L4, paired-block/CRN,
+  public telemetry, and higher-cumulant/analytic-prefix spaces after the
+  same-day closeouts. No legal, non-duplicate estimator or gate candidate was
+  found with a plausible `~1.5x` variance-per-FLOP prior. The former sampler
+  measurement lead is closed by the block-predictability/paired-block results;
+  terminal routes still need a new conditional law; L4 is structurally tied to
+  residual-heavy narrow leaves; projection/sketch variants need an illegal
+  truth-labeled correction vector or collapse to killed controls; and K3/joint
+  transports need a fundamentally cheaper low-covariance carrier before depth
+  economics are worth reopening. Blocker: crossing `1.6e-7` now requires
+  external participant information/public code, a genuinely new label-free
+  conditional law, a new higher-cumulant carrier, or an owner-provided idea or
+  telemetry outside the documented graveyard. No estimator mode, syntax check,
+  or `make fly` was warranted. Report:
+  `ARC-estimation-research/remaining_lane_audit_20260707.md`.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
