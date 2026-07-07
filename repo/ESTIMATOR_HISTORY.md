@@ -2294,6 +2294,26 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   or `make fly` was warranted. Report:
   `ARC-estimation-research/remaining_lane_audit_20260707.md`.
 
+- **2026-07-07 sketched cumulant carrier no-build.** A theory/economics pass
+  audited TensorSketch/CountSketch degree-2 features, randomized low-rank
+  third-cumulant propagation, signed-measure particles, and polynomial-chaos
+  controls as possible low-covariance higher-cumulant carriers. The key result
+  is a covariance lower bound in whitened layer-2 coordinates: exact kappa3
+  matching fixes the degree-2 Hermite projection of the quadratic carrier
+  uniquely, so the existing full joint-K3 transport already realizes the
+  minimum covariance load for that target. Any CountSketch/TensorSketch that
+  preserves the target keeps that load or adds collision variance; any sketch
+  that lowers load does so by projecting away the spread cumulant mass already
+  shown necessary by M2c/low-rank gates. The split-base `ts` carrier was the
+  genuine covariance-kernel change in this family, and its clean middle-rank
+  results remained far above both the standing frontier and the `1.6e-7`
+  target. Pre-registered build gate would have required `>=0.90`/`>=0.85`/
+  `>=0.85` kappa3 correlations with pre-damping covariance load
+  `<=0.80` near floor compute, or paired evidence of a `>=1.35x` final-MSE
+  reduction; the sketch family fails analytically before labels or Fly
+  scoring. No estimator mode, syntax check, or `make fly` was warranted.
+  Report: `ARC-estimation-research/sketched_cumulant_state_20260707.md`.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
