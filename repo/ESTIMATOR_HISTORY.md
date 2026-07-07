@@ -1715,6 +1715,69 @@ slices. Artifact note: failed Fly estimator object hash prefix
   machine entrypoint/aggregator; these files are gitignored, so this entry is
   the durable record. No estimator.py change.
 
+- **2026-07-07 ReLU region granularity gate DEAD for region-stratified
+  sampling.** Truth-bank structural measurement gate answering whether the
+  effective linear regions of the width-256/depth-32 ReLU MLPs are coarse
+  enough under the standard-Gaussian input measure to make exact-region,
+  one-point-per-region, or Rao-Blackwellized region stratification pay. This
+  was motivated by the tension between naive line-breakpoint counts
+  (`~8192` nominal hidden hyperplanes) and the repository's observed deep
+  collapse / mixture-like late-layer marginals.
+
+  Method and preregistration: before running, the gate fixed three pass
+  thresholds. P1 granularity would pass if random Gaussian-bulk chords
+  `x(t)=x0+t*u`, `t in [-1,1]`, showed total breakpoint density below
+  `512` flips per input-sigma, a `16x` coarsening versus the naive `8192`
+  count. P2 payoff would pass if the same-pattern affine within-region
+  variance share was at least `5%` at layer 31, or at least `10%` in any
+  layer; below that, exact-region Rao-Blackwellization cannot plausibly
+  supply the `~1.6x` variance edge over the current antithetic/Hadamard route,
+  which already balances signs and first-layer covariance. P3 collapse
+  coarseness would pass if the sampled effective live hyperplane count was
+  at most `2048` total or at most `128` in layer 31. The machine-side
+  `make fly-bank` gate rebuilt each of the 100 truth-bank MLPs, verified
+  weight checksums (`100/100`), sampled 12 chords with a 65-point grid, counted
+  per-neuron gate flips by layer, and decomposed per-layer chord output
+  variation into same-pattern affine interval variance versus between-interval
+  variance. No labels, truth means, estimator behavior, or local estimator
+  scoring were used; aggregation was local only.
+
+  Results: P1 PASS -- total sampled breakpoint density was much coarser than
+  naive, median `160.958` [`132.933`, `194.763`] flips per sigma, implying a
+  typical sampled region extent of `0.00621` sigma. Individual layer densities
+  were only about `5/sigma` early and late: layer 0 median `5.04`, layer 15
+  `5.04`, layer 31 `4.88`. P3 PASS -- sampled live hyperplanes were far below
+  nominal in deep layers: total effective live count median `2239.5`
+  [`1957.5`, `2509.7`] versus nominal `8192`, while layer 31 had only `49`
+  live units [`37`, `63`] versus nominal `256`; layer-31 frozen fraction was
+  `0.809` median. Deep flip events were often synchronized rather than
+  independent, with a deep-layer co-occurrence fraction median `0.507`
+  [`0.380`, `0.615`].
+
+  P2 FAIL decisively -- despite the coarser regions, the measured
+  within-region affine variance share was tiny. Layer-31 within-region share
+  was median `0.0003648` [`0.0003213`, `0.0004088`] using the interval
+  decomposition, and `0.0003552` [`0.0003128`, `0.0003993`] against total
+  chord variance. This was also the maximum median across layers, still about
+  `137x` below the `5%` layer-31 pass threshold and about `274x` below the
+  `10%` any-layer threshold. Early layers were even smaller: layer 0 median
+  `0.0002479`, layer 15 `0.0003038`, layer 30 `0.0003601`.
+
+  Verdict: **DEAD** for region-stratified / one-point-per-region /
+  exact-region Rao-Blackwellized sampling as a route to the missing variance
+  edge. The structural collapse is real and fattens sampled regions by roughly
+  `8192 / 160.958 ~= 51x` relative to the naive line-breakpoint count, with
+  layer-31 live hyperplanes only `49/256`; however, essentially all
+  per-layer output variation along Gaussian-bulk chords is between-region, not
+  within-region. Follow-up justified only as a coarse diagnostic over measured
+  live deep gates or flip-cluster structure, not as an estimator-promotion
+  path for exact region stratification. Artifacts are under
+  `paired_fly_logs/fingerprint_theory/region_granularity_gate_20260707.md`,
+  `region_granularity_gate_20260707_results.json`,
+  `region_granularity_gate_20260707_fly.jsonl`, and the corresponding
+  machine entrypoint/aggregator; these files are gitignored, so this entry is
+  the durable record. No estimator.py change.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
