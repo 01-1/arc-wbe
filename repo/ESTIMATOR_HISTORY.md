@@ -1624,8 +1624,11 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   `~1.6-1.7x` better constant than ours.
 
   Follow-up gates, ranked: (1) sampler/antithetic reproduction gate, requiring
-  participant code/writeups and not currently executable because writeups are
-  only available at competition end; (2) keenan state-propagation contraction
+  participant code/writeups, which are not available and are not known to be
+  forthcoming at any point (correction 2026-07-07: an earlier version of this
+  entry asserted writeups become available at competition end; that was an
+  unverified assumption, not a known competition policy); (2) keenan
+  state-propagation contraction
   toy gate, executable offline; (3) andrew terminal-refinement gate, needing
   external telemetry. None have been run, and no estimator change was made.
   Artifacts are under `paired_fly_logs/fingerprint_theory/`, including
