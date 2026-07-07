@@ -72,14 +72,18 @@ Estimator relevance:
 
 - This explains why tracking only ordinary off-diagonal cumulants or only a
   low-order Gaussian closure is fragile.
-- The local K=3 route already has structured diagonal/power-like machinery;
-  future K-route comparisons should check whether every repeated-index slice
-  implied by the paper is represented or deliberately projected away.
+- The completed upstream audit found that the local K=3 route already has the
+  paper's power-cumulant machinery and the `(3,)`/`(2,1)` repeated-index
+  slices. The genuine local omission is narrower: upstream's augmented
+  degree-4 state, especially `(3,1)`/`(2,1,1)` slices and `K211` feedback into
+  the degree-4 core. See `upstream-audit.md`.
 
 Actionability:
 
-- If auditing the local K=3 route against upstream, prioritize repeated-index
-  slices and power-cumulant-to-cumulant conversion before prettier algebra.
+- Do not file "add power cumulants" as an open task; that audit is done.
+- If revisiting this lane, focus specifically on compute-cheap augmented
+  degree-4/K211 state, not broad power-cumulant support; the 16GB retry showed
+  memory is not the constraint, predict wall-clock is.
 - For Hadamard variants, this is a warning that matching only off-diagonal
   structure can lose high-variance diagonal/repeated-neuron effects.
 
@@ -115,6 +119,14 @@ Estimator relevance:
 - This is the most precise version of "keep statistics by value per FLOP."
 - It supports the existing instinct to track selected slices rather than full
   tensors.
+- A Fly Stage A diagnostic for the omitted augmented K=3 degree-4/K211 state
+  first OOM-killed on 2GB Machines, but that floor was artificial (grader has
+  64GB; Fly allows 16GB on shared-cpu-8x). The 16GB retry showed the omitted
+  state is material (roughly 6-20x the local degree-4 core, growing with
+  depth), yet the ported `k3_aug` mode failed the 60s predict wall-clock on
+  100/100 Machines, and even baseline `r1` exhausted the combined budget at
+  depth 32. The kill is scorer-path compute economics, not memory or state
+  irrelevance. See `../ESTIMATOR_HISTORY.md` entries for 2026-07-07.
 
 Actionability:
 
@@ -122,6 +134,9 @@ Actionability:
   as a blanket instruction to add all covariance/cumulant details.
 - For this challenge, an augmented state must survive residual-time and
   flopscope realities, not only asymptotic FLOP counts.
+- Reopen only with a fundamentally cheaper compute path; memory is not the
+  binding constraint, and any K=3-family route must first beat the depth-32
+  budget wall that baseline `r1` itself fails.
 
 ### 0.5 Factorization Is The Main Width Win But Hurts Depth Scaling
 
@@ -519,8 +534,8 @@ Actionability:
 | Random MLP Gaussian input target | `alignment-posts-combined.md:632` | Challenge target | Direct match |
 | Cumulant propagation layer by layer | `alignment-posts-combined.md:676` | `_factorized_k3_propagation` | Shallow fallback |
 | Width-256 ReLU MLP empirical FLOP curves | `alignment-posts-combined.md:1384` | Grader width is 256 but depth is 32 | Need Fly proof |
-| Power cumulants and repeated-index slices | paper Section 4.1 and 6.4 | partially represented in K=3 machinery | high priority for upstream audit |
-| Odd-K extra full trace | paper Section 4.1 | related to variance/energy corrections | useful only if tied to projected cumulants |
+| Power cumulants and repeated-index slices | paper Section 4.1 and 6.4; `upstream-audit.md` | already present in local K=3 for `(3,)`/`(2,1)` | audit closed; not an open task |
+| Odd-K extra full trace / augmented degree-4 state | paper Section 4.1; `upstream-audit.md`; `../ESTIMATOR_HISTORY.md` 2026-07-07 | local has partial `r=1` state, not full augmented `(3,1)`/`(2,1,1)` + K211 feedback | state material (6-20x local core) but port killed by predict wall-clock at depth 32; memory not the constraint |
 | Factorized K>=3 tensors | paper Section 4.3 and S.4.3 | local `r1` factorization | depth scaling limits default use |
 | Paper FLOP accounting excludes symmetric redundancy | paper Section 6.1 and Appendix J | local flopscope may charge differently | benchmark locally |
 | Low-order deviations from Gaussian | `alignment-posts-combined.md:1471` | variance match, K=3, Edgeworth diagnostics | Useful but many variants failed |
@@ -531,14 +546,17 @@ Actionability:
 ## Ideas Worth Testing Only If They Differ From Rejected Variants
 
 1. Upstream details audit:
-   compare `mlp_cumulant_propagation` against local K=3 handling,
-   especially power cumulants, repeated-index slices, odd-K trace state,
-   factor growth with depth, ablations, and finite-width constants.
+   completed in `upstream-audit.md`. Result: local K=3 already contains the
+   paper's power-cumulant machinery; the omitted upstream state is the
+   augmented degree-4/K211 path — material in magnitude (6-20x local core),
+   but the ported mode is killed by predict wall-clock at depth 32
+   (2026-07-07 history entries).
 
 2. Tail-aware projection proxy:
-   build a very cheap diagonal or small low-rank proxy for downstream
-   sensitivity and use it to select which moment corrections survive. This is
-   the closest concrete interpretation of mechanistic `L^2` sketching.
+   diagonal whole-suffix truth-bank gate is DEAD. It failed all
+   pre-registered premises and added almost no rank signal over local moment
+   error. Reopen only with a genuinely distinct low-rank/full-kernel mechanism,
+   not a diagonal retread.
 
 3. Hybrid analytic prefix plus sampled suffix:
    use a short analytic prefix to reduce initial moment bias, then sample the
