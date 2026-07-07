@@ -2196,6 +2196,42 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   candidate, and no final `make fly` were warranted. Report:
   `ARC-estimation-research/keenan_contraction_closeout_20260707.md`.
 
+- **2026-07-07 large-kernel L4 audit: no distinct implementable route.** A
+  focused code/economics audit checked whether a materially different L4
+  Strassen implementation could preserve the attractive raw-FLOP savings while
+  avoiding the grader/Fly residual charge that killed the many-small-leaf L4
+  paths. The audit read `_strassen_matmul_batched`,
+  `_strassen_matmul_hybrid_l4`, `_strassen_matmul`,
+  `_deep_hadamard_blocks_for_budget`, and Hadamard mode parsing against the
+  prior L4 evidence: AICrowd L4 residual kill (`3.438e-7` adjusted /
+  `2.3e-6` MSE / `2.41e10` raw / `4.11e10` effective with `~1.70e10`
+  residual compute), post-fp32 L4 leaf-kernel trim, and the same-day
+  block-reinvestment probe where `hadamard_st4_b16` again hit a
+  combined-budget exhaustion.
+
+  Mechanism verdict: no legal dense large-kernel L4 variant was identified.
+  The current L3 route already expresses each propagation matmul as batched
+  Strassen leaves with BLAS-shaped `1024 x 32 @ 32 x 32`-class work at the
+  contest shape. The incremental L4 FLOP saving necessarily replaces each
+  remaining `32 x 32` inner/column leaf multiplication with seven `16 x 16`
+  leaf products. Those products can be stacked or scheduled differently, as
+  the existing batched and hybrid helpers already do, but making them into a
+  small number of ordinary dense large matmuls reintroduces the cross-products
+  that Strassen avoided, losing the L4 raw-FLOP cut. A block-diagonal
+  formulation would be algebraically equivalent but would either require a
+  sparse/batched primitive unavailable on the scorer path or execute zeros and
+  charge more raw FLOPs. Thus the raw-saving L4 family is structurally tied to
+  many narrow leaves under the legal dense array operations available to
+  `predict()`.
+
+  No mode was added and the default remains `hadamard_st3_b16`/L3. Because
+  there was no distinct estimator behavior candidate, no local scoring,
+  `py_compile`, or `make fly-mode` was run in this closeout. Final score did
+  not cross `1.6e-7`; the lane closes as an implementation-economics no-go
+  unless a future scorer exposes a genuinely large-kernel batched/sparse
+  primitive or a separate target-scale variance mechanism changes the value of
+  spending residual headroom.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
