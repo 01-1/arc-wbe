@@ -2406,8 +2406,11 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             final_cv3 = True
         elif token == "noanti":
             antithetic_fraction = 0.0
-        elif token == "anti50":
-            antithetic_fraction = 0.5
+        elif token.startswith("anti") and token[len("anti") :].isdigit():
+            antithetic_fraction = max(
+                min(int(token[len("anti") :]) / 100.0, 1.0),
+                0.0,
+            )
         elif token.startswith("hybr"):
             hybrid_prefix_layers = 2
             hybrid_joint_k3_matched = True

@@ -1798,6 +1798,95 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   machine entrypoint/aggregator; these files are gitignored, so this entry is
   the durable record. No estimator.py change.
 
+- **2026-07-07 terminal-refinement worker probes: final-preactivation
+  reflection DEAD; penultimate mirror DEAD.** A terminal-only worker tested
+  two legal final-layer mechanisms against the standing `hadamard_st3_b16`
+  route, after re-reading the 2026-07-06/07 graveyard and avoiding the killed
+  Gaussian smoothing, Edgeworth, trimming, CV3, tail-projection, and region
+  stratification families.
+
+  First, a scratch mode `hadamard_st3_b16_fpm50` reflected the final
+  preactivation cloud around its sample mean and blended the empirical ReLU
+  mean with the reflected empirical ReLU mean. The intended distinction from
+  Gaussian readout smoothing was that it made no Gaussian plug-in assumption
+  and used only the observed terminal preactivation sample. The scorer-path
+  result nevertheless had the same bias-dominated signature as the rejected
+  posthoc readout family: `8.423e-03` adjusted / `8.426e-03` final-layer MSE /
+  `2.824e10` effective / `2.536e10` raw FLOPs over 80 returned MLPs, with
+  two `combined_budget_exhausted` rows. The scratch mode was removed rather
+  than kept as a diagnostic.
+
+  Second, the existing pre-final `mirror_layer` machinery was run as
+  `hadamard_st3_mirror30`. This differs mechanistically from final-pre/posthoc
+  smoothing: it halves the hidden-depth particle count, mirrors the
+  penultimate activation ensemble around its sample mean, and spends the
+  terminal matmul/ReLU on the changed doubled ensemble, so it is a real
+  final-layer effort-reallocation candidate rather than a hidden-row placeholder
+  or output-only correction. It was clean but much too noisy:
+  `6.357e-07` adjusted / `6.357e-06` final-layer MSE / `1.526e10` effective /
+  `1.312e10` raw FLOPs over 80 returned MLPs, no failures. The lower compute
+  floor multiplier did not compensate for the larger final-layer MSE, and the
+  result is far above both the `~2.4e-7` standing frontier and the `1.6e-7`
+  target. Verdict: do not promote; late penultimate mirroring joins the
+  earlier layer-8/16/24 mirror failures as a dead terminal allocation route.
+
+- **2026-07-07 Partial-antithetic Hadamard sampler mix NOT PROMOTED.**
+  Added a general diagnostic parser token `anti<N>` so modes such as
+  `hadamard_st3_b16_anti25`, `anti50`, and `anti75` can vary what fraction of
+  first-layer Hadamard blocks use strict antithetic halves versus fresh
+  randomized half-blocks. This is a sampler-family probe, distinct from the
+  killed point-weight BQ, final-row robust aggregation, and moment-correction
+  families: it changes first-layer sign-pair symmetry before the exact
+  first-layer covariance recolor, while preserving legal use of only the
+  passed MLP object and MLP-independent randomization from `mlp.seed`.
+
+  Quick normal-window Fly summaries showed one interesting but insufficient
+  bounce. `hadamard_st3_b16_anti50` first scored `2.611e-7` adjusted /
+  `2.586e-6` final-layer MSE / `2.752e10` effective compute with
+  `2.554e10` raw FLOPs over 80 returned MLPs and no failures. The endpoints
+  and neighbors did not support a large mechanism: `anti25` scored
+  `2.845e-7` / `2.785e-6` / `2.779e10`; `anti75` scored `2.823e-7` /
+  `2.743e-6` / `2.808e10`; and `noanti` scored `2.774e-7` / `2.673e-6` /
+  `2.831e10`, all over 80 returned MLPs with no failures. A repeat
+  `anti50` run hit one known harness-side `combined_budget_exhausted` artifact
+  and scored `5.997e-3`, so it was not decision-grade. Block scaling also
+  failed to expose a route to the target: `hadamard_st3_b15_anti50` was clean
+  but scored `2.919e-7` / `2.823e-6` / `2.645e10`, while
+  `hadamard_st3_b17_anti50` was clean at `2.847e-7` / `2.637e-6` /
+  `2.944e10`. Verdict: keep `anti<N>` as a cheap diagnostic mode, but do not
+  promote; the best clean signal is far short of the `1.6e-7` target and does
+  not clear the repository's `~15%` Fly-noise rule against the current
+  `st3_b16` frontier.
+
+- **2026-07-07 block reinvestment / Strassen economics probe: no promotion.**
+  Worker pass on the current `hadamard_st3_b16` fp32 default tested whether a
+  legal block-count or post-fp32 Strassen-depth change could lower adjusted
+  score by moving residual/effective compute around the score floor while
+  preserving final-layer MSE. All runs used the sanctioned Fly scorer path and
+  only mode flags; default estimator behavior was not changed.
+
+  Fast summary probes: `hadamard_st3_b15` returned 80 clean MLPs at
+  `2.854e-7` adjusted / `2.811e-6` final MSE / `2.378e10` raw /
+  `2.627e10` effective, so the multiplier reduction lost too much sampling
+  variance. `hadamard_st3_b17` initially looked mildly promising on 80 clean
+  MLPs (`2.364e-7` / `2.236e-6` / `2.693e10` / `2.883e10`), but the
+  required longer full-100 summary check reverted to the plateau:
+  `2.592e-7` adjusted / `2.437e-6` final MSE / `2.693e10` raw /
+  `2.910e10` effective, no failures. `hadamard_st3_b18` was worse at
+  `2.585e-7` / `2.251e-6` / `2.851e10` / `3.138e10` over 80 clean MLPs.
+  Explicit `hadamard_st3_b16` and post-fp32 `hadamard_st4_b16` both hit one
+  combined-budget exhaustion in 80-result summary runs, making their aggregate
+  scores meaningless (`5e-3` class) and reaffirming that L4 still trades raw
+  FLOPs for too much residual/timeout risk.
+
+  Final unchanged default proof: `make fly` returned 80 clean MLPs with
+  `2.851e-7` adjusted / `2.768e-6` final MSE / `2.535e10` raw /
+  `2.789e10` effective and no failures. Verdict: no block/effective-compute
+  mode showed the needed `~1.5x` variance-per-FLOP improvement or crossed
+  `1.6e-7`; default remains unchanged. The narrow b17 residual dip is summary
+  noise unless a future paired full-JSON run shows a per-MLP MSE win large
+  enough to offset its higher multiplier.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
