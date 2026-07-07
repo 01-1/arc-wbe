@@ -2001,6 +2001,47 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   approached the `1.6e-7` target or cleared the repository's `~15%` Fly-noise
   rule against the current `st3_b16` frontier.
 
+- **2026-07-07 split-base joint-k3 transport NOT PROMOTED.** Added a small
+  diagnostic `ts` joint-k3 transport token, e.g.
+  `hadamard_st3_b16_hybx2_k512_ts`, to test a genuinely different
+  low-covariance carrier from M2/M2b/M2c/hybr64. Instead of evaluating the
+  layer-2 quadratic map on the same whitened Hadamard base as the linear
+  Gaussian carrier, the split carrier uses two MLP-independent Hadamard sign
+  streams: `linear = L(g + h) / sqrt(2)` and
+  `Q = gamma * (u.g) * (v.h)`. Its population `Cov(Q)` drops the same-base
+  `uv * uv.T` term, so the PD guard sees
+  `gamma ((U.T U) * (V.T V)) gamma.T` rather than the full same-base
+  quadratic covariance. This differs from the previous rank/taper knobs by
+  changing the carrier algebra instead of only selecting fewer columns or
+  changing damping constants.
+
+  Initial Fly smokes caught and fixed two implementation-only failures before
+  scoring: a stale helper name and then a fresh-half-block row-count mismatch.
+  After `python -m py_compile estimator.py` passed, the corrected split modes
+  scored through the sanctioned Fly path. `hadamard_st3_b16_hybx2_k128_ts`
+  returned 80 clean rows with no failures at `1.094e-6` adjusted /
+  `9.391e-6` final-layer MSE / `3.153e10` effective compute /
+  `2.900e10` raw FLOPs. The full-column
+  `hadamard_st3_b16_hybx2_kfull_ts` run was not decision-grade because four
+  `combined_budget_exhausted` artifacts poisoned the printed mean
+  (`2.145e-2` adjusted / `2.145e-2` final MSE / `6.780e10` effective /
+  `6.477e10` raw), though the raw cost and artifact pattern were consistent
+  with the old expensive full-column family. `hadamard_st3_b16_hybx2_k512_ts`
+  likewise artifacted twice (`3.340e-2` printed adjusted / `3.341e-2`
+  printed final MSE / `3.721e10` effective / `3.426e10` raw), so it was
+  followed by the lower-block clean check
+  `hadamard_st3_b15_hybx2_k512_ts`: 80 returned rows, no failures,
+  `6.715e-7` adjusted / `5.286e-6` final-layer MSE / `3.515e10`
+  effective compute / `3.224e10` raw FLOPs.
+
+  Verdict: no promotion and no final `make fly`. The split-base construction
+  is a legitimate new carrier and reduces the nominal quadratic covariance
+  term, but the clean middle-rank result remains far above both the
+  `~2.4e-7` frontier and the `1.6e-7` target, while full columns retain the
+  old expensive/artifact-prone footprint. Keep `ts` only as a compact
+  diagnostic because it documents that independent-base covariance reduction
+  alone does not solve the joint-k3 transport-quality wall.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For

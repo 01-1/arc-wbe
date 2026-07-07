@@ -1941,6 +1941,12 @@ def _joint_k3_quadratic_cov(gamma: fnp.ndarray, u: fnp.ndarray, v: fnp.ndarray) 
     return gamma @ term @ gamma.T
 
 
+def _joint_k3_split_quadratic_cov(gamma: fnp.ndarray, u: fnp.ndarray, v: fnp.ndarray) -> fnp.ndarray:
+    if gamma.shape[1] == 0:
+        return fnp.zeros((gamma.shape[0], gamma.shape[0]))
+    return gamma @ ((u.T @ u) * (v.T @ v)) @ gamma.T
+
+
 def _largest_pd_transport_scale(cov: fnp.ndarray, q_cov: fnp.ndarray) -> float:
     if fnp.max(fnp.abs(q_cov)) <= 0.0:
         return 1.0
@@ -1998,9 +2004,13 @@ def _joint_k3_transport(
     gamma, u, v = _joint_k3_quadratic_terms(chol, k3, max_terms, symmetric_order)
     if taper == "eigen":
         gamma, u, v = _taper_joint_k3_terms(cov, gamma, u, v)
-    q_cov = _joint_k3_quadratic_cov(gamma, u, v)
+    q_cov = (
+        _joint_k3_split_quadratic_cov(gamma, u, v)
+        if taper == "split"
+        else _joint_k3_quadratic_cov(gamma, u, v)
+    )
     pd_damping = _largest_pd_transport_scale(cov, q_cov)
-    damping = min(_HYBRID_JOINT_K3_GLOBAL_DAMP, pd_damping) if taper in ("global", "hybr") else pd_damping
+    damping = min(_HYBRID_JOINT_K3_GLOBAL_DAMP, pd_damping) if taper in ("global", "hybr", "split") else pd_damping
     gamma = gamma * damping
     q_cov = q_cov * (damping * damping)
     chol = fnp.linalg.cholesky(cov - q_cov + jitter * eye)
@@ -2030,6 +2040,37 @@ def _apply_joint_k3_transport(
             (ug[:, start:stop] * vg[:, start:stop] - uv[None, start:stop])
             @ gamma[:, start:stop].T
         )
+    pre = linear + q
+    sample_mean = fnp.mean(pre, axis=0)
+    centered = pre - sample_mean[None, :]
+    sample_cov = (centered.T @ centered) / float(centered.shape[0])
+    jitter = fnp.maximum(fnp.mean(fnp.diag(cov)), _MIN_VARIANCE) * 1e-6
+    sample_chol = fnp.linalg.cholesky(sample_cov + jitter * _eye(cov.shape[0]))
+    target_chol = fnp.linalg.cholesky(cov + jitter * _eye(cov.shape[0]))
+    recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+    return centered @ recolor + mean[None, :]
+
+
+def _apply_joint_k3_split_transport(
+    signs_a: fnp.ndarray,
+    signs_b: fnp.ndarray,
+    mean: fnp.ndarray,
+    cov: fnp.ndarray,
+    chol: fnp.ndarray,
+    gamma: fnp.ndarray,
+    u: fnp.ndarray,
+    v: fnp.ndarray,
+) -> fnp.ndarray:
+    linear = (signs_a + signs_b) @ (chol.T / math.sqrt(2.0))
+    if gamma.shape[1] == 0:
+        return linear + mean[None, :]
+    ug = signs_a @ u
+    vh = signs_b @ v
+    q = fnp.zeros_like(linear)
+    chunk = 192
+    for start in range(0, gamma.shape[1], chunk):
+        stop = min(start + chunk, gamma.shape[1])
+        q = q + ((ug[:, start:stop] * vh[:, start:stop]) @ gamma[:, start:stop].T)
     pre = linear + q
     sample_mean = fnp.mean(pre, axis=0)
     centered = pre - sample_mean[None, :]
@@ -2094,7 +2135,21 @@ def _hybrid_analytic_prefix_hadamard_means(
             joint_k3_max_terms,
             joint_k3_taper,
         )
-        pre = _apply_joint_k3_transport(full_signs, pre_mean, pre_cov, centered_chol, gamma, u, v)
+        if joint_k3_taper == "split":
+            split_signs = _hadamard_sign_fresh_half_blocks(mlp, n_blocks, rng)
+            full_split_signs = fnp.concatenate((split_signs, -split_signs), axis=0)
+            pre = _apply_joint_k3_split_transport(
+                full_signs,
+                full_split_signs,
+                pre_mean,
+                pre_cov,
+                centered_chol,
+                gamma,
+                u,
+                v,
+            )
+        else:
+            pre = _apply_joint_k3_transport(full_signs, pre_mean, pre_cov, centered_chol, gamma, u, v)
     else:
         centered_chol = fnp.linalg.cholesky(pre_cov + fnp.maximum(fnp.mean(fnp.diag(pre_cov)), _MIN_VARIANCE) * 1e-6 * _eye(mlp.width))
         pre_half = signs @ centered_chol.T
@@ -2452,6 +2507,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             hybrid_joint_k3_taper = "global"
         elif token == "te":
             hybrid_joint_k3_taper = "eigen"
+        elif token == "ts":
+            hybrid_joint_k3_taper = "split"
         elif token.startswith("hybs"):
             hybrid_prefix_layers = max(int(token[len("hybs") :]), 1)
             hybrid_skew_matched = True
