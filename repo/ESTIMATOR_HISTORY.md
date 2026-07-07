@@ -2086,6 +2086,33 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   diagnostic because it documents that independent-base covariance reduction
   alone does not solve the joint-k3 transport-quality wall.
 
+- **2026-07-07 paired-block CRN gate FAIL.** A focused audit closed the
+  remaining common-randomness paired-block hypothesis without touching
+  `estimator.py`. The pre-registered family was a legal sibling-pair sampler:
+  current-route Hadamard blocks with shared MLP, first-layer covariance
+  recolor, first-successor variance match, and full nonlinear post-ReLU
+  propagation, averaged in fixed correlated pairs at equal charged block
+  count. This differs from the killed block-feature weighting/allocation gate:
+  it asks whether correlated block estimates already cancel leading
+  final-error noise, not whether label-free features should reweight blocks.
+  PASS required `>=20%` mean final-MSE reduction, median `>=10%`, q10 no worse
+  than `-5%`, or a model-based `>=1.3x` predicted variance reduction with a
+  simple label-free implementation path.
+
+  The smallest measurement was the existing 100-shard Fly-payload
+  truth-bank block gate (`block_predictability_gate_20260707.jsonl`), which
+  already propagated 8 independent legal 16-block current-route ensembles per
+  MLP and recorded per-block final-error summaries. Re-aggregating it over
+  100 MLPs / 12,800 block rows showed no target-scale CRN cancellation:
+  weighting/allocation proxy mean/median/q10/q90 variance ratios were
+  `1.001` / `1.000` / `0.994` / `1.009`, and the paired-control proxy
+  mean/median/q10 reductions were only `2.9%` / `1.5%` / `0.04%`.
+  Although log squared-error prediction correlation was visible at `0.542`,
+  it did not convert into useful equal-count variance reduction. Verdict:
+  FAIL; no estimator mode, no `python -m py_compile`, no `make fly-mode`, and
+  no final `make fly` were warranted. See
+  `paired_fly_logs/fingerprint_theory/paired_block_crn_gate_20260707.md`.
+
 - **2026-07-07 block predictability gate FAIL.** A pre-registered
   Fly-payload truth-bank gate tested the scout-recommended hypothesis that
   label-free MLP-derived block observables could predict blockwise final error
