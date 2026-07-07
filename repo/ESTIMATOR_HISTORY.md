@@ -45,6 +45,24 @@ Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
 
+On 2026-07-07, an isolated `augk3` worktree tested the upstream-audit
+candidate to measure the omitted augmented K=3 degree-4 state, namely the
+`(3,1)`/`(2,1,1)` power-cumulant slices plus `K211` feedback, before any
+promotion attempt. The diagnostic was implemented behind a temporary
+`k3_aug_diag` mode and run with `make fly-mode MODE=k3_aug_diag` on the fixed
+100 Fly MLPs from the isolated worktree. It failed before emitting layerwise
+magnitudes: the first 80 returned Machines all exited `247` after Linux OOM
+killed the Python process around `1.80e6` to `1.86e6` anon-RSS pages, and the
+Fly aggregate had no WhestBench results. Because the straightforward augmented
+state materialization cannot fit the current Fly runner memory envelope, Stage
+B was not run and no paired `r1` versus augmented scoring comparison was
+attempted. The temporary estimator mode was removed rather than leaving a
+known-OOM diagnostic path. Treat the upstream augmented-K3 port as killed for
+the current local K=3 route unless a future design derives a streaming or
+factored trace diagnostic that never materializes the degree-4 augmented
+slices. Artifact note: failed Fly estimator object hash prefix
+`cec6f54ef304ec8c`; run stopped at `min_results=80` with `failed_mlps=80`.
+
 ## Winning Checkpoints
 
 - **K=2 covariance plus sampling floor.** The early analytical baseline tracked
