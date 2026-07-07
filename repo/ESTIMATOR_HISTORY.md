@@ -2259,6 +2259,23 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   primitive or a separate target-scale variance mechanism changes the value of
   spending residual headroom.
 
+- **2026-07-07 external telemetry refresh found no new mechanism.** A
+  documentation-only public-source refresh checked GitHub repositories, code,
+  issues, official WhestBench/starterkit/explorer surfaces, cached AIcrowd
+  challenge text, and the previously identified contestant/cumulant repos for
+  new writeups, notebooks, estimator code, discussions, or all-layer profile
+  disclosures. The only substantive public estimator artifact remains
+  folded-whitening antithetic Monte Carlo at a reported `3.357e-7` adjusted
+  score, which is legal but already superseded by the current Hadamard
+  recolor/variance-match route and does not explain the floor-group edge. The
+  cumulant port remains a useful reference but overlaps killed or guarded
+  K3/K4, Edgeworth, H2/control-variate, and final-readout lanes. No public
+  `thylinao` estimator/writeup or new sampler, allocation, readout, MLMC, or
+  moment mechanism was found. Report:
+  `ARC-estimation-research/external_telemetry_refresh_20260707.md`. No
+  estimator change and no final `make fly`; no action toward the `1.6e-7`
+  target follows.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For
