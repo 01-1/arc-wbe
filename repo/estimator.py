@@ -1599,6 +1599,22 @@ def _zero_mean_relu_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.nda
     return mean, cov
 
 
+def _zero_mean_folded_normal_mean_cov(cov_pre: fnp.ndarray) -> tuple[fnp.ndarray, fnp.ndarray]:
+    """Exact mean/covariance of ``abs(Z)`` for zero-mean Gaussian ``Z``."""
+    var = fnp.maximum(fnp.diag(cov_pre), _MIN_VARIANCE)
+    std = fnp.sqrt(var)
+    denom = std[:, None] * std[None, :]
+    rho = cov_pre / denom
+    rho = fnp.maximum(fnp.minimum(rho, 1.0), -1.0)
+    second = denom * (2.0 / math.pi) * (
+        fnp.sqrt(fnp.maximum(1.0 - rho * rho, 0.0))
+        + rho * (0.5 * math.pi - fnp.arccos(rho))
+    )
+    mean = std * math.sqrt(2.0 / math.pi)
+    cov = second - fnp.outer(mean, mean)
+    return mean, cov
+
+
 def _gaussian_relu_variance(mean_pre: fnp.ndarray, var_pre: fnp.ndarray) -> fnp.ndarray:
     """Gaussian marginal ReLU variance for possibly nonzero preactivations."""
     var_pre = fnp.maximum(var_pre, _MIN_VARIANCE)
@@ -2203,6 +2219,7 @@ def _hadamard_first_cov_recolored_means(
     mirror_layer: int | None = None,
     final_cv3: bool = False,
     antithetic_fraction: float = 1.0,
+    first_layer_transport: str = "relu_cov",
     posthoc: _HadamardPosthocConfig | None = None,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
@@ -2218,6 +2235,7 @@ def _hadamard_first_cov_recolored_means(
     h2_cv_parts = []
     h2_cv_weight = None
     h2_cv_std = None
+    folded_pre_half = None
     if posthoc is not None and posthoc.hermite2_cv_shrink:
         h2_cv_weight = fnp.sum(mlp.weights[1] * mlp.weights[1], axis=1)
         h2_cv_weight = h2_cv_weight / fnp.maximum(fnp.mean(h2_cv_weight), _MIN_VARIANCE)
@@ -2229,8 +2247,11 @@ def _hadamard_first_cov_recolored_means(
             scales = fnp.array(_chi_stratified_radial_scales(mlp.width), dtype=fnp.float32)
             n_scale_blocks = x_half.shape[0] // mlp.width
             pre_half = pre_half * fnp.concatenate((scales,) * n_scale_blocks)[:, None]
-        y_parts.append(fnp.maximum(pre_half, 0.0))
-        y_parts.append(fnp.maximum(-pre_half, 0.0))
+        if first_layer_transport in ("fold", "foldx"):
+            folded_pre_half = pre_half
+        else:
+            y_parts.append(fnp.maximum(pre_half, 0.0))
+            y_parts.append(fnp.maximum(-pre_half, 0.0))
         if h2_cv_weight is not None and h2_cv_std is not None:
             z = pre_half.astype(fnp.float64) / h2_cv_std[None, :]
             h2_score = fnp.mean((z * z - 1.0) * h2_cv_weight[None, :], axis=1)
@@ -2247,23 +2268,63 @@ def _hadamard_first_cov_recolored_means(
         if h2_cv_weight is not None and h2_cv_std is not None:
             z = pre_fresh.astype(fnp.float64) / h2_cv_std[None, :]
             h2_cv_parts.append(fnp.mean((z * z - 1.0) * h2_cv_weight[None, :], axis=1).astype(fnp.float32))
-    y = fnp.concatenate(tuple(y_parts), axis=0)
     h2_cv_score = fnp.concatenate(tuple(h2_cv_parts), axis=0) if h2_cv_parts else None
 
-    target_mean, target_cov = _zero_mean_relu_mean_cov(w0.T @ w0)
-    sample_mean = fnp.mean(y, axis=0).astype(fnp.float64)
-    centered = y - sample_mean[None, :]
-    sample_cov = (
-        _strassen_matmul(centered.T.astype(fnp.float32), centered.astype(fnp.float32), strassen_levels)
-        / float(centered.shape[0])
-    ).astype(fnp.float64)
-    jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
     eye = _eye(mlp.width)
-    sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
-    target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
-    recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
-    x = _strassen_matmul(centered.astype(fnp.float32), recolor.astype(fnp.float32), strassen_levels)
-    x = x + target_mean.astype(fnp.float32)[None, :]
+    cov_pre0 = w0.T @ w0
+    target_mean, target_cov = _zero_mean_relu_mean_cov(cov_pre0)
+    if first_layer_transport in ("fold", "foldx"):
+        if folded_pre_half is None or y_parts:
+            raise ValueError("folded first-layer transport requires fully antithetic first-layer rows")
+        folded_mean, folded_cov = _zero_mean_folded_normal_mean_cov(cov_pre0)
+        z_half = folded_pre_half.astype(fnp.float64)
+        folded = fnp.abs(z_half)
+        sample_mean = fnp.mean(folded, axis=0).astype(fnp.float64)
+        centered = folded - sample_mean[None, :]
+        if first_layer_transport == "foldx":
+            z_second = (
+                _strassen_matmul(z_half.T.astype(fnp.float32), z_half.astype(fnp.float32), strassen_levels)
+                / float(z_half.shape[0])
+            ).astype(fnp.float64)
+            z_fold = (
+                _strassen_matmul(z_half.T.astype(fnp.float32), centered.astype(fnp.float32), strassen_levels)
+                / float(z_half.shape[0])
+            ).astype(fnp.float64)
+            z_jitter = fnp.maximum(fnp.mean(fnp.diag(z_second)), _MIN_VARIANCE) * 1e-6
+            cross_map = fnp.linalg.inv(z_second + z_jitter * eye) @ z_fold
+            centered = centered - _strassen_matmul(z_half.astype(fnp.float32), cross_map.astype(fnp.float32), strassen_levels).astype(fnp.float64)
+        sample_cov = (
+            _strassen_matmul(centered.T.astype(fnp.float32), centered.astype(fnp.float32), strassen_levels)
+            / float(centered.shape[0])
+        ).astype(fnp.float64)
+        jitter = fnp.maximum(fnp.mean(fnp.diag(folded_cov)), _MIN_VARIANCE) * 1e-6
+        sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
+        target_chol = fnp.linalg.cholesky(folded_cov + jitter * eye)
+        recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+        folded_recolored = _strassen_matmul(centered.astype(fnp.float32), recolor.astype(fnp.float32), strassen_levels)
+        folded_recolored = folded_recolored + folded_mean.astype(fnp.float32)[None, :]
+        z_apply = folded_pre_half.astype(fnp.float32)
+        x = fnp.concatenate(
+            (
+                0.5 * (folded_recolored + z_apply),
+                0.5 * (folded_recolored - z_apply),
+            ),
+            axis=0,
+        )
+    else:
+        y = fnp.concatenate(tuple(y_parts), axis=0)
+        sample_mean = fnp.mean(y, axis=0).astype(fnp.float64)
+        centered = y - sample_mean[None, :]
+        sample_cov = (
+            _strassen_matmul(centered.T.astype(fnp.float32), centered.astype(fnp.float32), strassen_levels)
+            / float(centered.shape[0])
+        ).astype(fnp.float64)
+        jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
+        sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
+        target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
+        recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+        x = _strassen_matmul(centered.astype(fnp.float32), recolor.astype(fnp.float32), strassen_levels)
+        x = x + target_mean.astype(fnp.float32)[None, :]
 
     cv3_s_blocks = None
     if final_cv3:
@@ -2429,6 +2490,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     bool,
     int | None,
     str,
+    str,
     _HadamardPosthocConfig,
 ]:
     strassen_levels = 1
@@ -2440,6 +2502,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     exact_recolor_layers = 0
     variance_match_start_layer = 1
     antithetic_fraction = 1.0
+    first_layer_transport = "relu_cov"
     hybrid_prefix_layers = None
     hybrid_skew_matched = False
     hybrid_joint_k3_matched = False
@@ -2466,6 +2529,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             exact_recolor_layers,
             variance_match_start_layer,
             antithetic_fraction,
+            first_layer_transport,
             hybrid_prefix_layers,
             hybrid_skew_matched,
             hybrid_joint_k3_matched,
@@ -2491,6 +2555,10 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
                 min(int(token[len("anti") :]) / 100.0, 1.0),
                 0.0,
             )
+        elif token == "fold":
+            first_layer_transport = "fold"
+        elif token == "foldx":
+            first_layer_transport = "foldx"
         elif token.startswith("hybr"):
             hybrid_prefix_layers = 2
             hybrid_joint_k3_matched = True
@@ -2551,6 +2619,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         exact_recolor_layers,
         variance_match_start_layer,
         antithetic_fraction,
+        first_layer_transport,
         hybrid_prefix_layers,
         hybrid_skew_matched,
         hybrid_joint_k3_matched,
@@ -2673,6 +2742,7 @@ class Estimator(BaseEstimator):
                 exact_recolor_layers,
                 variance_match_start_layer,
                 antithetic_fraction,
+                first_layer_transport,
                 hybrid_prefix_layers,
                 hybrid_skew_matched,
                 hybrid_joint_k3_matched,
@@ -2726,6 +2796,7 @@ class Estimator(BaseEstimator):
                 mirror_layer=mirror_layer,
                 final_cv3=final_cv3,
                 antithetic_fraction=antithetic_fraction,
+                first_layer_transport=first_layer_transport,
                 posthoc=posthoc,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")

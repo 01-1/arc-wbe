@@ -630,6 +630,26 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   higher-order row-radius error, also lost at half strength:
   `4.117e-7` adjusted / `3.629e-6` MSE / `3.084e10` effective compute with no
   worker failures.
+  A folded-pair first-layer transport tested a narrower antithetic mechanism:
+  for pair preactivation `z`, reconstruct ReLU rows from `(s + z) / 2` and
+  `(s - z) / 2`, preserving the odd component `z` exactly and recoloring only
+  `s = |z|` to the exact multivariate folded-normal mean/covariance. For
+  zero-mean Gaussian preactivations with covariance `C`,
+  `E|Z_i||Z_j| = sigma_i sigma_j * (2/pi) *
+  (sqrt(1-rho^2) + rho*asin(rho))`, so
+  `Cov(ReLU(Z)) = (Cov(|Z|) + C) / 4`; this uses only passed-MLP weights and
+  label-free moment identities, and is not the generic full first-covariance,
+  marginal cubic/skew, support-clipping, `anti<N>`, or radial transport.
+  Mode-gated `hadamard_st3_b16_fold` was clean but not competitive:
+  `3.060e-7` adjusted / `2.998e-6` MSE / `2.707e10` effective compute with
+  `2.460e10` raw FLOPs over 80 returned MLPs and no failures. The
+  cross-orthogonalized neighbor `hadamard_st3_b16_foldx`, which removes finite
+  sample folded/odd cross-covariance before recoloring, recovered some MSE but
+  still lost: `2.968e-7` adjusted / `2.798e-6` MSE / `2.888e10` effective
+  compute with `2.580e10` raw FLOPs over 80 returned MLPs and no failures.
+  Verdict: killed; the lower first-layer transport cost does not offset
+  downstream geometry loss, so default behavior remains unchanged. See
+  `ARC-estimation-research/folded_pair_first_layer_20260707.md`.
   A two-radius fourth-moment mixture after the first-layer covariance recolor,
   alternating centered-row scales while recentering to keep the first reported
   mean fixed, was catastrophic even at half strength: `1.353e-5` adjusted /
