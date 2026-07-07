@@ -40,3 +40,6 @@ paired_fly_logs/
 
 # Research-only external clone.
 ARC-estimation-research/upstream/mlp_cumulant_propagation/
+
+# Worktrees
+.worktrees
