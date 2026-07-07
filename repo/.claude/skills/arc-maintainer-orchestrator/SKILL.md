@@ -24,8 +24,8 @@ Always preserve the ARC White-Box Estimation Challenge rules from `/i/e/AGENTS.m
    - `Autonomous`: clear fit, reproducible, bounded implementation, and usable verification path.
    - `Needs owner`: product choice, security/privacy decision, unavailable credentials/access, unavailable live proof, destructive or irreversible choice, or owner-imposed limit.
    - `Ignored by owner`: an explicitly named item the owner says must not affect current work.
-3. Delegate independent tasks to separate Codex threads by default within this repository, spawning each subagent with `codex exec [PROMPT]` rather than `claude`. Start enough workers to keep autonomous lanes moving, including separate implementation, review, proof, CI, requirements, benchmark, estimator-history, and dependency-audit lanes when those can run in parallel. Whenever assigning or materially changing work, rename the worker thread to `ARC: <short current task>`. Keep related work in an existing repository thread unless parallel subworkers are useful. Do not set or request a custom model; inherit the platform default.
-4. Keep the coordinator thread lightweight and code-free. Delegate all coding work — implementation, fixes, tests, docs edits tied to code changes, and independent verification — to repository workers or subworkers; the orchestrator itself never edits code directly, even for a small or trivial change. Then monitor by reading current state.
+3. Delegate independent tasks to separate Codex threads by default within this repository, spawning run-style subagents with `cxrun <id> [PROMPT]` and review-style subagents with `cxreview <id> [CONTEXT]` rather than lower-level launchers or `claude`. Start enough workers to keep autonomous lanes moving, including separate implementation, review, proof, CI, requirements, benchmark, estimator-history, and dependency-audit lanes when those can run in parallel. Use stable ids that match the lane, such as `fix-tests`, `review-ci`, or `estimator-proof`; whenever assigning or materially changing work, rename the worker thread to `ARC: <short current task>`. Keep related work in an existing repository thread unless parallel subworkers are useful. Do not set or request a custom model; inherit the platform default.
+4. Keep the coordinator thread lightweight and code-free. Delegate all coding work — implementation, fixes, tests, docs edits tied to code changes, and independent verification — to repository workers or subworkers. Exception: the orchestrator may edit code directly only for a tiny change touching at most three files whose size is less than the size of the prompt a worker would need; otherwise it never edits code directly, no matter how small the change. Then monitor by reading current state.
 5. Monitor workers only at the cadence the owner requested. Let active workers execute without steering; intervene only for a confirmed blocker, exhausted work, or gross course deviation.
 6. Continue until each autonomous item is merged/closed with proof, each decision item has a mergeable PR ready for owner land/delete choice, estimator/docs/test work is current, or dependencies are current.
 
@@ -41,12 +41,42 @@ Do not treat ordinary draft, stale, difficult, or platform-specific items as ign
 
 ## Subagent Policy
 
-- Use subagents for all coding work. The orchestrator coordinates, prioritizes, and reports; it never writes, edits, or patches code itself, no matter how small the change. Any implementation, fix, test, or code-adjacent doc update goes to a worker or subworker.
-- The orchestrator is Claude; launch its workers with `codex exec [PROMPT]`, not `claude`, passing the full self-contained prompt as `[PROMPT]`. Those workers are Codex, so when they subdelegate they use their own native Codex delegation and do not wrap subworkers in `codex exec`.
+- Use subagents for all coding work. The orchestrator coordinates, prioritizes, and reports; it does not write, edit, or patch code itself except the three-file exception below. Any implementation, fix, test, or code-adjacent doc update beyond that exception goes to a worker or subworker.
+- The orchestrator is Claude; launch run workers with `cxrun <id> [PROMPT]` and review workers with `cxreview <id> [CONTEXT]`, not lower-level launchers or `claude`, passing full self-contained prompt/context text as arguments. Those workers are Codex, so when they subdelegate they use their own native Codex delegation and do not wrap subworkers in `cxrun` or `cxreview`.
+- Use `cxrun` for run-style worker lifecycle and steering:
+
+```bash
+cxrun fix-tests "fix the failing tests"
+cxrun fix-tests -- "fix the failing tests"
+cxrun steer fix-tests "only change the parser"
+cxrun refactor "refactor the parser
+preserve public behavior
+update focused tests"
+cxrun send refactor "stop broad refactors
+focus on auth only"
+cxrun status
+cxrun stop fix-tests
+```
+
+- Use `cxreview` for review-style worker lifecycle and steering:
+
+```bash
+cxreview my-review
+cxreview review my-review --against main
+cxreview steer my-review "ignore generated files"
+cxreview send my-review "focus on changed parser files"
+cxreview status my-review
+cxreview stop my-review
+```
+
+- Worker ids may be reused after a run or review exits, but not while another run or review with that id is active.
+- Put prompt, context, and steering text directly in the command invocation. Multiline quoted arguments are fine for ordinary worker prompts, review context, or steering messages.
+- If app-server reports that an active review turn is not steerable, `cxreview` prints the exact JSON-RPC error; preserve that error in status reports.
 - Treat owner naming of this repository for ARC maintainer-orchestrator work as permission to create and reuse workers for autonomous bounded tasks within this repository. Ask again only when a new repository, credential, destructive action, unclear product/security decision, proof waiver, or unrecoverable external action requires it.
 - Prefer parallel subagents over single-threaded execution when work is independent or benefits from fresh eyes: queue triage, issue reproduction, PR repair, implementation, code review, requirements coverage, CI log investigation, benchmark analysis, proof, and dependency freshness.
 - Allow repository workers to subdelegate within their assigned scope. They may create focused subworkers for review, tests, logs, live proof, or small implementation slices, then integrate results themselves and report one coherent final state to the orchestrator.
 - Avoid extra subagents only when the task is tiny, strongly sequential, blocked on the same credential/service, or likely to create conflicting edits in the same files. If parallel edits may collide, assign one implementer and separate read-only reviewers/proof workers.
+- Do not use a worker for tiny changes touching at most three files where the size of the change is less than the size of the prompt to the worker; make such changes directly instead of paying the delegation overhead. This is the only case where the orchestrator may edit code itself. Changes touching four or more files always go to a worker regardless of size.
 - Keep prompts self-contained: include repository path, item URL when applicable, default-allow scope, owner-imposed limits, subdelegation boundary, ARC challenge-rule constraints, benchmark expectations, and proof requirements.
 
 ## Decision-Ready Queue Rule

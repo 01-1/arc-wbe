@@ -28,6 +28,22 @@ Guidance for coding agents working in this repository:
   `make fly` uploads the current `estimator.py`, launches 100 one-MLP EWR Fly
   Machines, and prints one averaged WhestBench text summary from the first 80
   returned results. Recent timing is about 20 seconds.
+- Estimator evaluation goes through `make fly` only. Use mode-gated
+  diagnostics on the fixed 100 Fly MLPs, paired against baseline rows, matching
+  the repository's own historical workflow. Do not run the estimator via local
+  generation or an offline campaign.
+- Local generation is allowed only when a gate needs raw activation samples
+  that Fly cannot return, such as spectra or cumulants. It must never be used
+  for running or scoring the estimator.
+- Use `make fly-bank` for truth-bank Fly runs: it uploads the configured
+  estimator, research script, and `analysis/truth_bank/truth_bank.npz`, launches
+  one Machine per bank shard, and writes the configured JSONL. The Makefile
+  target reuses the existing Fly image with `--skip-build`; rebuild the image
+  only through an explicit build path when runner/runtime code actually changes.
+- Use `make fly-payload` for generic Machine-side research tasks that upload an
+  arbitrary manifest plus explicit file set. It also reuses the existing Fly
+  image with `--skip-build`; the payload contains the experiment code, while
+  the image remains the stable runtime envelope.
 - Be liberal with Fly runs when iterating on changed estimator code or comparing
   modes; Fly Machines are approximately free for this workflow. Repeating the
   same run on unchanged code is usually not useful because it evaluates the same
