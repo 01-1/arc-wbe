@@ -149,6 +149,8 @@ def _redact_command(cmd: list[str]) -> list[str]:
             redacted[index + 1] = "<script-url>"
         elif part == "--bank-url":
             redacted[index + 1] = "<bank-url>"
+        elif part == "--payload-url":
+            redacted[index + 1] = "<payload-url>"
     return redacted
 
 
@@ -245,6 +247,11 @@ def _bank_object_key(args: argparse.Namespace, digest: str, source: Path) -> str
     return f"{prefix}/{digest}/{source.name}"
 
 
+def _payload_object_key(args: argparse.Namespace, digest: str) -> str:
+    prefix = args.payload_object_prefix.rstrip("/")
+    return f"{prefix}/{digest}/payload.tar.gz"
+
+
 def _object_bucket(args: argparse.Namespace) -> str:
     bucket = args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")
     if not bucket:
@@ -296,6 +303,18 @@ def _bank_endpoint(args: argparse.Namespace) -> str | None:
     return args.bank_object_endpoint_url or _object_endpoint(args)
 
 
+def _payload_bucket(args: argparse.Namespace) -> str:
+    if args.payload_object_bucket:
+        return args.payload_object_bucket
+    if args.dry_run and not (args.object_bucket or os.environ.get("WHEST_OBJECT_STORE_BUCKET")):
+        return "dry-run-bucket"
+    return _object_bucket(args)
+
+
+def _payload_endpoint(args: argparse.Namespace) -> str | None:
+    return args.payload_object_endpoint_url or _object_endpoint(args)
+
+
 def _object_url(args: argparse.Namespace, key: str) -> str:
     if not args.object_base_url:
         raise SystemExit("--object-base-url is required so workers can read uploaded archives")
@@ -327,6 +346,14 @@ def _bank_object_url(args: argparse.Namespace, key: str) -> str:
     base_url = args.bank_object_base_url or args.object_base_url
     if not base_url:
         raise SystemExit("--bank-object-base-url or --object-base-url is required so workers can read the bank")
+    base = base_url.rstrip("/")
+    return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
+
+
+def _payload_object_url(args: argparse.Namespace, key: str) -> str:
+    base_url = args.payload_object_base_url or args.object_base_url
+    if not base_url:
+        raise SystemExit("--payload-object-base-url or --object-base-url is required so workers can read the payload")
     base = base_url.rstrip("/")
     return f"{base}/{'/'.join(quote(part) for part in key.split('/'))}"
 
@@ -448,6 +475,90 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _payload_archive_root(args: argparse.Namespace) -> Path:
+    return (args.payload_archive_dir or (REPO_ROOT / ".cache" / "whestbench" / "fly-payloads")).resolve()
+
+
+def _payload_arcname(source: Path) -> str:
+    source = source.resolve()
+    try:
+        rel = source.relative_to(REPO_ROOT)
+    except ValueError:
+        rel = Path(source.name)
+    return rel.as_posix()
+
+
+def _iter_payload_sources(args: argparse.Namespace) -> list[Path]:
+    sources = [args.payload_manifest, *args.payload_file]
+    if args.payload_manifest is None:
+        raise SystemExit("--task payload requires --payload-manifest or --payload-url")
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for source in sources:
+        path = source.resolve()
+        if not path.exists():
+            raise SystemExit(f"payload source does not exist: {source}")
+        if path in seen:
+            continue
+        seen.add(path)
+        resolved.append(path)
+    return resolved
+
+
+def _prepare_payload_archive(args: argparse.Namespace) -> tuple[Path, str]:
+    manifest = args.payload_manifest.resolve()
+    if not manifest.is_file():
+        raise SystemExit(f"--payload-manifest must be a file: {args.payload_manifest}")
+    sources = _iter_payload_sources(args)
+    digest = hashlib.sha256()
+    members: list[tuple[Path, str]] = []
+    for source in sorted(sources, key=lambda path: path.as_posix()):
+        if source.is_dir():
+            for child in sorted(path for path in source.rglob("*") if path.is_file()):
+                arcname = f"payload/{_payload_arcname(child)}"
+                members.append((child, arcname))
+        elif source.is_file():
+            arcname = "payload/manifest.json" if source == manifest else f"payload/{_payload_arcname(source)}"
+            members.append((source, arcname))
+        else:
+            raise SystemExit(f"payload source must be a file or directory: {source}")
+    arcnames = [arcname for _, arcname in members]
+    if len(set(arcnames)) != len(arcnames):
+        duplicates = sorted({name for name in arcnames if arcnames.count(name) > 1})
+        raise SystemExit("payload archive has duplicate paths: " + ", ".join(duplicates))
+    for source, arcname in members:
+        digest.update(arcname.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(_file_sha256(source).encode("ascii"))
+        digest.update(b"\0")
+    short_digest = digest.hexdigest()[:16]
+    archive_root = _payload_archive_root(args) / short_digest
+    archive_root.mkdir(parents=True, exist_ok=True)
+    archive = archive_root / "payload.tar.gz"
+    tmp = archive.with_suffix(".tar.gz.tmp")
+    if tmp.exists():
+        tmp.unlink()
+    with tarfile.open(tmp, mode="w:gz", compresslevel=1) as tar:
+        for source, arcname in members:
+            tar.add(source, arcname=arcname)
+    tmp.rename(archive)
+    return archive, short_digest
+
+
+def _payload_url(args: argparse.Namespace) -> str:
+    if args.payload_url:
+        return args.payload_url
+    archive, digest = _prepare_payload_archive(args)
+    key = _payload_object_key(args, digest)
+    bucket = _payload_bucket(args)
+    endpoint = _payload_endpoint(args)
+    if args.upload_payload:
+        _upload_file(args, archive, key, bucket=bucket, endpoint=endpoint)
+    if args.presign_urls:
+        return _presign_url(args, key, bucket=bucket, endpoint=endpoint)
+    return _payload_object_url(args, key)
 
 
 def _upload_file(
@@ -680,6 +791,7 @@ def _entrypoint_args(
     estimator_url: str | None,
     script_url: str | None,
     bank_url: str | None,
+    payload_url: str | None,
     index: int,
     done_sentinel: str,
 ) -> list[str]:
@@ -730,6 +842,19 @@ def _entrypoint_args(
         )
         if args.mode:
             cmd.extend(["--mode", args.mode])
+    elif args.task == "payload":
+        if payload_url is None:
+            raise SystemExit("--task payload requires a payload URL")
+        cmd.extend(
+            [
+                "--payload-url",
+                payload_url,
+                "--shard-index",
+                str(index),
+                "--shard-count",
+                str(args.n_mlps),
+            ]
+        )
     else:
         if dataset_url is None or estimator_url is None:
             raise SystemExit("--task whest requires dataset and estimator URLs")
@@ -778,6 +903,7 @@ def _machine_command(
     estimator_url: str | None,
     script_url: str | None,
     bank_url: str | None,
+    payload_url: str | None,
     index: int,
     run_id: str,
     machine_name: str,
@@ -811,6 +937,7 @@ def _machine_command(
             estimator_url=estimator_url,
             script_url=script_url,
             bank_url=bank_url,
+            payload_url=payload_url,
             index=index,
             done_sentinel=done_sentinel,
         ),
@@ -860,6 +987,7 @@ def _run_machine_api(
     estimator_url: str | None,
     script_url: str | None,
     bank_url: str | None,
+    payload_url: str | None,
     index: int,
     machine_name: str,
     done_sentinel: str,
@@ -879,6 +1007,7 @@ def _run_machine_api(
                     estimator_url=estimator_url,
                     script_url=script_url,
                     bank_url=bank_url,
+                    payload_url=payload_url,
                     index=index,
                     done_sentinel=done_sentinel,
                 )
@@ -1031,8 +1160,6 @@ def _wait_for_log_sentinel(
 
 
 def _sentinel_returncode(output: str, done_sentinel: str) -> int:
-    if "WHEST_RESULT_JSON " in output or "WHEST_RESULT_JSON_B64_DONE " in output:
-        return 0
     for line in output.splitlines():
         marker = "returncode="
         if done_sentinel not in line or marker not in line:
@@ -1042,6 +1169,8 @@ def _sentinel_returncode(output: str, done_sentinel: str) -> int:
             return int(value)
         except ValueError:
             return 1
+    if "WHEST_RESULT_JSON " in output or "WHEST_RESULT_JSON_B64_DONE " in output:
+        return 0
     for line in output.splitlines():
         marker = "Main child exited normally with code:"
         if marker not in line:
@@ -1270,6 +1399,13 @@ def _print_whest_aggregate(args: argparse.Namespace, whest_results: list[dict[st
             )
         )
         return
+    if args.task == "payload":
+        payload_results = [result for result in whest_results if result.get("task") == "payload"]
+        if not payload_results:
+            print("Payload aggregate: no results")
+            return
+        print(f"Payload aggregate ({len(payload_results)} returned shards)")
+        return
     if not whest_results:
         print("WhestBench aggregate: no results")
         return
@@ -1329,6 +1465,7 @@ def _run_machine(
     estimator_url: str | None,
     script_url: str | None,
     bank_url: str | None,
+    payload_url: str | None,
     run_id: str,
     index: int,
 ) -> tuple[int, int, str, float | None, float | None, float | None]:
@@ -1342,6 +1479,7 @@ def _run_machine(
         estimator_url=estimator_url,
         script_url=script_url,
         bank_url=bank_url,
+        payload_url=payload_url,
         index=index,
         run_id=run_id,
         machine_name=machine_name,
@@ -1359,6 +1497,7 @@ def _run_machine(
                 estimator_url=estimator_url,
                 script_url=script_url,
                 bank_url=bank_url,
+                payload_url=payload_url,
                 index=index,
                 machine_name=machine_name,
                 done_sentinel=done_sentinel,
@@ -1438,6 +1577,7 @@ def _run_machines(
     estimator_url: str | None,
     script_url: str | None,
     bank_url: str | None,
+    payload_url: str | None,
 ) -> None:
     if args.skip_run:
         return
@@ -1459,7 +1599,7 @@ def _run_machines(
 
         def run_after_start(index: int) -> tuple[int, int, str, float | None, float | None, float | None]:
             start_event.wait()
-            return _run_machine(args, image, dataset_urls, estimator_url, script_url, bank_url, run_id, index)
+            return _run_machine(args, image, dataset_urls, estimator_url, script_url, bank_url, payload_url, run_id, index)
 
         futures = {
             pool.submit(run_after_start, index): index
@@ -1596,7 +1736,7 @@ def _run_machines(
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, help="Existing Fly app used for registry and Machines.")
-    parser.add_argument("--task", choices=("whest", "truth", "bank"), default="whest")
+    parser.add_argument("--task", choices=("whest", "truth", "bank", "payload"), default="whest")
     parser.add_argument("--n-mlps", type=int, default=100)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--source-dataset", default=DEFAULT_SOURCE_DATASET)
@@ -1635,18 +1775,33 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--bank-url")
     parser.add_argument("--bank-object-prefix", default="whest/research-banks")
     parser.add_argument("--bank-object-bucket")
+    parser.add_argument("--payload-manifest", type=Path, help="Manifest JSON to include as payload/manifest.json.")
+    parser.add_argument(
+        "--payload-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="File or directory to include in the generic payload archive. May be repeated.",
+    )
+    parser.add_argument("--payload-url", help="Use an already-uploaded generic payload archive.")
+    parser.add_argument("--payload-archive-dir", type=Path)
+    parser.add_argument("--payload-object-prefix", default="whest/payloads")
+    parser.add_argument("--payload-object-bucket")
     parser.add_argument("--object-base-url")
     parser.add_argument("--estimator-object-base-url")
     parser.add_argument("--research-script-object-base-url")
     parser.add_argument("--bank-object-base-url")
+    parser.add_argument("--payload-object-base-url")
     parser.add_argument("--object-endpoint-url")
     parser.add_argument("--estimator-object-endpoint-url")
     parser.add_argument("--research-script-object-endpoint-url")
     parser.add_argument("--bank-object-endpoint-url")
+    parser.add_argument("--payload-object-endpoint-url")
     parser.add_argument("--upload", action="store_true", help="Upload one-MLP archives with aws s3 cp.")
     parser.add_argument("--upload-estimator", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--upload-research-script", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--upload-bank", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--upload-payload", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--estimator-url")
     parser.add_argument(
         "--estimator-url-cache",
@@ -1704,6 +1859,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             raise SystemExit("--truth-target-seconds must be positive")
         if args.truth_chunk_pairs <= 0 or args.truth_min_pairs <= 0:
             raise SystemExit("--truth-chunk-pairs and --truth-min-pairs must be positive")
+    if args.task == "payload":
+        if args.payload_url is None and args.payload_manifest is None:
+            raise SystemExit("--task payload requires --payload-manifest or --payload-url")
     if args.min_results is not None and not (0 < args.min_results <= args.n_mlps):
         raise SystemExit("--min-results must be between 1 and --n-mlps")
     if args.residual_compute_scale is not None and args.residual_compute_scale <= 0:
@@ -1726,6 +1884,7 @@ def main(argv: list[str] | None = None) -> int:
     estimator_url: str | None = None
     script_url: str | None = None
     bank_url: str | None = None
+    payload_url: str | None = None
     if args.task == "truth":
         step_started_at = time.monotonic()
         print("Preparing research script URL...", flush=True)
@@ -1757,6 +1916,14 @@ def main(argv: list[str] | None = None) -> int:
             f"Research script URL ready ({prepare_timings['prepare_research_script_url_s']:.3f}s)",
             flush=True,
         )
+    elif args.task == "payload":
+        step_started_at = time.monotonic()
+        print("Preparing generic payload URL...", flush=True)
+        payload_url = _payload_url(args)
+        prepare_timings["prepare_payload_url_s"] = time.monotonic() - step_started_at
+        prepare_timings["prepare_dataset_urls_s"] = 0.0
+        prepare_timings["prepare_estimator_url_s"] = 0.0
+        print(f"Payload URL ready ({prepare_timings['prepare_payload_url_s']:.3f}s)", flush=True)
     else:
         step_started_at = time.monotonic()
         print("Preparing dataset URLs...", flush=True)
@@ -1797,6 +1964,15 @@ def main(argv: list[str] | None = None) -> int:
                     "shard_count": args.n_mlps,
                 }
             )
+        elif args.task == "payload":
+            payload.update(
+                {
+                    "payload_url": payload_url,
+                    "payload_manifest": str(args.payload_manifest) if args.payload_manifest else None,
+                    "payload_files": [str(path) for path in args.payload_file],
+                    "shard_count": args.n_mlps,
+                }
+            )
         else:
             payload.update(
                 {
@@ -1822,7 +1998,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Fly image: {image}", flush=True)
     if args.build_only:
         return 0
-    _run_machines(args, image, dataset_urls, estimator_url, script_url, bank_url)
+    _run_machines(args, image, dataset_urls, estimator_url, script_url, bank_url, payload_url)
     return 0
 
 

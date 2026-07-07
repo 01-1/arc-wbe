@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -22,11 +23,12 @@ JSON_CHUNK_SIZE = 4000
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", choices=("whest", "truth", "bank"), default="whest")
+    parser.add_argument("--task", choices=("whest", "truth", "bank", "payload"), default="whest")
     parser.add_argument("--dataset-url")
     parser.add_argument("--estimator-url")
     parser.add_argument("--script-url")
     parser.add_argument("--bank-url")
+    parser.add_argument("--payload-url")
     parser.add_argument("--mlp-index", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--shard-index", type=int)
@@ -61,6 +63,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         or args.shard_count is None
     ):
         parser.error("--task bank requires --script-url, --estimator-url, --bank-url, --shard-index, and --shard-count")
+    if args.task == "payload" and (not args.payload_url or args.shard_index is None or args.shard_count is None):
+        parser.error("--task payload requires --payload-url, --shard-index, and --shard-count")
     return args
 
 
@@ -81,6 +85,107 @@ def _extract(archive: Path, output_dir: Path) -> Path:
     if not (dataset / "metadata.json").is_file():
         raise SystemExit(f"downloaded archive did not contain a WhestBench dataset: {dataset}")
     return dataset
+
+
+def _extract_payload(archive: Path, output_dir: Path) -> Path:
+    with tarfile.open(archive, mode="r:gz") as tar:
+        tar.extractall(output_dir, filter="data")
+    payload = output_dir / "payload"
+    if not (payload / "manifest.json").is_file():
+        raise SystemExit("payload archive must contain payload/manifest.json")
+    return payload
+
+
+def _load_payload_manifest(payload: Path) -> dict[str, object]:
+    manifest_path = payload / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid payload manifest JSON: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise SystemExit("payload manifest must be a JSON object")
+    command = manifest.get("command")
+    if not isinstance(command, list) or not command or not all(isinstance(part, str) for part in command):
+        raise SystemExit("payload manifest must define command as a non-empty string list")
+    env = manifest.get("env", {})
+    if not isinstance(env, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in env.items()):
+        raise SystemExit("payload manifest env must be an object of string keys and values")
+    workdir = manifest.get("workdir", ".")
+    if not isinstance(workdir, str):
+        raise SystemExit("payload manifest workdir must be a string")
+    result_json = manifest.get("result_json")
+    if result_json is not None and not isinstance(result_json, str):
+        raise SystemExit("payload manifest result_json must be a string")
+    return manifest
+
+
+def _payload_format(value: str, args: argparse.Namespace, payload: Path) -> str:
+    return value.format(
+        index=args.shard_index,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
+        n_mlps=args.shard_count,
+        payload_dir=str(payload),
+    )
+
+
+def _run_payload(payload: Path, args: argparse.Namespace) -> tuple[int, str]:
+    manifest = _load_payload_manifest(payload)
+    command = [
+        _payload_format(part, args, payload)
+        for part in manifest["command"]
+        if isinstance(part, str)
+    ]
+    workdir_text = _payload_format(str(manifest.get("workdir", ".")), args, payload)
+    workdir = (payload / workdir_text).resolve()
+    try:
+        workdir.relative_to(payload.resolve())
+    except ValueError as exc:
+        raise SystemExit(f"payload workdir escapes payload: {workdir}") from exc
+    env = os.environ.copy()
+    manifest_env = manifest.get("env", {})
+    if isinstance(manifest_env, dict):
+        for key, value in manifest_env.items():
+            if isinstance(key, str) and isinstance(value, str):
+                env[key] = _payload_format(value, args, payload)
+    env.setdefault("WHEST_PAYLOAD_DIR", str(payload))
+    env.setdefault("WHEST_SHARD_INDEX", str(args.shard_index))
+    env.setdefault("WHEST_SHARD_COUNT", str(args.shard_count))
+    env.setdefault("WHEST_BANK_INDEX", str(args.shard_index))
+    proc = subprocess.run(
+        command,
+        cwd=workdir,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    result_json = manifest.get("result_json")
+    payload_obj: dict[str, object] | None = None
+    if isinstance(result_json, str):
+        result_path = (workdir / _payload_format(result_json, args, payload)).resolve()
+        try:
+            result_path.relative_to(payload.resolve())
+        except ValueError as exc:
+            raise SystemExit(f"payload result_json escapes payload: {result_path}") from exc
+        if result_path.is_file():
+            try:
+                loaded = json.loads(result_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid payload result_json: {exc}") from exc
+            if isinstance(loaded, dict):
+                payload_obj = loaded
+    if payload_obj is None:
+        payload_obj = _json_object_from_output(proc.stdout)
+    if isinstance(payload_obj, dict):
+        payload_obj.setdefault("task", "payload")
+        payload_obj.setdefault("shard_index", args.shard_index)
+        payload_obj.setdefault("shard_count", args.shard_count)
+        _print_chunked_result(payload_obj)
+    else:
+        print(proc.stdout, end="")
+    return proc.returncode, proc.stdout
 
 
 def _json_object_from_output(output: str) -> dict[str, object] | None:
@@ -137,6 +242,21 @@ def main(argv: list[str] | None = None) -> int:
     started_at = time.monotonic()
     try:
         work = Path(tempfile.mkdtemp(prefix="whest-fly-"))
+        if args.task == "payload":
+            archive = work / "payload.tar.gz"
+            payload_root = work / "payload-root"
+            payload_root.mkdir()
+            step_started_at = time.monotonic()
+            _download(args.payload_url, archive)
+            timings["worker_download_payload_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            payload = _extract_payload(archive, payload_root)
+            timings["worker_extract_payload_s"] = time.monotonic() - step_started_at
+            step_started_at = time.monotonic()
+            returncode, _ = _run_payload(payload, args)
+            timings["worker_task_s"] = time.monotonic() - step_started_at
+            timings["worker_total_s"] = time.monotonic() - started_at
+            return returncode
         if args.task == "truth":
             script = work / "truth_entrypoint.py"
             step_started_at = time.monotonic()

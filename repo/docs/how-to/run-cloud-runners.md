@@ -120,3 +120,65 @@ For repeated tests with the same sampled dataset, use `make fly-large-fast` afte
 by default because estimator iteration is the main loop. The fast target also
 uses `--skip-build`, so the measured path starts at Machine launch and waits
 only until each Machine prints the done sentinel; teardown time is ignored.
+
+## Fly.io: Generic Payload Runs
+
+Research gates that are not `estimator.py` scoring should use the same stable
+Fly image as a minimal runtime envelope. Upload experiment code as a per-run
+payload instead of baking a fresh image or growing shared runner code.
+
+Create a manifest JSON:
+
+```json
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/readout_smoothing_fly_entrypoint_20260706.py",
+    "--bank-index",
+    "{shard_index}",
+    "--shard-count",
+    "{shard_count}",
+    "--out",
+    "result.json"
+  ],
+  "result_json": "result.json"
+}
+```
+
+Then dry-run the payload launch:
+
+```bash
+make fly-payload-dry \
+  FLY_APP=<your-fly-app> \
+  FLY_MLPS=100 \
+  FLY_PAYLOAD_MANIFEST=paired_fly_logs/fingerprint_theory/readout_manifest.json \
+  FLY_PAYLOAD_FILES="paired_fly_logs/fingerprint_theory/readout_smoothing_fly_entrypoint_20260706.py analysis/truth_bank/loader.py"
+```
+
+Run it for real with the same arguments:
+
+```bash
+make fly-payload \
+  FLY_APP=<your-fly-app> \
+  FLY_MLPS=100 \
+  FLY_PAYLOAD_MANIFEST=paired_fly_logs/fingerprint_theory/readout_manifest.json \
+  FLY_PAYLOAD_FILES="paired_fly_logs/fingerprint_theory/readout_smoothing_fly_entrypoint_20260706.py analysis/truth_bank/loader.py"
+```
+
+The payload archive preserves repository-relative paths under `payload/`, with
+the manifest always available as `payload/manifest.json`. The Machine sets these
+environment variables for the command:
+
+| Variable | Meaning |
+|---|---|
+| `WHEST_PAYLOAD_DIR` | Absolute path to the unpacked payload |
+| `WHEST_SHARD_INDEX` | Zero-based Machine assignment |
+| `WHEST_SHARD_COUNT` | Number of launched shards |
+| `WHEST_BANK_INDEX` | Alias for `WHEST_SHARD_INDEX` |
+
+Manifest strings can use `{shard_index}`, `{index}`, `{shard_count}`,
+`{n_mlps}`, and `{payload_dir}` placeholders. If `result_json` is present, the
+Machine reads that JSON file and returns it through the normal
+`WHEST_RESULT_JSON_B64_*` log channel. Otherwise it tries to parse the command's
+stdout as one JSON object. The launcher appends parsed results to
+`FLY_PAYLOAD_JSONL`.
