@@ -183,6 +183,11 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   unconstrained centered scale's geometry is more useful than enforcing ReLU
   support at that point: `3.624e-7` adjusted / `3.193e-6` MSE / `3.085e10`
   effective compute with no worker failures.
+  A monotone nonnegative power transform of the first-successor ReLU
+  activations, normalized back to the original sample mean while using the
+  target/sample variance ratio as a coordinatewise exponent, reached the compute
+  floor but lost too much raw MSE: `3.249e-7` adjusted / `3.238e-6` MSE /
+  `2.502e10` effective compute with no worker failures.
   Applying the same variance-ratio correction to centered preactivations before
   the first-successor ReLU, instead of to centered post-ReLU activations, was a
   decisive loss at `1.5x`: `5.821e-7` adjusted / `5.130e-6` MSE /
