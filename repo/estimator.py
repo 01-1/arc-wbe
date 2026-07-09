@@ -98,6 +98,7 @@ class _HadamardPosthocConfig:
     trimmed_final: bool = False
     second_variance_strength: float | None = None
     hermite2_cv_shrink: float = 0.0
+    exact_dead_prune: bool = False
 
 
 def _hermite_prob(n: int, x: fnp.ndarray) -> fnp.ndarray:
@@ -1816,6 +1817,33 @@ def _strassen_matmul(a: fnp.ndarray, b: fnp.ndarray, levels: int) -> fnp.ndarray
     return _strassen_matmul_batched(a, b, levels)
 
 
+def _exact_dead_input_matmul(
+    x: fnp.ndarray,
+    w: fnp.ndarray,
+    strassen_levels: int,
+) -> fnp.ndarray:
+    """Skip input coordinates that are identically zero across all rows.
+
+    This is an exact real-arithmetic simplification: omitted coordinates
+    contribute only ``0 * w`` to every output.  For L1--L3, pad the compact
+    inner dimension to the recursion divisor so useful Strassen savings are
+    retained; very narrow compact products fall back to the plain helper.
+    """
+    live = fnp.flatnonzero(fnp.any(x != 0.0, axis=0))
+    live_count = live.shape[0]
+    if live_count == x.shape[1]:
+        return _strassen_matmul(x, w, strassen_levels)
+    x_live = x[:, live]
+    w_live = w[live, :]
+    if 0 < strassen_levels <= 3:
+        divisor = 1 << strassen_levels
+        padded_count = ((live_count + divisor - 1) // divisor) * divisor
+        if padded_count != live_count:
+            x_live = fnp.pad(x_live, ((0, 0), (0, padded_count - live_count)))
+            w_live = fnp.pad(w_live, ((0, padded_count - live_count), (0, 0)))
+    return _strassen_matmul(x_live, w_live, strassen_levels)
+
+
 def _hybrid_analytic_blocks_for_budget(
     mlp: MLP,
     budget: int,
@@ -2284,7 +2312,10 @@ def _hadamard_first_cov_recolored_means(
     rows = [target_mean.astype(fnp.float64)]
     final_pre = None
     for layer_idx, (w, w_prop) in enumerate(zip(mlp.weights[1:], weights_f32[1:]), start=1):
-        pre = _strassen_matmul(x, w_prop, strassen_levels)
+        if posthoc.exact_dead_prune:
+            pre = _exact_dead_input_matmul(x, w_prop, strassen_levels)
+        else:
+            pre = _strassen_matmul(x, w_prop, strassen_levels)
         final_pre = pre
         x = fnp.maximum(pre, 0.0)
         if layer_idx <= exact_recolor_layers:
@@ -2452,6 +2483,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     trimmed_final = False
     second_variance_strength = None
     hermite2_cv_shrink = 0.0
+    exact_dead_prune = False
     suffix = mode[len("hadamard") :]
     if suffix.startswith("_"):
         suffix = suffix[1:]
@@ -2528,6 +2560,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             second_variance_strength = max(int(token[len("w2") :]) / 100.0, 0.0)
         elif token.startswith("h2cv"):
             hermite2_cv_shrink = max(int(token[len("h2cv") :]) / 100.0, 0.0)
+        elif token == "prune":
+            exact_dead_prune = True
         elif token == "l2x":
             exact_recolor_layers = 1
             variance_match_start_layer = 99
@@ -2564,6 +2598,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             trimmed_final=trimmed_final,
             second_variance_strength=second_variance_strength,
             hermite2_cv_shrink=hermite2_cv_shrink,
+            exact_dead_prune=exact_dead_prune,
         ),
     )
 
