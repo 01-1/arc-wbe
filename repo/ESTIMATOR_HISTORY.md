@@ -2361,7 +2361,12 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   `2.370e9` residual compute. This is within the route's established noise
   band and costs more than the current `2.535e10`-class raw path, so no
   full-100 paired follow-up was warranted. Keep `haar` diagnostic-only and
-  leave the default unchanged.
+  leave the default unchanged. A later sanctioned `make fly-mode
+  MODE=hadamard_st3_b16_haar` confirmation also returned 80/80 with no
+  failures at `2.966e-7` adjusted / `2.788e-6` final-layer MSE /
+  `2.609e10` raw / `2.912e10` effective compute (`3.032e9` residual),
+  confirming that the mode remains well above the target and should not be
+  promoted.
 
 - **2026-07-09 packed gate-clustered two-sided pruning gate fails.** The
   machine-side gate returned `100/100` shards with valid checksums and zero
