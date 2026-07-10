@@ -2299,6 +2299,100 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   or `make fly` was warranted. Report:
   `ARC-estimation-research/remaining_lane_audit_20260707.md`.
 
+- **2026-07-09 exact-dead input-column pruning reaches the compute floor but
+  is not a score win.** A mode-gated `hadamard_st3_b16_prune` diagnostic
+  removes an input coordinate from a propagation matmul only when its
+  post-ReLU activation is exactly zero across every propagated ensemble row,
+  slicing the corresponding weight row and padding the compact inner dimension
+  to the L3 recursion divisor. This is an exact real-arithmetic simplification
+  using only the passed MLP and the estimator's own activations. Inspection of
+  the installed flopscope implementation confirmed that `fnp.flatnonzero`
+  returns a concrete metered NumPy array and `fnp.pad` accepts its resulting
+  host-static width; `python -m py_compile estimator.py` passed, and Fly
+  accepted the data-dependent shapes.
+
+  The first normal-window Fly smoke saved real arithmetic but had one known
+  `combined_budget_exhausted` harness artifact: `2.273e10` raw FLOPs and
+  `2.724e10` effective compute over 80 returned MLPs. A clean confirmation
+  returned 80/80 with no failures at `2.897e-7` adjusted / `2.838e-6`
+  final-layer MSE / `2.270e10` raw / `2.649e10` effective. Relative to the
+  current `2.535e10`-class raw route, union pruning saves about `10.5%` and
+  reaches the score-multiplier floor, but it leaves the sampling MSE in the
+  established 16-block band and therefore does not approach the `1.6e-7`
+  target.
+
+  A stronger transient implementation pruned independently within contiguous
+  512-row groups. It reduced raw FLOPs only to `2.201e10`, while fragmented
+  kernels raised residual compute to `6.444e9`; five harness-side combined
+  budget artifacts poisoned the 80-result aggregate. The extra `~3.0%` raw
+  saving over union pruning is far too small to offset the wall/residual cost,
+  so the blockwise mode was removed. Verdict: keep union pruning diagnostic
+  only; do not promote it or reopen smaller pruning groups without a
+  large-kernel implementation that changes the measured economics.
+
+- **2026-07-09 positive-homogeneity angular-importance gate fails.** The
+  pre-registered `make fly-payload` gate evaluated a pilot-fitted,
+  first-layer folded angular proposal on all 100 research MLP shards with
+  no failures and verified weight checksums. The exact likelihood-ratio and
+  direct-sampling checks passed: pooled direct/identity second-moment ratio
+  `0.999918`, variance ratio `0.992466`, and normalized mean-difference
+  statistic `0.999164`; importance-weight ESS median/q10 were `0.996874`/
+  `0.996551`, with global maximum weight `1.28767`.
+
+  The fitted proposal did not capture enough terminal amplitude: pooled
+  variance ratio was only `1.14483x`, with per-MLP median/q10 `1.11882x`/
+  `1.04196x`, giving projected total variance fraction `0.88931x` rather
+  than the required `<=0.58x`. The unattainable oracle proposal reached
+  `2.42675x` pooled, confirming the surrogate gap. Verdict: **FAIL**;
+  do not add an estimator mode. Artifacts:
+  `paired_fly_logs/fingerprint_theory/angular_importance_gate_20260709.md`,
+  `angular_importance_gate_20260709_fly.jsonl`, and
+  `angular_importance_gate_20260709_results.json`.
+
+- **2026-07-09 Haar-orthogonal angular blocks are not a mechanism-scale win.**
+  A mode-gated `hadamard_st3_b16_haar` diagnostic replaced each positive
+  Hadamard half-block with an independent QR-generated Haar orthogonal block,
+  applied deterministic QR sign normalization, scaled rows to the
+  `sqrt(width)` spherical/Gaussian covariance convention, and reused the
+  exact antithetic first-layer shortcut, recolor, `1.5x` variance match,
+  fp32 propagation, and L3 Strassen path. The normal-window Fly run returned
+  80/80 MLPs with no failures at `2.824e-7` adjusted / `2.705e-6`
+  final-layer MSE / `2.609e10` raw / `2.846e10` effective compute, with
+  `2.370e9` residual compute. This is within the route's established noise
+  band and costs more than the current `2.535e10`-class raw path, so no
+  full-100 paired follow-up was warranted. Keep `haar` diagnostic-only and
+  leave the default unchanged.
+
+- **2026-07-09 packed gate-clustered two-sided pruning gate fails.** The
+  machine-side gate returned `100/100` shards with valid checksums and zero
+  certificate violations. The best `gatekey32`/`support_lex` group-64 box had
+  decision product mean `0.7328` (required `<=0.31`), certificate recall
+  effectively zero, and projected 28-block raw FLOPs q90 `5.15e10` (required
+  `<=2.4e10`). Verdict: **FAIL**; no estimator mode. Artifacts:
+  `paired_fly_logs/fingerprint_theory/packed_gate_cluster_pruning_gate_20260709.md`,
+  `packed_gate_cluster_pruning_gate_20260709_report.md`,
+  `packed_gate_cluster_pruning_gate_20260709_results.json`,
+  `packed_gate_cluster_pruning_gate_20260709_fly.jsonl`, and
+  `packed_gate_cluster_pruning_gate_20260709.jsonl`.
+
+- **2026-07-09 scalar angular-importance ceiling closeout.** The i.i.d.
+  angular 4096-pair baseline had mean coordinate MSE `5.217e-6`, requiring a
+  `3.261x` variance reduction to reach `1.6e-6`. Even the globally optimal
+  scalar likelihood-ratio proposal `q proportional ||g31||` reached only
+  `2.4268x`; its oracle MSE was `2.150e-6` without a pilot and `2.533e-6`
+  with a 1/8 pilot. Therefore every scalar likelihood-ratio angular proposal
+  is target-ceiling-dead; no further proposal gate is justified. The measured
+  artifacts are the angular-importance gate files cited above.
+
+- **2026-07-09 matrix-/coordinate-specific angular estimators are closed.**
+  For a fixed shared set of proposal evaluations, any universally unbiased
+  matrix-weight estimator Rao-Blackwellizes to scalar balance weights on the
+  same vector integrand; output-specific proposals or grouping cannot beat
+  the scalar optimum `q proportional ||g||`. The only remaining loophole is
+  a known-mean vector control, but anchored, H2, block, and conditional gates
+  are all negligible at target scale. Verdict: **NO-GO**; only structured
+  fixed-count negative dependence remains as an untested family.
+
 ## Benchmarking Notes
 
 Use current scorer-path comparisons, not stale flops-only proxies. For

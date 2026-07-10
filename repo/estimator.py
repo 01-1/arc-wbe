@@ -1542,6 +1542,30 @@ def _hadamard_sign_fresh_half_blocks(
     return fnp.concatenate(tuple(blocks), axis=0)
 
 
+def _haar_orthogonal_half_blocks(
+    mlp: MLP,
+    n_blocks: int,
+    rng: fnp.random.Generator,
+) -> fnp.ndarray:
+    """Return independent Haar-orthogonal angular blocks at Gaussian radius.
+
+    A reduced QR of a standard-normal square matrix is Haar orthogonal after
+    deterministic column-sign normalization.  Rows are scaled by
+    ``sqrt(width)`` so every direction has the same covariance convention as
+    the existing Hadamard sphere blocks; callers supply the exact antithetic
+    negatives without a second first-layer matmul.
+    """
+    width = mlp.width
+    blocks = []
+    for _ in range(max(int(n_blocks), 1)):
+        gaussian = rng.standard_normal((width, width))
+        q, r = fnp.linalg.qr(gaussian)
+        signs = fnp.where(fnp.diag(r) >= 0.0, 1.0, -1.0)
+        q = q * signs[None, :]
+        blocks.append((math.sqrt(width) * q.T).astype(fnp.float32))
+    return fnp.concatenate(tuple(blocks), axis=0)
+
+
 def _norm_ppf(p: float) -> float:
     """Acklam rational approximation to the standard normal quantile."""
     a = (-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
@@ -2231,6 +2255,7 @@ def _hadamard_first_cov_recolored_means(
     mirror_layer: int | None = None,
     final_cv3: bool = False,
     antithetic_fraction: float = 1.0,
+    haar_orthogonal: bool = False,
     posthoc: _HadamardPosthocConfig | None = None,
 ) -> fnp.ndarray:
     """Hadamard ensemble recolored to the exact first ReLU covariance."""
@@ -2251,7 +2276,10 @@ def _hadamard_first_cov_recolored_means(
         h2_cv_weight = h2_cv_weight / fnp.maximum(fnp.mean(h2_cv_weight), _MIN_VARIANCE)
         h2_cv_std = fnp.sqrt(fnp.maximum(fnp.diag(w0.T @ w0), _MIN_VARIANCE))
     if antithetic_blocks:
-        x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor).astype(fnp.float32)
+        if haar_orthogonal and split_factor == 1:
+            x_half = _haar_orthogonal_half_blocks(mlp, antithetic_blocks, rng)
+        else:
+            x_half = _hadamard_sign_half_blocks(mlp, antithetic_blocks * 2 * mlp.width, rng, split_factor).astype(fnp.float32)
         pre_half = _strassen_matmul(x_half, w0_f32, strassen_levels)
         if radial_chi:
             scales = fnp.array(_chi_stratified_radial_scales(mlp.width), dtype=fnp.float32)
@@ -2455,6 +2483,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     int,
     int,
     float,
+    bool,
     int | None,
     bool,
     bool,
@@ -2471,6 +2500,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     exact_recolor_layers = 0
     variance_match_start_layer = 1
     antithetic_fraction = 1.0
+    haar_orthogonal = False
     hybrid_prefix_layers = None
     hybrid_skew_matched = False
     hybrid_joint_k3_matched = False
@@ -2498,6 +2528,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             exact_recolor_layers,
             variance_match_start_layer,
             antithetic_fraction,
+            haar_orthogonal,
             hybrid_prefix_layers,
             hybrid_skew_matched,
             hybrid_joint_k3_matched,
@@ -2523,6 +2554,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
                 min(int(token[len("anti") :]) / 100.0, 1.0),
                 0.0,
             )
+        elif token == "haar":
+            haar_orthogonal = True
         elif token.startswith("hybr"):
             hybrid_prefix_layers = 2
             hybrid_joint_k3_matched = True
@@ -2585,6 +2618,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         exact_recolor_layers,
         variance_match_start_layer,
         antithetic_fraction,
+        haar_orthogonal,
         hybrid_prefix_layers,
         hybrid_skew_matched,
         hybrid_joint_k3_matched,
@@ -2708,6 +2742,7 @@ class Estimator(BaseEstimator):
                 exact_recolor_layers,
                 variance_match_start_layer,
                 antithetic_fraction,
+                haar_orthogonal,
                 hybrid_prefix_layers,
                 hybrid_skew_matched,
                 hybrid_joint_k3_matched,
@@ -2761,6 +2796,7 @@ class Estimator(BaseEstimator):
                 mirror_layer=mirror_layer,
                 final_cv3=final_cv3,
                 antithetic_fraction=antithetic_fraction,
+                haar_orthogonal=haar_orthogonal,
                 posthoc=posthoc,
             )
         raise ValueError(f"Unsupported WHEST_EXPERIMENT_MODE/WHEST_K3_MODE: {mode}")
