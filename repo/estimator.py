@@ -2,9 +2,9 @@
 
 Submission for https://www.aicrowd.com/challenges/arc-white-box-estimation-challenge-2026.
 
-Depth-32 contest MLPs use randomized antithetic Hadamard cubature with exact
-first-layer ReLU mean/covariance recoloring. Shallower MLPs use the optimized
-factorized K=3 r=1 cumulant route.
+Contest MLPs use randomized antithetic Hadamard cubature with exact first-layer
+ReLU mean/covariance recoloring. The grader shape and budget are fixed, so the
+unforced route and block count are fixed as well.
 """
 
 from __future__ import annotations
@@ -26,23 +26,9 @@ if hasattr(flops, "configure"):
     flops.configure(symmetry_warnings=False)
 
 _MIN_VARIANCE = 1e-30
-_DEEP_HADAMARD_MIN_DEPTH = 16
 _DEEP_HADAMARD_BLOCKS = 16
 _DEEP_STRASSEN_LEVELS = 3
 _DEEP_VARIANCE_MATCH_STRENGTH = 1.5
-_DEEP_HADAMARD_MAX_BLOCKS = 32
-_DEEP_BLOCK_FIXED_OVERHEAD = 1.09
-_DEEP_BLOCK_COST_SAFETY = 1.03
-_DEEP_MEASURED_ROW_FLOPS = {
-    3: 3.10e6,
-    4: 2.94e6,
-}
-_DEEP_RESIDUAL_BLOCK_SAFETY = {
-    3: 1.0,
-    4: 1.06,
-}
-_HYBRID_ANALYTIC_LAYER_FLOPS = 1.05e8
-_HYBRID_JOINT_K3_PREFIX_FLOPS = 1.1e9
 _HYBRID_JOINT_K3_MAX_TERMS = 128
 _HYBRID_JOINT_K3_COV_FRACTION = 0.5
 _HYBRID_JOINT_K3_GLOBAL_DAMP = 0.516
@@ -1868,44 +1854,6 @@ def _exact_dead_input_matmul(
     return _strassen_matmul(x_live, w_live, strassen_levels)
 
 
-def _hybrid_analytic_blocks_for_budget(
-    mlp: MLP,
-    budget: int,
-    strassen_levels: int,
-    prefix_layers: int,
-    joint_k3_matched: bool = False,
-) -> int:
-    rows_per_block = 2 * mlp.width
-    suffix_layers = max(mlp.depth - prefix_layers, 1)
-    measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(strassen_levels)
-    analytic_cost = (
-        _HYBRID_JOINT_K3_PREFIX_FLOPS
-        if joint_k3_matched
-        else max(prefix_layers, 1) * _HYBRID_ANALYTIC_LAYER_FLOPS
-    )
-    score_floor_budget = max(0.1 * budget - analytic_cost, rows_per_block)
-    if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
-        per_block_cost = (
-            rows_per_block
-            * measured_row_cost
-            * suffix_layers
-            / mlp.depth
-            * _DEEP_BLOCK_COST_SAFETY
-            * _DEEP_RESIDUAL_BLOCK_SAFETY.get(strassen_levels, 1.0)
-        )
-    else:
-        plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
-        strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
-        per_block_cost = (
-            suffix_layers
-            * plain_layer_cost
-            * strassen_discount
-            * _DEEP_BLOCK_FIXED_OVERHEAD
-            * _DEEP_BLOCK_COST_SAFETY
-        )
-    return min(max(int(score_floor_budget // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
-
-
 def _layer2_gaussian_prefix_and_factored_k3(mlp: MLP) -> tuple[fnp.ndarray, fnp.ndarray, _FactoredThird]:
     width = mlp.width
     w0 = mlp.weights[0]
@@ -2025,7 +1973,7 @@ def _taper_joint_k3_terms(
     if gamma.shape[1] == 0:
         return gamma, u, v
     eigvals, eigvecs = fnp.linalg.eigh(cov)
-    budget = _HYBRID_JOINT_K3_COV_FRACTION * fnp.maximum(eigvals, _MIN_VARIANCE)
+    covariance_allowance = _HYBRID_JOINT_K3_COV_FRACTION * fnp.maximum(eigvals, _MIN_VARIANCE)
     gamma_eig = eigvecs.T @ gamma
     term_load = (gamma_eig * gamma_eig) * (
         fnp.sum(u * u, axis=0)[None, :] * fnp.sum(v * v, axis=0)[None, :]
@@ -2034,7 +1982,10 @@ def _taper_joint_k3_terms(
     weights = fnp.ones(gamma.shape[1])
     for _ in range(3):
         load = term_load @ (weights * weights)
-        direction_scale = fnp.minimum(1.0, fnp.sqrt(budget / fnp.maximum(load, _MIN_VARIANCE)))
+        direction_scale = fnp.minimum(
+            1.0,
+            fnp.sqrt(covariance_allowance / fnp.maximum(load, _MIN_VARIANCE)),
+        )
         weights = weights * fnp.min(
             fnp.where(term_load > 0.0, direction_scale[:, None], 1.0),
             axis=0,
@@ -2145,6 +2096,7 @@ def _hybrid_analytic_prefix_hadamard_means(
     joint_k3_matched: bool = False,
     joint_k3_max_terms: int | None = _HYBRID_JOINT_K3_MAX_TERMS,
     joint_k3_taper: str = "eigen",
+    recolor_post_relu: bool = False,
 ) -> fnp.ndarray:
     """Analytic Gaussian-closure prefix, then Hadamard sample the prefix preactivation."""
     prefix_layers = min(max(int(prefix_layers), 1), mlp.depth)
@@ -2220,24 +2172,62 @@ def _hybrid_analytic_prefix_hadamard_means(
         pre = centered_pre * fnp.sqrt(var / sample_var)[None, :] + pre_mean[None, :]
     x = fnp.maximum(pre, 0.0)
 
-    rows = list(analytic_rows[:-1])
-    rows.append(fnp.mean(x, axis=0))
-    for layer_idx, w in enumerate(mlp.weights[prefix_layers:], start=prefix_layers):
+    if recolor_post_relu:
+        target_mean = mean
+        target_cov = cov
+        sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
+        centered = x - sample_mean[None, :]
+        sample_cov = (
+            _strassen_matmul(
+                centered.T.astype(fnp.float32),
+                centered.astype(fnp.float32),
+                strassen_levels,
+            )
+            / float(centered.shape[0])
+        ).astype(fnp.float64)
+        jitter = fnp.maximum(fnp.mean(fnp.diag(target_cov)), _MIN_VARIANCE) * 1e-6
+        eye = _eye(mlp.width)
+        sample_chol = fnp.linalg.cholesky(sample_cov + jitter * eye)
+        target_chol = fnp.linalg.cholesky(target_cov + jitter * eye)
+        recolor = fnp.linalg.inv(sample_chol.T) @ target_chol.T
+        x = _strassen_matmul(
+            centered.astype(fnp.float32),
+            recolor.astype(fnp.float32),
+            strassen_levels,
+        )
+        x = x + target_mean.astype(fnp.float32)[None, :]
+        rows = list(analytic_rows)
+        suffix_weights = [w.astype(fnp.float32) for w in mlp.weights[prefix_layers:]]
+    else:
+        rows = list(analytic_rows[:-1])
+        rows.append(fnp.mean(x, axis=0))
+        suffix_weights = list(mlp.weights[prefix_layers:])
+    for layer_idx, w in enumerate(suffix_weights, start=prefix_layers):
         pre = _strassen_matmul(x, w, strassen_levels)
         x = fnp.maximum(pre, 0.0)
         if layer_idx == prefix_layers:
-            pre_mean_sample = fnp.mean(pre, axis=0)
+            pre_mean_sample = fnp.mean(pre, axis=0).astype(fnp.float64)
             pre_centered = pre - pre_mean_sample[None, :]
             target_var = _gaussian_relu_variance(
                 pre_mean_sample,
-                fnp.mean(pre_centered * pre_centered, axis=0),
+                fnp.mean(pre_centered * pre_centered, axis=0).astype(fnp.float64),
             )
-            sample_mean = fnp.mean(x, axis=0)
+            sample_mean = fnp.mean(x, axis=0).astype(fnp.float64)
             centered_layer = x - sample_mean[None, :]
-            sample_var = fnp.maximum(fnp.mean(centered_layer * centered_layer, axis=0), _MIN_VARIANCE)
+            sample_var = fnp.maximum(
+                fnp.mean(centered_layer * centered_layer, axis=0).astype(fnp.float64),
+                _MIN_VARIANCE,
+            )
             scale = 1.0 + variance_match_strength * (fnp.sqrt(target_var / sample_var) - 1.0)
-            x = centered_layer * scale[None, :] + sample_mean[None, :]
-        rows.append(fnp.mean(x, axis=0))
+            if recolor_post_relu:
+                centered_apply = x - sample_mean.astype(fnp.float32)[None, :]
+                x = (
+                    centered_apply * scale.astype(fnp.float32)[None, :]
+                    + sample_mean.astype(fnp.float32)[None, :]
+                )
+            else:
+                x = centered_layer * scale[None, :] + sample_mean[None, :]
+        rows.append(fnp.mean(x, axis=0).astype(fnp.float64))
     return fnp.stack(rows, axis=0)
 
 
@@ -2429,48 +2419,16 @@ def _hadamard_first_cov_recolored_means(
     return fnp.stack(rows, axis=0)
 
 
-def _deep_hadamard_blocks_for_budget(mlp: MLP, budget: int, strassen_levels: int) -> int:
-    rows_per_block = 2 * mlp.width
-    measured_row_cost = _DEEP_MEASURED_ROW_FLOPS.get(strassen_levels)
-    if measured_row_cost is not None and mlp.width == 256 and mlp.depth == 32:
-        per_block_cost = (
-            rows_per_block
-            * measured_row_cost
-            * _DEEP_BLOCK_COST_SAFETY
-            * _DEEP_RESIDUAL_BLOCK_SAFETY.get(strassen_levels, 1.0)
-        )
-    else:
-        plain_layer_cost = rows_per_block * mlp.width * (2 * mlp.width - 1)
-        strassen_discount = (7.0 / 8.0) ** max(strassen_levels, 0)
-        per_block_cost = (
-            mlp.depth
-            * plain_layer_cost
-            * strassen_discount
-            * _DEEP_BLOCK_FIXED_OVERHEAD
-            * _DEEP_BLOCK_COST_SAFETY
-        )
-    return min(max(int((0.1 * budget) // per_block_cost), 1), _DEEP_HADAMARD_MAX_BLOCKS)
-
-
-def _hadamard_sample_count_for_budget(
-    mlp: MLP,
-    budget: int,
-    strassen_levels: int | None = None,
-) -> int:
+def _hadamard_sample_count(mlp: MLP) -> int:
     explicit = os.environ.get("WHEST_EXPERIMENT_SAMPLES")
     if explicit:
         return max(int(explicit), 2)
     block_override = os.environ.get("WHEST_HADAMARD_BLOCKS")
     if block_override:
         blocks = max(int(block_override), 1)
-    elif strassen_levels is not None:
-        blocks = _deep_hadamard_blocks_for_budget(mlp, budget, strassen_levels)
     else:
         blocks = _DEEP_HADAMARD_BLOCKS
-    rows = blocks * 2 * mlp.width
-    rough_cost_per_sample = 2.0 * mlp.depth * mlp.width * mlp.width
-    max_rows = max(2, int((0.2 * budget) // rough_cost_per_sample))
-    return min(rows, max_rows)
+    return blocks * 2 * mlp.width
 
 
 def _parse_hadamard_tokens(mode: str) -> tuple[
@@ -2489,6 +2447,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     bool,
     int | None,
     str,
+    bool,
     _HadamardPosthocConfig,
 ]:
     strassen_levels = 1
@@ -2506,6 +2465,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
     hybrid_joint_k3_matched = False
     hybrid_joint_k3_max_terms = _HYBRID_JOINT_K3_MAX_TERMS
     hybrid_joint_k3_taper = "eigen"
+    hybrid_recolor = False
     scale_cap = None
     kurtosis_gate = None
     gaussian_pull = 0.0
@@ -2534,6 +2494,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             hybrid_joint_k3_matched,
             hybrid_joint_k3_max_terms,
             hybrid_joint_k3_taper,
+            hybrid_recolor,
             _HadamardPosthocConfig(),
         )
     for token in suffix.split("_"):
@@ -2579,6 +2540,8 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
             hybrid_skew_matched = True
         elif token.startswith("hyb"):
             hybrid_prefix_layers = max(int(token[len("hyb") :]), 1)
+        elif token == "recolor":
+            hybrid_recolor = True
         elif token.startswith("cap"):
             scale_cap = max(int(token[len("cap") :]) / 100.0, 1.0)
         elif token.startswith("kg"):
@@ -2624,6 +2587,7 @@ def _parse_hadamard_tokens(mode: str) -> tuple[
         hybrid_joint_k3_matched,
         hybrid_joint_k3_max_terms,
         hybrid_joint_k3_taper,
+        hybrid_recolor,
         _HadamardPosthocConfig(
             scale_cap=scale_cap,
             kurtosis_gate=kurtosis_gate,
@@ -2662,21 +2626,14 @@ class Estimator(BaseEstimator):
         """
         mode = os.environ.get("WHEST_EXPERIMENT_MODE") or os.environ.get("WHEST_K3_MODE", "")
         if mode in ("", "default"):
-            if mlp.depth >= _DEEP_HADAMARD_MIN_DEPTH:
-                n_samples = _hadamard_sample_count_for_budget(
-                    mlp,
-                    budget,
-                    _DEEP_STRASSEN_LEVELS,
-                )
-                return _hadamard_first_cov_recolored_means(
-                    mlp,
-                    n_samples,
-                    fnp.random.default_rng(mlp.seed),
-                    variance_match_layers=1,
-                    variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
-                    strassen_levels=_DEEP_STRASSEN_LEVELS,
-                )
-            return _factorized_k3_propagation(mlp)
+            return _hadamard_first_cov_recolored_means(
+                mlp,
+                _DEEP_HADAMARD_BLOCKS * 2 * mlp.width,
+                fnp.random.default_rng(mlp.seed),
+                variance_match_layers=1,
+                variance_match_strength=_DEEP_VARIANCE_MATCH_STRENGTH,
+                strassen_levels=_DEEP_STRASSEN_LEVELS,
+            )
         if mode == "r1":
             return _factorized_k3_propagation(mlp)
         if mode == "k3_aug_diag":
@@ -2684,10 +2641,10 @@ class Estimator(BaseEstimator):
         if mode == "k3_aug":
             return _factorized_k3_propagation(mlp, augment=True)
         if mode == "hadamard_first_cov":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            n_samples = _hadamard_sample_count(mlp)
             return _hadamard_first_cov_recolored_means(mlp, n_samples, fnp.random.default_rng(mlp.seed))
         if mode == "hadamard_var1":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            n_samples = _hadamard_sample_count(mlp)
             return _hadamard_first_cov_recolored_means(
                 mlp,
                 n_samples,
@@ -2695,7 +2652,7 @@ class Estimator(BaseEstimator):
                 variance_match_layers=1,
             )
         if mode.startswith("hadamard_var1_s"):
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            n_samples = _hadamard_sample_count(mlp)
             return _hadamard_first_cov_recolored_means(
                 mlp,
                 n_samples,
@@ -2704,7 +2661,7 @@ class Estimator(BaseEstimator):
                 variance_match_strength=int(mode[len("hadamard_var1_s") :]) / 100.0,
             )
         if mode == "hadamard_chi":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            n_samples = _hadamard_sample_count(mlp)
             return _hadamard_first_cov_recolored_means(
                 mlp,
                 n_samples,
@@ -2714,7 +2671,7 @@ class Estimator(BaseEstimator):
                 radial_chi=True,
             )
         if mode == "hadamard_var2":
-            n_samples = _hadamard_sample_count_for_budget(mlp, budget)
+            n_samples = _hadamard_sample_count(mlp)
             return _hadamard_first_cov_recolored_means(
                 mlp,
                 n_samples,
@@ -2748,19 +2705,20 @@ class Estimator(BaseEstimator):
                 hybrid_joint_k3_matched,
                 hybrid_joint_k3_max_terms,
                 hybrid_joint_k3_taper,
+                hybrid_recolor,
                 posthoc,
             ) = _parse_hadamard_tokens(mode)
             if hybrid_prefix_layers is not None:
+                if hybrid_recolor and (
+                    hybrid_prefix_layers != 1
+                    or hybrid_skew_matched
+                    or hybrid_joint_k3_matched
+                ):
+                    raise ValueError("recolor is supported only for the plain hyb1 diagnostic")
                 n_hybrid_blocks = (
                     n_blocks
                     if n_blocks is not None
-                    else _hybrid_analytic_blocks_for_budget(
-                        mlp,
-                        budget,
-                        strassen_levels,
-                        hybrid_prefix_layers,
-                        hybrid_joint_k3_matched,
-                    )
+                    else _DEEP_HADAMARD_BLOCKS
                 )
                 return _hybrid_analytic_prefix_hadamard_means(
                     mlp,
@@ -2773,11 +2731,12 @@ class Estimator(BaseEstimator):
                     hybrid_joint_k3_matched,
                     hybrid_joint_k3_max_terms,
                     hybrid_joint_k3_taper,
+                    hybrid_recolor,
                 )
             n_samples = (
                 n_blocks * 2 * mlp.width
                 if n_blocks is not None
-                else _hadamard_sample_count_for_budget(mlp, budget, strassen_levels)
+                else _hadamard_sample_count(mlp)
             )
             return _hadamard_first_cov_recolored_means(
                 mlp,

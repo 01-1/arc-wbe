@@ -10,9 +10,11 @@ are likely to be retried.
 The current grader shape is width 256, depth 32, with a `2.72e11` FLOP/MLP
 budget and a score-efficient target just under `2.72e10` effective FLOPs.
 
-For depth-32 contest MLPs, unforced `predict()` uses randomized antithetic
-Walsh-Hadamard sign cubature with adaptive budget selection that gives
-16 blocks at the current grader shape. After the first linear/ReLU layer, the
+Unforced `predict()` always uses 16 blocks of randomized antithetic
+Walsh-Hadamard sign cubature. There is deliberately no shape/depth route
+selector and no budget-derived block selector: the contest shape and budget
+are fixed, and altered metadata in a diagnostic must not silently select a
+different estimator configuration. After the first linear/ReLU layer, the
 estimator linearly recolors the first hidden activation ensemble so its
 mean and covariance match the exact zero-mean Gaussian ReLU moments for
 `W0.T @ W0`. The first layer uses only the positive half of each antithetic
@@ -26,11 +28,24 @@ object and label-free moment identities; L4 remains diagnostic because the
 best clean L4 measurements were either weaker than `st3_b16` or too close to
 the combined-budget edge after widening the Fly collection window.
 
-For shallower MLPs, the default remains the optimized factorized K=3 cumulant
-route with `r=1` degree-4 harmonic tracking, structured third-cumulant factor
-groups, and a diagonal-only final-layer ReLU mean shortcut. The K=3 route is
-still the relevant fallback and comparison baseline for shallow or diagnostic
-runs.
+The optimized factorized K=3 cumulant route with `r=1` degree-4 harmonic
+tracking, structured third-cumulant factor groups, and a diagonal-only
+final-layer ReLU mean shortcut remains available only through the explicit
+`r1` diagnostic mode; it is not an automatic shallow-network fallback.
+
+**2026-07-20 fixed-route robustness correction.** Removed the default depth
+selector and every automatic shape/budget-derived Hadamard block or sample
+selector. Unforced prediction is now unconditional L3/16-block Hadamard, and
+unnumbered Hadamard diagnostics also fall back to 16 blocks; explicit
+experiment mode or environment overrides remain explicit. The fixed grader
+computation is unchanged. `python -m py_compile estimator.py` passed. The
+first Fly proof was contaminated by one residual-time combined-budget failure
+among 80 returned rows. A confirmation returned 80 scored rows with zero
+estimator/scorer failures at `2.804e-6` final-layer MSE, `2.894e-7` adjusted
+score, `2.535e10` raw FLOPs, and `2.815e10` effective compute. Five separate
+Fly Machines returned HTTP 408 and 15 remained pending, so the wrapper exited
+124 after printing the clean aggregate; this is an infrastructure-completion
+caveat, not an estimator failure.
 
 The submission estimator now keeps only the live default route and direct
 comparison modes: `r1` for the shallow K=3 path, `hadamard_first_cov` for the
@@ -40,7 +55,9 @@ variance-matching variants, including `hadamard_var1_s<N>` strength sweeps.
 `hadamard[_st<L>][_b<N>][_split<F>]` modes remain diagnostics for the same
 variance route with chi-radial first-layer scaling, explicit block counts,
 Strassen propagation matmuls, and split-block Hadamard row subsets; the
-promoted depth-32 default is equivalent to `hadamard_st3_b16`.
+promoted default is equivalent to `hadamard_st3_b16`. Hadamard diagnostics
+without an explicit block/sample override also use 16 blocks; none infer a
+route, block count, or sample count from shape or the passed budget.
 Older experimental modes for compressed K=3, K=1/K=2 diagnostics, low-rank
 covariance, axis cubature, and sample blends were removed from `estimator.py`
 after losing or becoming irrelevant to the current scorer frontier.
@@ -2157,6 +2174,14 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   code/writeups or a different mechanism, not merely a resampling of these
   features.
 
+  **2026-07-10 correctness correction:** this gate used the same interleaved
+  `_block_rows` helper and first-half slice, so its 16 nominal blocks likewise
+  contained only 8 unique independent bases duplicated. In addition, the
+  aggregator's decisive weighting/pairing closure used covariance/scalar
+  proxies rather than exact weighted vector MSE. The result remains a useful
+  warning signal, but the strong closure claim is weakened; no positive
+  estimator candidate follows from this correction.
+
 - **2026-07-07 spline conditional readout gate FAIL.** A pre-registered
   Fly-payload truth-bank gate tested the specific follow-up left open by the
   collapse campaign: replace the failed hard-cell sampled-latent
@@ -2183,6 +2208,14 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   fixed, to measure final MSE. A first launch omitted `estimator.py` from the
   generic payload file set and failed uniformly with `ModuleNotFoundError`;
   the corrected Fly run returned `100/100` shards with zero failures.
+
+  **2026-07-10 correctness correction:** the shared research `_block_rows`
+  helper interleaved each Hadamard basis with its negative and then sliced the
+  first half, so the nominal 16-block route actually contained only 8 unique
+  independent bases duplicated as 16 nominal blocks. The spline result is
+  therefore an effective-b8 measurement, not a 16-block proof. Its algebraic
+  neutrality remains evidence against that readout family, but the claimed
+  16-block strength is withdrawn.
 
   Pre-registered PASS required mean final-MSE reduction at least `1.35x`,
   median per-MLP ratio at least `1.20x`, q10 at least `0.90x`, and no obvious
@@ -2368,6 +2401,17 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   confirming that the mode remains well above the target and should not be
   promoted.
 
+- **Owner-reported cross-block orthogonal-array coupling FAIL.** The owner
+  reported that Fable 5's proposed cross-block orthogonal-array coupling had
+  already been tested on another repository branch and lost at `3.492e-7`
+  adjusted score / `3.279e-6` final-layer MSE. This closes that concrete
+  structured fixed-count negative-dependence construction; it does not prove
+  a no-go theorem for every possible negatively dependent sampler. The branch
+  and run artifacts are not present in this worktree, and the experiment was
+  not rerun here, so these numbers are retained explicitly as an owner-reported
+  benchmark record rather than a locally reverified result. No estimator
+  change followed.
+
 - **2026-07-09 packed gate-clustered two-sided pruning gate fails.** The
   machine-side gate returned `100/100` shards with valid checksums and zero
   certificate violations. The best `gatekey32`/`support_lex` group-64 box had
@@ -2397,6 +2441,417 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   a known-mean vector control, but anchored, H2, block, and conditional gates
   are all negligible at target scale. Verdict: **NO-GO**; only structured
   fixed-count negative dependence remains as an untested family.
+
+- **2026-07-10 cross-fitted multivariate final-row control variate fails.**
+  The mode-gated `hadamard_st3_b16_foldcv` diagnostic formed folded first-layer
+  features `C = 0.5 * abs(pre_half)` from the positive half-block rows and
+  paired final activations `G = 0.5 * (x_positive + x_negative)` across the
+  positive/negative row-half boundary. It split the 16 positive Hadamard
+  blocks into two 8-block folds, fit each held-out coefficient matrix from
+  centered training `C/G` rows with the single preregistered dimensionless
+  ridge `lambda=0.1` (`trace(Ct.T@Ct)/width` scaling), and corrected only the
+  final reported row. The gate safely disables itself for non-fully-antithetic
+  or odd-block modes (and for radial or mirrored variants).
+
+  This is a legal label-free diagnostic, but not a formal unbiased control
+  variate: the Gaussian `target_mean` is the analytic target used by the
+  recolor, while raw Hadamard/Rademacher folded `C` does not have that exact
+  expectation, and the global first-layer recolor couples the two folds.
+  `python -m py_compile estimator.py` passed. The one requested normal-window
+  `make fly-mode MODE=hadamard_st3_b16_foldcv` run returned 73 MLPs with no
+  failures (27 pending at the 45-second window): `4.070e-7` adjusted score /
+  `3.834e-6` final-layer MSE / `4.414e-6` all-layer MSE / `2.653e10` raw FLOPs
+  / `2.897e10` effective compute / `2.438e9` residual compute. This is worse
+  than the current route and far above the `1.6e-6` MSE target; no full-100
+  follow-up or promotion is warranted. The diagnostic implementation was
+  removed after this decisive failure; the default remains unchanged.
+
+- **2026-07-10 terminal two-Gaussian mixture readout gate FAIL.** The corrected
+  truth-bank payload used exactly 16 independent positive Hadamard half-bases,
+  then formed their antipodes, retained final preactivations, and fit the fixed
+  per-output two-Gaussian EM readout (12 updates, variance floor `1e-4` times
+  marginal variance, weight floor `0.02`). It returned `100/100` shards with
+  zero failures and valid checksums. Mean baseline/candidate MSE was
+  `2.6775205219e-6` / `2.8027283307e-6`; mean/median/q10/q90 per-MLP ratios
+  were `0.9553264555x` / `0.9530426299x` / `0.9101160915x` /
+  `0.9801239599x`, with minimum `0.8753156605x` and no ratio below `0.70`.
+  Mean replicate-pair variance was `2.3197934031e-6`, three-replicate mean
+  MSE `1.2561993954e-6`, and squared-bias proxy `6.0066460386e-7`. The
+  one-Gaussian control also lost at `0.7121048393x` mean ratio. Verdict:
+  **FAIL**; no estimator change. Artifacts:
+  `paired_fly_logs/fingerprint_theory/terminal_mixture_readout_gate_20260710.md`,
+  `terminal_mixture_readout_payload_20260710.py`,
+  `terminal_mixture_readout_aggregate_20260710.py`,
+  `terminal_mixture_readout_manifest_20260710.json`,
+  `terminal_mixture_readout_gate_20260710_fly.jsonl`, and
+  `terminal_mixture_readout_gate_20260710_results.json`.
+
+- **2026-07-10 unbiased raw Haar-sphere fold-CV gate FAIL.** The 100/100
+  checksum-valid truth-bank gate compared raw Haar-sphere estimates with a
+  fixed four/four fold-CV Stein correction, using the exact radial factor and
+  three replicates per MLP. Mean MSE was `2.677484e-6` for the current
+  reference, `2.732770e-6` for raw Haar, and `2.691146e-6` for `haar_cv`.
+  Current-over-`haar_cv` ratio mean/median/q10/q90/min was
+  `1.0567` / `0.9936` / `0.5658` / `1.6762` / `0.3262`; raw-Haar-over-CV was
+  `1.0206` / `1.0023` / `0.8283` / `1.2262` / `0.7029`. The `haar_cv`
+  three-replicate decomposition was bias-squared mean `9.819731e-7`, variance
+  mean `1.709173e-6`, total `2.691146e-6`. Verdict: **FAIL**; the mean,
+  median, q10, and minimum-ratio gates failed despite the bias condition
+  passing. No estimator change. Artifacts:
+  `paired_fly_logs/fingerprint_theory/haar_sphere_foldcv_gate_20260710.md`,
+  `haar_sphere_foldcv_payload_20260710.py`,
+  `haar_sphere_foldcv_aggregate_20260710.py`,
+  `haar_sphere_foldcv_manifest_20260710.json`,
+  `haar_sphere_foldcv_gate_20260710_fly.jsonl`,
+  `haar_sphere_foldcv_gate_20260710_results.json`, and
+  `haar_sphere_foldcv_gate_20260710_report.md`.
+
+- **2026-07-10 spherical Stein matched-cost b8 gate FAIL.** This gate used
+  the zero-mean sphere surface-divergence identity: for a traceless,
+  Frobenius-normalized quadratic perturbation, the directional derivative is
+  paired with the divergence correction before the final fold-CV readout.
+  The 100/100 truth-bank shards passed checksum validation. Current, raw-Haar,
+  and Stein mean MSE were respectively `2.748727e-6`, `5.657141e-6`, and
+  `5.702312e-6`; raw/Stein mean ratio was `0.9961`, and Stein bias-squared
+  mean was `1.887585e-6`. Verdict: **FAIL**; no estimator change. Unique
+  artifacts are `paired_fly_logs/fingerprint_theory/spherical_stein_gate_20260710.md`,
+  `spherical_stein_payload_20260710.py`, `spherical_stein_aggregate_20260710.py`,
+  `spherical_stein_manifest_20260710.json`,
+  `spherical_stein_gate_20260710_fly.jsonl`,
+  `spherical_stein_gate_20260710_results.json`, and
+  `spherical_stein_gate_20260710_report.md`.
+
+- **2026-07-10 active-subspace reflection fast smoke closed.** The earlier
+  full smoke timed out because its implementation was unbatched float64; the
+  optimized smoke finished in about `20.7s`. It was only one MLP with
+  `nref=1` and `nheld=64`, so it cannot justify a 100-MLP gate. All six
+  positive correlations were `0.851436`, `0.447886`, `0.866285`, `0.467164`,
+  `0.929856`, and `0.593506`; corresponding gains were `0.540121`, `0.690662`,
+  `0.535824`, `0.681587`, `0.518173`, and `0.627547`. Every direction is
+  opposite the required negative-correlation target `rho <= -0.4118`.
+  Verdict: **CLOSE**, with no 100-MLP launch and no positive candidate.
+  Artifacts: `paired_fly_logs/fingerprint_theory/active_subspace_reflection_fast_smoke_payload_20260710.py`,
+  `active_subspace_reflection_fast_smoke_manifest_20260710.json`, and
+  `active_subspace_reflection_fast_smoke_20260710.jsonl`.
+
+- **2026-07-10 LRP32K12 two-stage gate (pre-registered).** The diagnostic-only
+  `lrp32k12` mode will begin at propagation layer 12, preserve each fp32 row
+  mean, and replace only `x@W` with a fresh Rademacher-diagonal 8-stage
+  normalized FWHT sketch of rank 32 followed by `Y.T@Y` jittered solve and
+  projected reconstruction. Stage A is one normal-window
+  `hadamard_st3_b16_lrp32k12` Fly mode run; it must have zero failures, final
+  MSE `<=3.2e-6`, raw FLOPs `<=1.9e10`, and effective compute `<=2.8e10`.
+  On failure, remove the mode and retain the negative result. If Stage A
+  passes, run only `B=min(32,floor(16*2.45e10/stage_A_raw))` as
+  `hadamard_st3_b<B>_lrp32k12`; Stage B requires adjusted score `<1.8e-7`,
+  zero failures, and final MSE `<=1.8e-6`. Default behavior is unchanged.
+  Stage A returned 80/100 MLPs in the normal window with zero failures
+  (20 pending): adjusted score `1.999e-4`, final-layer MSE `1.998e-3`,
+  all-layer MSE `9.932e-4`, raw FLOPs `1.669e10`, effective compute
+  `1.854e10`, and residual compute `1.846e9` (measured residual
+  `1.846e10`, scale `0.1`). It therefore failed the Stage-A MSE gate by
+  orders of magnitude. Final verdict: **FAIL**. The LRP code/config/parser/
+  helper changes were removed; the proposed exact row-subsampled residual
+  correction was not pursued because this approximation residual is roughly
+  three orders of magnitude above the target. No Stage B run was launched and
+  the default estimator remains unchanged. Command:
+  `make fly-mode MODE=hadamard_st3_b16_lrp32k12`.
+
+- **2026-07-10 dependency-free Sobol-sphere v2 gate FAIL.** The reviewed
+  SciPy-free LMS Sobol generator produced `100/100` checksum-valid rows:
+  current/iid/Sobol mean MSE `2.659818e-6` / `2.669833e-6` /
+  `2.648143e-6`; current/Sobol mean/median/q10/min ratios were
+  `1.1448` / `1.0349` / `0.5139` / `0.2789`. This is the scientific v2
+  result; the earlier zero-row SciPy-import attempt was infrastructure-only
+  and did not consume the gate. No estimator change. Artifacts:
+  `sobol_sphere_v2_gate_20260710_report.md`,
+  `sobol_sphere_v2_gate_20260710_results.json`, and
+  `sobol_sphere_v2_payload_20260710.py`.
+
+- **2026-07-10 triangular-LT Sobol v2 gate FAIL.** The corrected gate returned
+  `100/100` checksum-valid rows. Current/unrotated/triangular mean MSE was
+  `2.546576e-6` / `2.679661e-6` / `2.977580e-6`; no Stage B followed the
+  failed Stage-A thresholds. No estimator change. Artifacts:
+  `sobol_triangular_lt_v2_gate_20260710_report.md`,
+  `sobol_triangular_lt_v2_gate_20260710_results.json`, and
+  `sobol_triangular_lt_v2_payload_20260710.py`.
+
+- **2026-07-10 Jacobian-LT Sobol v2 gate FAIL.** The dependency-corrected
+  payload returned `98/100` rows with `0` failures and `2` pending at the
+  fixed window; the partial metrics were current/unrotated/LT mean MSE
+  `2.5190119e-6` / `2.5627142e-6` / `3.5289168e-6`, with no Stage B run.
+  This candidate was already far worse than the current route, so the
+  incomplete window is only a completeness caveat, not a reason to recover
+  the pending shards. No estimator change. Artifacts:
+  `sobol_jacobian_lt_v2_stagea_report_20260710.md`,
+  `sobol_jacobian_lt_v2_stagea_aggregate_20260710.json`, and
+  `sobol_jacobian_lt_v2_stagea_fly_20260710.jsonl`.
+
+- **2026-07-10 cross-output empirical-Bayes final-row gate FAIL.** The
+  `cross_output_eb` diagnostic returned `100/100` checksum-valid rows with
+  current/candidate mean MSE `2.546555679e-6` / `3.273980770e-6`, global
+  current/candidate ratio `0.777816`, and frozen `lambda_EB=1` throughout
+  because of the per-row noise proxy. Coordinator posthoc quadratic
+  reconstruction found that even truth-oracle global blending toward this
+  predictor used `lambda=0.02287` and improved only `1.00016x`; the predictor
+  direction is therefore closed. No estimator change. Artifacts:
+  `cross_output_eb_stagea_report_20260710.md`,
+  `cross_output_eb_stagea_aggregate_20260710.json`, and
+  `cross_output_eb_stagea_fly_20260710.jsonl`.
+
+- **2026-07-10 row-cross-fitted James–Stein gate FAIL.** The diagnostic
+  returned `100/100` checksum-valid rows with current/candidate mean MSE
+  `2.718539e-6` / `3.248759e-6`, global ratio `0.83679`, and mean shrinkage
+  `lambda=0.85371`. No estimator change. Artifacts:
+  `cross_output_rowcf_stagea_report_20260710.md`,
+  `cross_output_rowcf_stagea_results_20260710.json`, and
+  `cross_output_rowcf_stagea_fly_20260710.jsonl`.
+
+- **2026-07-10 scalar prefix-rank/GREG v2 gate FAIL.** The gate returned
+  `100/100` valid rows: current b16 MSE `2.5465832617e-6`, full-b32-pool
+  ceiling `1.4099880781e-6`, and best candidate K2 MSE `4.7542980641e-6`.
+  K2 predictor correlation median/q10 was `0.57543/0.50228`; all
+  `K={2,4,8,12}` failed while projected raw compute stayed at or below
+  `2.2479e10`. The target-clearing full-pool ceiling therefore does not help:
+  scalar prefix ranking/GREG cannot recover the suffix strongly enough. No
+  estimator change. Artifacts:
+  `prefix_rank_stratified_v2_stagea_report_20260710.md` and
+  `prefix_rank_stratified_v2_stagea_aggregate_20260710.json`.
+
+- **2026-07-10 full-vector prefix GREG v3 gate FAIL.** The preregistered
+  `100/100` valid-row gate had current MSE `2.5465748872e-6` and full-b32
+  ceiling `1.4099889432e-6`. K4/K6/K8 candidates were respectively
+  `4.7979905193e-6` / `3.7095593958e-5` / `6.6993220498e-6`, with full-main
+  vector R2 median/q10 `0.34107/0.17141`, `0.41058/-0.33898`, and
+  `0.46442/-1.36312`; projected raw compute stayed at or below
+  `2.4609e10`. All K failed and no Stage B ran. Scalar and full-linear
+  two-phase GREG are closed; this is not a conclusion about arbitrary
+  nonlinear compression. No estimator change. Artifacts:
+  `prefix_vector_greg_v3_stagea_report_20260710.md`,
+  `prefix_vector_greg_v3_prereg_20260710.md`, and
+  `prefix_vector_greg_v3_stagea_aggregate_20260710.json`.
+
+## 2026-07-10 Gaussian QMC/LHS closures
+
+- **Unnormalized Gaussian Sobol v1 FAIL.** The `sobol_gaussian_v1` gate returned
+  `100/100` checksum-valid rows with current/IID-Gaussian/Sobol-Gaussian mean
+  MSE `2.546583e-6` / `3.768793e-6` / `3.558828e-6`. The current/Sobol ratio
+  computed from global mean MSEs was `0.71557`; this is distinct from the
+  per-MLP ratio mean `1.0269`, whose median/q10/min were `0.8156` / `0.3697` /
+  `0.0941`. The candidate retained the standard Gaussian radial law, closing
+  the normalization loophole left by Sobol-sphere. Verdict: **FAIL**; no
+  estimator change. Artifacts: `sobol_gaussian_v1_prereg_20260710.md`,
+  `sobol_gaussian_v1_payload_20260710.py`,
+  `sobol_gaussian_v1_aggregate_20260710.py`,
+  `sobol_gaussian_v1_manifest_20260710.json`,
+  `sobol_gaussian_v1_stagea_fly_20260710.jsonl`,
+  `sobol_gaussian_v1_stagea_results_20260710.json`, and
+  `sobol_gaussian_v1_stagea_report_20260710.md`.
+
+- **Exact antithetic Gaussian LHS v1 FAIL.** The gate returned `100/100`
+  checksum-valid rows using exact strata and antipodes. Current/LHS/IID mean
+  MSE was `2.5465865671e-6` / `4.0034978373e-6` / `3.7688097480e-6`; global
+  current/LHS ratio was `0.6360904`, with per-MLP median/q10/min
+  `0.800159` / `0.246370` / `0.105682`. Verdict: **FAIL**; no estimator
+  change. Artifacts: `antithetic_lhs_v1_prereg_20260710.md`,
+  `antithetic_lhs_v1_payload_20260710.py`,
+  `antithetic_lhs_v1_aggregate_20260710.py`,
+  `antithetic_lhs_v1_manifest_20260710.json`,
+  `antithetic_lhs_v1_stagea_fly_20260710.jsonl`, and
+  `antithetic_lhs_v1_stagea_report_20260710.md`.
+
+- **Hadamard-oriented LHS v1 FAIL.** The gate returned `100/100` with exact
+  strata and antipodes. Current/independent-LHS/Hadamard-LHS mean MSE was
+  `2.546587103e-6` / `3.836092491e-6` / `3.979278485e-6`. The global
+  current/Hadamard-LHS ratio from mean MSEs was `0.63996`, distinct from the
+  per-MLP ratio mean `1.0637`; its median/q10/min were `0.7954` / `0.2854` /
+  `0.0902`. Hadamard sign orientation reduced off-diagonal RMS from
+  `0.015596` to `0.012033` but worsened MSE. Verdict: **FAIL**; no estimator
+  change. Artifacts: `hadamard_lhs_v1_prereg_20260710.md`,
+  `hadamard_lhs_v1_payload_20260710.py`,
+  `hadamard_lhs_v1_aggregate_20260710.py`,
+  `hadamard_lhs_v1_manifest_20260710.json`,
+  `hadamard_lhs_v1_gate_20260710_fly.jsonl`,
+  `hadamard_lhs_v1_stagea_results_20260710.json`, and
+  `hadamard_lhs_v1_stagea_report_20260710.md`.
+
+Combined conclusion is narrow: input-axis Gaussian QMC/LHS, including exact
+antipodal strata, retained radial law, and Hadamard sign orientation, is closed.
+This does not pre-judge first-layer-coordinate rank transport.
+
+- **First-layer coordinatewise Gaussian anamorphosis v1 FAIL.** The
+  `layer1_rank_gauss_v1` Stage-A gate returned `100/100` rows with zero
+  failures/pending and valid checksums. Current/rank-Gaussian mean MSE was
+  `2.521168251474e-6` / `2.555385657835e-6`; global current/candidate ratio
+  was `0.9928583095`, with per-MLP median/q10/min
+  `0.9865111337` / `0.9202015029` / `0.8317887341`. Exact antipodes,
+  magnitude-rank roundtrip, and full sorted-target transport all had zero
+  error; maximum magnitude-tie fraction was `1.230540293e-4`. Sparse raw
+  zeros (max `1`, mean `0.05`) tripped the conservative integrity gate but
+  do not affect the decisive performance FAIL. First-layer coordinatewise
+  Gaussian anamorphosis with exact post-ReLU recolor is closed; no estimator
+  change. Artifacts: `layer1_rank_gauss_v1_stagea_fly_20260710.jsonl`,
+  `layer1_rank_gauss_v1_stagea_results_20260710.json`, and
+  `layer1_rank_gauss_v1_stagea_report_20260710.md`.
+
+- **Folded finite-set ZCA for Gaussian QMC/LHS v1 FAIL.** The frozen
+  420-second Stage-A window returned `90/100` rows with zero explicit
+  failures, ten pending indices (`4,10,21,37,51,74,81,84,96,98`), zero
+  duplicates, and all 90 returned rows individually checksum-valid. Mean MSE
+  for current/LHS-base/LHS-ZCA/Sobol-base/Sobol-ZCA was
+  `2.651589827247e-6` / `4.219461683318e-6` / `4.270643995772e-6` /
+  `3.741434150188e-6` / `3.624390535576e-6`. Global current/ZCA ratios were
+  `0.6208876` LHS and `0.7315961` Sobol; their per-MLP median/q10/min ratios
+  were `0.7790406/0.2697721/0.1313155` and
+  `0.8207934/0.3595786/0.1024458`. LHS-base/ZCA and Sobol-base/ZCA were only
+  `0.9880153` and `1.0322933`, both below the frozen `1.15` improvement bar.
+  Whitening itself was numerically successful: post-ZCA covariance relative
+  Frobenius error was at most `7.3753e-8` LHS and `7.4167e-8` Sobol,
+  antipodes were exact, and preactivation covariance error was about `1e-6`.
+  The incomplete tail fails common integrity, but returned-row performance
+  independently fails decisively: exact finite-set input covariance whitening
+  is not the missing Gaussian QMC/LHS defect. No estimator change. Artifacts:
+  `folded_zca_qmc_v1_stagea_fly_20260710.jsonl`,
+  `folded_zca_qmc_v1_stagea_results_20260710.json`, and
+  `folded_zca_qmc_v1_stagea_report_20260710.md`.
+
+- **K8 antipodal odd-state Rao--Blackwell closure v1 FAIL.** The frozen
+  three-replication Stage-A gate returned `100/100` checksum- and schema-valid
+  rows with zero failures, pending shards, or duplicates. Current/candidate
+  M1 was `2.752383145e-6` / `2.577790606e-4`, a global current/candidate
+  ratio of `0.0106773`; candidate squared bias was `2.562949223e-4`, and its
+  projected b27 MSE remained `2.571744117e-4`. All numerical integrity checks
+  passed, but the initial rank-one odd-covariance factor residual had mean
+  `0.78821` and the propagated closure residual mean was `0.15722`. The
+  approximation therefore removed variance at the cost of overwhelming bias:
+  increasing the block count cannot rescue this closure. No Stage B or
+  estimator change followed. Artifacts:
+  `odd_rb_k8_v1_stagea_fly_20260710.jsonl`,
+  `odd_rb_k8_v1_stagea_results_20260710.json`, and
+  `odd_rb_k8_v1_stagea_report_20260710.md`.
+
+- **Signed low-rank antipodal odd-state transport v1 FAIL.** The frozen
+  three-replication Stage-A gate returned `100/100` checksum- and schema-valid
+  rows with zero failures, pending shards, or duplicates. Current/candidate M1
+  was `2.850595174e-6` / `1.023208499e-4`, a global current/candidate ratio of
+  `0.0278594`; candidate squared bias was `8.656223730e-5`, and its projected
+  b27 MSE remained `9.590067441e-5`. All pair, subspace, Gram, and
+  coordinate-energy-restoration checks passed. The scheduled rank
+  `64/32/16/8` carrier captured mean odd-state energy `0.85906`, but restoring
+  coordinatewise energy required scales as large as `64.28` and produced
+  overwhelming bias. The diagnostic-only exact/candidate block correlation
+  averaged `0.52532`, while correction/exact block variance averaged `0.93051`,
+  so an unbiased two-level correction is also unattractive. Verdict: **FAIL**;
+  no estimator implementation, rerun, or estimator change. Artifacts:
+  `odd_lr_transport_v1_20260710_stagea_fly.jsonl`,
+  `odd_lr_transport_v1_20260710_stagea_results.json`, and
+  `odd_lr_transport_v1_20260710_stagea_report.md`.
+
+- **Final-weight collapse cross-output oracle ceiling CLOSED.** A read-only
+  scout reused the completed terminal-mixture Fly vectors and verified all
+  `100/100` rebuilt MLP checksums and `300/300` stored baseline MSEs. It gave
+  polynomial-ridge, RBF-kernel, and 16-nearest-neighbor smoothers the illegal
+  optimistic layer-30 truth mean as a feature anchor, then evaluated a
+  truth-oracle global blend back toward the direct estimator. Baseline M1 was
+  `2.677520522e-6`; the best oracle blend was only the 16-NN arm at
+  `2.650269629e-6`, a `1.01028x` gain, with three-rep-mean MSE
+  `1.103269425e-6`. Even the held-out truth-response approximation ceilings
+  were orders of magnitude above `1.6e-6`. Verdict: **CLOSE**; final means are
+  not sufficiently smooth in these final-weight/penultimate-mean features for
+  cross-output denoising, even under information unavailable to a legal
+  estimator. No estimator change or new Fly run. Artifacts:
+  `final_weight_collapse_scout_20260710.py`,
+  `final_weight_collapse_scout_20260710.json`, and
+  `final_weight_collapse_scout_20260710.md`.
+
+- **2026-07-20 one-layer analytic-prefix/Hadamard-suffix `hyb1` is not a
+  faithful exact-post-ReLU isolation and loses on the current scorer path.**
+  Code inspection confirmed that the existing mode
+  `hadamard_st3_b16_hyb1` already implements the proposed preactivation
+  restart, so no duplicate mode or estimator rewrite was made. It forms the
+  exact Gaussian first-preactivation covariance
+  `Sigma1 = W0.T @ W0`, adds a ridge of `1e-6` times its mean marginal
+  variance for Cholesky stability, and maps randomized Hadamard cubature rows
+  through that Cholesky factor before adding their exact antipodes. These rows
+  are cubature particles, not Gaussian draws. It then applies ReLU and
+  propagates through `W1...` with L3 Strassen plus the current `1.5x`
+  first-successor marginal-variance correction. The mode uses only the passed
+  MLP, `mlp.seed`, and analytic Gaussian identities; the mode environment
+  token is a general diagnostic control, not an evaluation-instance branch.
+
+  The existing implementation does **not** report or enforce the exact
+  post-ReLU moments at layer 1. `_zero_mean_relu_mean_cov` computes the exact
+  Gaussian mean `sqrt(diag(Sigma1)/(2*pi))` and arc-cosine covariance, but for
+  `hyb1` the reporting path discards that analytic row and appends the finite
+  Hadamard ensemble mean instead. The propagated layer-1 particles are also
+  not recolored, so their mean/covariance are the cubature moments after ReLU,
+  not the exact Gaussian ReLU mean/covariance. Only the zero preactivation
+  mean and the jittered preactivation covariance are exact for each complete
+  Hadamard block. Restarting in Cholesky coordinates also discards the
+  input-to-preactivation orthogonal orientation carried by `W0`; that
+  orientation is irrelevant for an actual Gaussian but changes Hadamard
+  fourth- and higher-order alias structure, which then survives the ReLU and
+  deep suffix.
+
+  The requested normal-window command
+  `make fly-mode MODE=hadamard_st3_b16_hyb1` used fixed Fly dataset
+  fingerprint `50c6efdca4059f0e` but initially produced no aggregate: `0`
+  scored rows, `5` Fly Machine failures with return code `408`, and `95`
+  pending when the 45-second collection window closed. That first cutoff was
+  incorrectly interpreted as a scorer-path wall-time loss. A correction run
+  extended only the result-collection window to 90 seconds while leaving the
+  worker/scorer wall limit unchanged at 60 seconds. It returned `80` scored
+  rows at `8.333e-5` final-layer MSE, `8.422e-6` adjusted score, `2.396e10`
+  raw FLOPs, and `2.688e10` effective compute, with no estimator/scorer
+  failures among returned rows; there were `4` separate Fly Machine `408`
+  failures and `16` pending rows. The same fixed-set canonical `make fly`
+  control returned `80` scored rows at `2.667e-6` final-layer MSE,
+  `2.829e-7` adjusted score, `2.535e10` raw FLOPs, and `2.799e10` effective
+  compute, with no estimator/scorer failures among returned rows; there were
+  `2` separate Fly Machine `408` failures and `18` pending rows. Thus the
+  hybrid's extra arithmetic is not the issue: it uses about `5.5%` fewer raw
+  FLOPs and `4.0%` less effective compute, but its final MSE is about `31.2x`
+  worse and adjusted score about `29.8x` worse. This is a decisive statistical
+  mechanism loss, so no paired/full-100 or constant-tuning run followed and
+  default behavior remains unchanged.
+
+  A separate `hyb1_recolor` would be scientifically justified only as a clean
+  mechanism ablation: report the exact analytic layer-1 mean and recolor the
+  direct-preactivation cubature particles to the exact Gaussian post-ReLU
+  covariance, thereby isolating Cholesky-coordinate higher-moment structure
+  from the already-promoted input-space route at matched first two ReLU
+  moments. It is not presently justified as an immediate promotion candidate
+  because the unrecolored route is roughly `31x` worse in final MSE. Any
+  future recolor gate should be preregistered strictly as an isolation
+  experiment rather than treated as tuning.
+
+  Follow-up `hyb1_recolor` isolation, requested 2026-07-20: added the
+  mode-gated `hadamard_st3_b16_hyb1_recolor` token without changing unforced
+  behavior. It keeps the same Cholesky-coordinate preactivation cubature, then
+  applies the current default's linear first-layer recolor so the propagated
+  ensemble matches the exact Gaussian post-ReLU mean and covariance, reports
+  that exact analytic mean for layer 1, and uses fp32 weights/particles for the
+  L3 suffix plus the unchanged `1.5x` first-successor variance correction.
+  The parser restricts `recolor` to the plain one-layer hybrid so it cannot be
+  accidentally composed with the approximate deeper/skew/joint-k3 prefixes.
+  `python -m py_compile estimator.py` passed.
+
+  Fly used the same fixed dataset fingerprint and the 90-second collection
+  window with the worker/scorer wall still at 60 seconds. The recolored mode
+  returned `80` scored rows at `3.480e-6` final-layer MSE, `3.561e-7`
+  adjusted score, `2.556e10` raw FLOPs, and `2.788e10` effective compute,
+  with no estimator/scorer failures among returned rows; there were `3`
+  separate Fly Machine `408` failures and `17` pending rows. Recoloring
+  improves MSE by about `24x` versus unrecolored `hyb1` (`8.333e-5`), proving
+  that missing post-ReLU moment matching caused most of the catastrophic loss.
+  Against the same-day canonical default (`2.667e-6` MSE, `2.829e-7`
+  adjusted, `2.535e10` raw, `2.799e10` effective), however, it remains about
+  `30.5%` worse in MSE and `25.9%` worse in adjusted score at essentially
+  matched compute. This clears the repository's `~15%` summary-noise loss
+  threshold. Verdict: the Cholesky-coordinate restart's altered higher-moment
+  Hadamard structure is itself harmful after controlling the exact first two
+  post-ReLU moments; keep `hyb1_recolor` diagnostic-only, do not promote, and
+  do not spend a paired/full-100 follow-up.
 
 ## Benchmarking Notes
 

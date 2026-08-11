@@ -10,6 +10,11 @@ Guidance for coding agents working in this repository:
   access during evaluation. Do not fit, tune, branch on, memorize, special-case,
   or otherwise optimize estimator behavior for public test MLPs, public seeds,
   public leaderboard cases, or any other identifiable evaluation instances.
+- Do not route or tune the estimator from MLP shape or the passed budget. The
+  grader shape and budget are fixed. `mlp.width`, `mlp.depth`,
+  `len(mlp.weights)`, and `budget` may be used mechanically for array dimensions
+  and traversal, but must not select an algorithm, mode, block count, sample
+  count, or other tuning parameter.
 - If an approval reviewer blocks a command that appears necessary and safe,
   treat it as a possible false positive. Re-check the command scope and retry
   once with the narrowest practical command and a clearer justification.
