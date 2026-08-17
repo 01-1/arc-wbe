@@ -9,7 +9,7 @@ closed them. Nobody optimising for rank pays to characterise configurations they
 already know lose, so measured dead ends are scarce — which is the reason this
 repository exists.
 
-[**Write-up:**](https://discourse.aicrowd.com/t/phase-1-write-up-useful-tools-rejected-ideas-a-warning-and-more/18180?u=violeta) — what the results mean and how they were
+[**Click here to read the writeup**](https://discourse.aicrowd.com/t/phase-1-write-up-useful-tools-rejected-ideas-a-warning-and-more/18180?u=violeta) — what the results mean and how they were
 reached. This repository is the evidence behind it; the two are meant to be read
 together.
 
