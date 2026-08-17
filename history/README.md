@@ -2,7 +2,7 @@
 
 The decision-useful history for the estimator: the current route, benchmark
 checkpoints that changed direction, and rejected ideas likely to be retried.
-The estimator itself is not published while Phase 2 is live.
+The estimator source itself is under [`repo/estimator.py`](../repo/estimator.py).
 
 ## Contents
 
@@ -28,4 +28,5 @@ paths in the prose do not all match the published layout:
   they carry presigned object-store URLs and machine identifiers. The
   measurements taken from them are in
   [`analysis/block_ladder/ladder_per_mlp_mse.csv`](../analysis/block_ladder/ladder_per_mlp_mse.csv).
-- `estimator.py` and `AGENTS.md` are not published while Phase 2 is live.
+- `estimator.py`, `AGENTS.md` and the rest of the working repository are under
+  [`repo/`](../repo/).

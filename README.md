@@ -3,7 +3,8 @@
 Closed research directions, measurements, and the raw rows behind both, from a
 Phase 1 entry.
 
-This is not an estimator release. It is the part of the work usually thrown
+The estimator is here, under [`repo/`](repo/), but it is not the point — it
+finished around rank 114. The point is the part of the work usually thrown
 away: the configurations that lost, the gates that failed, and the numbers that
 closed them. Nobody optimising for rank pays to characterise configurations they
 already know lose, so measured dead ends are scarce — which is the reason this
