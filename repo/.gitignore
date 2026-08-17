@@ -45,3 +45,9 @@ ARC-estimation-research/upstream/mlp_cumulant_propagation/
 
 # Worktrees
 .worktrees
+
+# Owner scratch — deliberately excluded from publication
+ignore/
+
+# Generated from ESTIMATOR_HISTORY.md by scripts/build_history_split.py
+history/
