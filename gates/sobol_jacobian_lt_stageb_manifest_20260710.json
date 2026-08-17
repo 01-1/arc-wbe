@@ -1,0 +1,16 @@
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/sobol_jacobian_lt_payload_20260710.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--output",
+    "result.json",
+    "--reps",
+    "3"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

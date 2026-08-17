@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/haar_sphere_foldcv_payload_20260710.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--output",
+    "result.json"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python",
+    "active_subspace_reflection_payload_20260710.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--output",
+    "result.json"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

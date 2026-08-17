@@ -1,0 +1,20 @@
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/active_subspace_reflection_fast_smoke_payload_20260710.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--output",
+    "result.json",
+    "--n-reference",
+    "1",
+    "--n-heldout",
+    "64",
+    "--reference-reps",
+    "1"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

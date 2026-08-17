@@ -1,0 +1,16 @@
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/angular_importance_payload_20260709.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--metadata",
+    "analysis/truth_bank/metadata.json",
+    "--output",
+    "result.json"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

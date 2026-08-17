@@ -1,0 +1,79 @@
+{
+  "rows": [
+    {
+      "mlp_seed": 11,
+      "variant": "baseline",
+      "R": 12,
+      "truth_samples": 120000,
+      "truth_noise_mse": 4.6495815718030053e-07,
+      "mse": 3.0432278166336247e-06,
+      "seed_variance": 2.9675999925193097e-06,
+      "bias_mse": 3.229278234909239e-07,
+      "variance_ratio_vs_baseline": 1.0,
+      "mse_ratio_vs_baseline": 1.0
+    },
+    {
+      "mlp_seed": 11,
+      "variant": "smooth_unbiased_0.05",
+      "R": 12,
+      "truth_samples": 120000,
+      "truth_noise_mse": 4.6495815718030053e-07,
+      "mse": 1.0828411118892663e-05,
+      "seed_variance": 3.1535577255939556e-06,
+      "bias_mse": 7.937649870431535e-06,
+      "variance_ratio_vs_baseline": 1.0626626679954865,
+      "mse_ratio_vs_baseline": 3.5581993105172445
+    },
+    {
+      "mlp_seed": 11,
+      "variant": "late_shrink_20_0.90",
+      "R": 12,
+      "truth_samples": 120000,
+      "truth_noise_mse": 4.6495815718030053e-07,
+      "mse": 0.0016513237636996425,
+      "seed_variance": 3.1253482280506945e-06,
+      "bias_mse": 0.001648458861157263,
+      "variance_ratio_vs_baseline": 1.053156839172744,
+      "mse_ratio_vs_baseline": 542.6224598348714
+    },
+    {
+      "mlp_seed": 11,
+      "variant": "late_shrink_24_0.85",
+      "R": 12,
+      "truth_samples": 120000,
+      "truth_noise_mse": 4.6495815718030053e-07,
+      "mse": 0.0007332571476857401,
+      "seed_variance": 3.200934645769866e-06,
+      "bias_mse": 0.0007303229575937844,
+      "variance_ratio_vs_baseline": 1.07862739379928,
+      "mse_ratio_vs_baseline": 240.94717578418388
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "mean_mse": 3.0432278166336247e-06,
+      "mean_seed_variance": 2.9675999925193097e-06,
+      "mean_variance_ratio_vs_baseline": 1.0,
+      "mean_mse_ratio_vs_baseline": 1.0
+    },
+    "smooth_unbiased_0.05": {
+      "mean_mse": 1.0828411118892663e-05,
+      "mean_seed_variance": 3.1535577255939556e-06,
+      "mean_variance_ratio_vs_baseline": 1.0626626679954865,
+      "mean_mse_ratio_vs_baseline": 3.5581993105172445
+    },
+    "late_shrink_20_0.90": {
+      "mean_mse": 0.0016513237636996425,
+      "mean_seed_variance": 3.1253482280506945e-06,
+      "mean_variance_ratio_vs_baseline": 1.053156839172744,
+      "mean_mse_ratio_vs_baseline": 542.6224598348714
+    },
+    "late_shrink_24_0.85": {
+      "mean_mse": 0.0007332571476857401,
+      "mean_seed_variance": 3.200934645769866e-06,
+      "mean_variance_ratio_vs_baseline": 1.07862739379928,
+      "mean_mse_ratio_vs_baseline": 240.94717578418388
+    }
+  },
+  "elapsed_seconds": 90.37499499303522
+}

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "python",
+    "paired_fly_logs/fingerprint_theory/terminal_mixture_readout_payload_20260710.py",
+    "--shard-index",
+    "{shard_index}",
+    "--bank",
+    "analysis/truth_bank/truth_bank.npz",
+    "--reps",
+    "3",
+    "--blocks",
+    "16",
+    "--output",
+    "result.json"
+  ],
+  "result_json": "result.json",
+  "workdir": "."
+}

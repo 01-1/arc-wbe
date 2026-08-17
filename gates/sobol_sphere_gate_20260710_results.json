@@ -1,0 +1,48 @@
+{
+  "checksums": false,
+  "complete": false,
+  "decomposition_3rep": {
+    "current": {
+      "bias_squared": {},
+      "total": {},
+      "variance": {}
+    },
+    "iid_sphere_recolor": {
+      "bias_squared": {},
+      "total": {},
+      "variance": {}
+    },
+    "sobol_sphere_recolor": {
+      "bias_squared": {},
+      "total": {},
+      "variance": {}
+    }
+  },
+  "gates": {
+    "checksums": false,
+    "complete_100": false,
+    "current_over_sobol_global": false,
+    "current_over_sobol_median": false,
+    "current_over_sobol_min": false,
+    "current_over_sobol_q10": false,
+    "sobol_bias_proxy": false,
+    "sobol_mean_mse": false
+  },
+  "mean_mse_per_mlp_then_reps": {
+    "current": null,
+    "iid_sphere_recolor": null,
+    "sobol_sphere_recolor": null
+  },
+  "mse_stats_per_mlp": {
+    "current": {},
+    "iid_sphere_recolor": {},
+    "sobol_sphere_recolor": {}
+  },
+  "n_mlps": 0,
+  "ratio_stats_per_mlp": {
+    "current_over_sobol": {},
+    "iid_over_sobol": {}
+  },
+  "script_version": "sobol-sphere-aggregate-v1",
+  "verdict": "FAIL"
+}
