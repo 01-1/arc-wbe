@@ -494,20 +494,13 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   shortcut features, or residual overlays against cached public-mini labels is
   not a legitimate estimator improvement. Those experiments were removed and
   should not be revived.
-- **2026-07-07 external sampler writeup scout.** Public-source searches found
-  no new legal target-scale sampler mechanism beyond lanes already weaker than
-  or killed by the local frontier. The main public challenge writeup found was
-  German Alfaro's folded-whitening antithetic Gaussian MC estimator, reporting
-  `3.357e-7` adjusted on the public split; that is legal in principle but
-  weaker than the current Hadamard/recolor/variance-match/Strassen route and
-  overlaps superseded Gaussian, antithetic, QMC, radial, MLMC, and control
-  variate probes. The ascender1729 NumPy/flopscope K=3 port is useful as an
-  implementation reference, but its documented final-layer k4 extrapolation
-  uses leave-one-net-out truth-labeled coefficient fitting and is therefore not
-  a submitted-estimator mechanism here; local final-only and augmented-K3
-  economics already fence off the nearby legal variants. Searches for a public
-  thylinao/writeup/code clue found no estimator source. See
-  `ARC-estimation-research/external_sampler_writeup_scout_20260707.md`.
+- **Per-participant leaderboard analysis (removed 2026-08-17).** An entry here
+  profiled identifiable competitors — per-MLP and per-layer error profiles,
+  inferred mechanisms, own-error separations, identity correlations between
+  entries, and searches of their public repositories. Removed before
+  publication. Pseudonyms would not have helped: the exact scores quoted
+  re-identify each entrant against the public leaderboard. No other entry
+  depends on it.
 - **2026-07-07 terminal mechanism closeout.** A read-only closeout inventoried
   the remaining final-readout space while the spline conditional readout gate
   was active in another worker. No distinct target-scale mechanism remained:
@@ -1580,22 +1573,12 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   pending external information.
 - **Leaderboard forensics plus collapse/filament gates closed.** On
   2026-07-06, owner-fetched public data under
-  `analysis/leaderboard-per-layer-mse/` gave an independent leaderboard
-  per-layer forensics check. Using ionel_chiosa's near-zero-own-error entry as
-  anchor, the extracted per-MLP truth-floor map has mean `F = 3.196e-7`,
-  sd `1.81e-7`, range `0.95e-7`-`8.78e-7`, which is `1.031x` our paired-probe
-  floor. Own-error separation is andrew_epstein `4.7e-8` (rank 1, score
-  `9.38e-8`, mean raw `6.25e10`, per-MLP adaptive
-  `5.4e10`-`9.5e10`), ionel `~0`, keenanpepper `6.0e-7`, thylinao `1.25e-6`,
-  and mliston `1.28e-6`. ionel+mliston are the same code with
-  BIT-IDENTICAL hidden-layer outputs (`max_abs_diff=0.0`), differing only in
-  the final-layer step (`~2.5e10` vs `1.25e11` total, own error `1.28e-6` vs
-  `~0`), a deterministic final-step refinement knob of order
-  `p >= 1.6-3.1`. Profile shapes separate: andrew grows to layer 26 then
-  sharply drops at the final layer; keenan is front-loaded (`1.24e-4` at
-  layer 2 decaying `134x` to final), a contraction signature; thylinao is
-  smooth/low and sampler-like. Nobody sits below the floor, excluding
-  truth-correlated methods.
+  *[A per-entrant leaderboard analysis stood here and was removed on
+  2026-08-17: per-MLP truth-floor maps, own-error separations, identity
+  correlations between entries, and profile-shape inferences, all tied to
+  named competitors. The truth-floor conclusion it supported was in any case
+  retracted on 2026-07-06 (see the CORRECTION entry below). The gate results
+  that follow are independent of it.]*
 
   Deep-collapse structure is confirmed, while two exploit constructions were
   falsified. Input-fluctuation covariance collapses with depth: PR effective
@@ -1614,8 +1597,8 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   dimension only halves it. This is the exponential-nodes curse, same as the
   input-space Gaussian-sum failure. Filament-grid mechanisms are closed.
 
-  Standing conclusion: the top entries' near-exact final-layer machinery
-  (andrew `4.7e-8`, ionel `~0`) remains outside every family this campaign can
+  Standing conclusion: the near-exact final-layer machinery implied by the
+  strongest entries remains outside every family this campaign can
   construct: evaluation-based (spectrum-capped `~0.5e-6` at their FLOPs),
   cumulant, mixture (input-space and collapse-aligned), anchored-CV, and
   telescope. The floor-group own-error band `1.25-1.28e-6` across two
@@ -1643,25 +1626,18 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   Methodological failure, recorded plainly: the original
   `F+B = 3.09e-7 +/- 2.05e-7` was a 1.5-sigma two-point extrapolation that
   was treated as an established constant; the grader A/B "confirmation"
-  carried `+/-~1e-7`; the leaderboard "confirmation" via ionel_chiosa was
-  circular (his own error was assumed zero to define the floor map).
-  Consequently RETRACTED: the per-MLP `F_i` map, the own-error table (andrew
-  `4.7e-8`, ionel `~0`, etc.), the `p>=1.6-3.1` final-step refinement-knob
+  carried `+/-~1e-7`; the leaderboard "confirmation" was circular (a
+  competitor's own error was assumed zero in order to define the floor map).
+  Consequently RETRACTED: the per-MLP `F_i` map, the per-entrant own-error
+  table, the `p>=1.6-3.1` final-step refinement-knob
   inference, and the "not evaluation-based / near-exact analytic entry"
-  conclusions in the forensics entry. Still VALID from that entry: the profile
-  shapes, the bit-identical ionel+mliston hidden outputs (same code, budget
-  knob), the per-MLP adaptive compute signatures, and all raw data under
-  `analysis/leaderboard-per-layer-mse/`.
+  conclusions in the forensics entry.
 
-  Corrected competitor read: at face-value MSE with exact truth, ionel/mliston
-  scale as pure `1/N` sampling (`1.60e-6 -> 0.32e-6` for `5x` compute); the
-  floor group (thylinao/mliston/keenan/ionel) shares a uniform `~1.7x`
-  variance-per-FLOP edge over our route at matched compute; andrew_epstein is
-  `~3x` (`3.67e-7` at `6.25e10` raw vs our scaled `~1.11e-6`). The in-house
-  lane closures (design/BQ optimality, anchored-CV ceiling, telescopes,
-  cumulant and mixture lanes) stand as measurements; the `~1.7x` mechanism
-  remains unidentified. Hidden-layer profile shapes remain the main
-  unexploited discriminating evidence.
+  *[Per-participant analysis removed 2026-08-17. What survives without it: the
+  in-house lane closures (design/BQ optimality, anchored-CV ceiling,
+  telescopes, cumulant and mixture lanes) stand as measurements, and the
+  variance-per-FLOP gap to the strongest entries remains unexplained by any
+  mechanism in the searched families.]*
 
   Methodology directives (owner, 2026-07-06), recorded as standing policy:
   all estimator evaluation runs on Fly against the fixed 100-MLP dataset with
@@ -1672,57 +1648,14 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   verdicts stand, but small-margin and absolute-level conclusions carry
   `~+/-2x` distribution uncertainty).
 
-- **2026-07-06 floor-free leaderboard profile forensics redo.** This
-  supersedes the floor-anchored forensics read above and in
-  `leaderboard_forensics_20260706.md`. Method: top-5 per-layer MSE profiles
-  on the 50 public MLPs from `analysis/leaderboard-per-layer-mse/`, our
-  default per-layer profile from the fixed-100 Fly full-JSON log, and
-  reference shapes from 32 fresh local He MLPs at 8192 inputs each (raw-sample
-  use only). No estimator was run locally, and there is no floor anchoring:
-  every reported MSE is treated as the entry's own error against effectively
-  exact labels.
-
-  | Entry | Classification | Conf. | Final MSE mean / median [q10,q90] | Compute mean, CV | L31/L30 median | n_B/n_A | Edge |
-  |---|---|---|---:|---:|---:|---:|---:|
-  | andrew_epstein | growth-then-terminal-drop, final-layer refinement | medium | `3.67e-07` / `2.87e-07` [`1.67e-07`, `6.99e-07`] | `7.06e10`, CV `0.145` | `0.0214` | `20.3` | `2.67x` |
-  | ionel_chiosa | placeholder hidden payload, final-layer-only effort | high | `3.20e-07` / `2.60e-07` [`1.50e-07`, `5.52e-07`] | `1.29e11`, CV `0.002` | n/a | n/a | `1.69x` |
-  | keenanpepper | decaying/contracting profile plus final-layer drop | medium | `9.23e-07` / `8.02e-07` [`5.04e-07`, `1.60e-06`] | `4.58e10`, CV `0.040` | `0.0403` | `26.8` | `1.64x` |
-  | thylinao | sampler-like hidden profile, no final discontinuity | medium | `1.57e-06` / `1.35e-06` [`7.22e-07`, `2.72e-06`] | `2.72e10`, CV `0.002` | `0.993` | `1.13` | `1.62x` |
-  | mliston | placeholder hidden payload, final-layer-only effort | high | `1.60e-06` / `1.42e-06` [`9.34e-07`, `2.49e-06`] | `2.72e10`, CV `0.001` | n/a | n/a | `1.60x` |
-
-  Structural conclusions: three of five entries (andrew, keenan,
-  ionel/mliston) show a large final-layer-specific mechanism, either
-  `n_B/n_A ~= 20-27x` or final-only placeholder payloads. Only the final layer
-  scores, so this is rational allocation. Keenan's hidden shape correlates
-  `0.982`/`0.988` with plain/antithetic sampler reference shapes; the hidden
-  profile alone is sampler-compatible, and the anomaly is the additional
-  `~25x` final-layer drop. Thylinao has a sampler-shaped profile with no final
-  discontinuity at exactly floor compute, yet a `1.62x` edge versus our route;
-  this is evidence that a shape-preserving variance-reduction route about
-  `1.6x` better than ours exists without any terminal-layer trick.
-  Keenan-thylinao per-MLP final-MSE correlation is `0.419`, consistent with
-  shared per-MLP difficulty and a sampler-family signature, while andrew is
-  near-uncorrelated with everyone, so his final error is not driven by per-MLP
-  activation variance. Ionel (`1.29e11` compute, `3.20e-07`) versus mliston
-  (`2.72e10`, `1.60e-06`), same code, gives MSE ratio `~5.0` at compute ratio
-  `~4.7`; their final-layer mechanism is itself pure variance, just with a
-  `~1.6-1.7x` better constant than ours.
-
-  Follow-up gates, ranked: (1) sampler/antithetic reproduction gate, requiring
-  participant code/writeups, which are expected only at competition end and
-  therefore cannot inform any in-competition work — of post-mortem interest
-  only, not an actionable lever, and it should not be carried in status
-  ledgers as a pending item (owner correction 2026-07-07); (2) keenan
-  state-propagation contraction
-  toy gate, executable offline; (3) andrew terminal-refinement gate, needing
-  external telemetry. None have been run, and no estimator change was made.
-  Artifacts are under `paired_fly_logs/fingerprint_theory/`, including
-  `profile_forensics_v2_20260706.md`,
-  `profile_forensics_v2_20260706_results.json`, and
-  `profile_forensics_v2_20260706.py`; those files are gitignored, so this
-  history entry is the durable record.
-
-- **2026-07-06 Fly truth bank built; readout-smoothing gate DEAD; keenan
+- **Per-participant leaderboard analysis (removed 2026-08-17).** An entry here
+  profiled identifiable competitors — per-MLP and per-layer error profiles,
+  inferred mechanisms, own-error separations, identity correlations between
+  entries, and searches of their public repositories. Removed before
+  publication. Pseudonyms would not have helped: the exact scores quoted
+  re-identify each entrant against the public leaderboard. No other entry
+  depends on it.
+- **2026-07-06 Fly truth bank built; readout-smoothing gate DEAD;
   contraction gate INCONCLUSIVE.** Infrastructure (commits `152b0ec`,
   `ff9208d`, owner-run): `make fly-truth` + `make truth-bank` built
   `analysis/truth_bank/` — 100 fresh research seeds (not grader instances),
@@ -1753,15 +1686,15 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   Keenan state-propagation contraction gate: **INCONCLUSIVE** on the full
   100 (checksums 100/100; four Fly 503s retried on a subset bank). Q1 PASS
   and notable: mean-relevant injected error contracts at median
-  `0.943`/layer, numerically matching keenan's measured hidden-profile decay
+  `0.943`/layer, numerically matching a reference hidden-profile decay
   (`e^-0.0609 ~= 0.941`) — the contraction physics is real and at the right
-  scale. Q2/Q3 degenerate: the only toy inside keenan's slope band
+  scale. Q2/Q3 degenerate: the only toy inside that slope band
   (plain particles n=512, slope median `-0.0767` [`-0.1059`, `-0.0379`]) is
   indistinguishable from the plain-sampler shape (corr `0.995`, residual log
   RMS `0.119`), while the shape-distinct rank-2 reprojection toy misses the
   band (slope `-0.0006`). Conclusion: the depth-profile shape cannot
-  discriminate state propagation from plain sampling, so keenan's hidden
-  profile identifies no mechanism; the discriminating anomaly remains his
+  discriminate state propagation from plain sampling, so the hidden
+  profile identifies no mechanism; the discriminating anomaly remains the
   terminal `~25x` drop, which no propagated-state toy reproduced and which
   still requires an explicit final-layer allocation/refinement/readout
   switch. No estimator change from either gate. Artifacts (gitignored;
@@ -2297,23 +2230,13 @@ for the current Fly/scorer path by wall-clock economics; do not promote.
   primitive or a separate target-scale variance mechanism changes the value of
   spending residual headroom.
 
-- **2026-07-07 external telemetry refresh found no new mechanism.** A
-  documentation-only public-source refresh checked GitHub repositories, code,
-  issues, official WhestBench/starterkit/explorer surfaces, cached AIcrowd
-  challenge text, and the previously identified contestant/cumulant repos for
-  new writeups, notebooks, estimator code, discussions, or all-layer profile
-  disclosures. The only substantive public estimator artifact remains
-  folded-whitening antithetic Monte Carlo at a reported `3.357e-7` adjusted
-  score, which is legal but already superseded by the current Hadamard
-  recolor/variance-match route and does not explain the floor-group edge. The
-  cumulant port remains a useful reference but overlaps killed or guarded
-  K3/K4, Edgeworth, H2/control-variate, and final-readout lanes. No public
-  `thylinao` estimator/writeup or new sampler, allocation, readout, MLMC, or
-  moment mechanism was found. Report:
-  `ARC-estimation-research/external_telemetry_refresh_20260707.md`. No
-  estimator change and no final `make fly`; no action toward the `1.6e-7`
-  target follows.
-
+- **Per-participant leaderboard analysis (removed 2026-08-17).** An entry here
+  profiled identifiable competitors — per-MLP and per-layer error profiles,
+  inferred mechanisms, own-error separations, identity correlations between
+  entries, and searches of their public repositories. Removed before
+  publication. Pseudonyms would not have helped: the exact scores quoted
+  re-identify each entrant against the public leaderboard. No other entry
+  depends on it.
 - **2026-07-07 remaining-lane audit: no autonomous target-scale lane left.**
   A final independent read-only audit covered the surviving sampler, terminal,
   mechanistic `L^2`, Keenan contraction, large-kernel L4, paired-block/CRN,
@@ -3002,23 +2925,13 @@ a mode-gated diagnostic only.
   competition, and it was never load-bearing for any conclusion in this file.
   Reported privately if it matters.
 
-- **Per-layer profiles: 4 of the top 5 collapse discontinuously at layer 31.**
-  Using `analysis/leaderboard-per-layer-mse/` (snapshot 2026-07-06) against the
-  `b64` per-layer profile averaged over 97 shards: at layer 30 versus layer 31,
-  `andrew_epstein` drops `1.475e-5 -> 3.670e-7` (`40x`), `keenanpepper`
-  `2.488e-5 -> 9.227e-7` (`27x`), and `ionel_chiosa`/`mliston`
-  `6.875e-1 -> ~3.2e-7` (`~2e6 x`). The latter pair is consistent with
-  reporting approximately zeros for unscored layers, since
-  `mean_j mu_j^2 ~= 0.935`; their `all_layers_mse` agree to seven digits
-  (`0.7536797100` / `0.7536797493`), consistent with the retained bit-identical
-  finding. Our profile and `thylinao`'s decay smoothly with depth. Only
-  `final_layer_mse` is scored. The load-bearing observation: `andrew_epstein`
-  reaches layer 31 with a layer-30 description `20x` worse than ours
-  (`1.475e-5` versus `7.23e-7`) and still reads out a better final answer, so
-  the missing factor is plausibly a **terminal readout**, not propagation.
-  Caveat: a reported hidden mean need not reflect the internal state, as the
-  `ionel`/`mliston` zeros demonstrate.
-
+- **Per-participant leaderboard analysis (removed 2026-08-17).** An entry here
+  profiled identifiable competitors — per-MLP and per-layer error profiles,
+  inferred mechanisms, own-error separations, identity correlations between
+  entries, and searches of their public repositories. Removed before
+  publication. Pseudonyms would not have helped: the exact scores quoted
+  re-identify each entrant against the public leaderboard. No other entry
+  depends on it.
 - **Public-50 identity: UNRESOLVED.** Whether the 50 public leaderboard MLPs
   overlap the published `aicrowd/arc-whestbench-public-2026` splits could not
   be determined. The published splits are `mini` (100) and `full` (1000);
@@ -3026,11 +2939,11 @@ a mode-gated diagnostic only.
   are baked by "the same process as the public release", implying a separate
   instance. A per-MLP difficulty-fingerprint test was attempted and is
   **underpowered**: among entrants known to share the same 50 MLPs, log-MSE
-  correlations are mostly null (`andrew` vs `ionel` `-0.072`, `keenan` vs
-  `mliston` `-0.045`; only `keenan` vs `thylinao` reaches `+0.608`), because
+  correlations between entrants are mostly null (three of the four pairs
+  examined fall between `-0.07` and `+0.05`; one reaches `+0.61`), because
   per-MLP error is dominated by each method's own variance realization. Our
-  `b16` rows correlate `+0.411` with `keenanpepper` and near-null with the
-  rest against a shuffle null of `|r| < 0.288`. Settling this needs the HF
+  `b16` rows reach `+0.411` against one entrant and are near-null against the
+  rest, versus a shuffle null of `|r| < 0.288`. Settling this needs the HF
   dataset plus a construction the fingerprint test cannot supply.
 
 - **Standing target.** The route is variance-limited with no bias floor, at
