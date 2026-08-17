@@ -2994,15 +2994,13 @@ a mode-gated diagnostic only.
   reduction versus rank 4's `51x`, and matching a `4.19e15`-FLOP label
   computation to within `5x` using `2.72e10` FLOPs.
 
-- **Submission-count extraction threshold.** Final-layer MSE is reported per
-  MLP over `256` outputs, so each submission yields one quadratic equation in
-  `256` unknowns per MLP, for all 50 public MLPs at once; perturbing output `j`
-  by `delta` shifts MSE by `(2*delta*(pred_j - truth_j) + delta^2)/256`. Full
-  extraction of the public answer key therefore needs `256` probes plus one
-  baseline = **`257` submissions**. Rank 1 has `259` entries; rank 3 has `169`;
-  rank 2 has `50`, five-fold below threshold, so whatever produces its `467x`
-  is not this. Across all 100, `corr(log entries, log adjusted) = -0.302`.
-  Circumstantial; recorded because the threshold is exact and checkable.
+- **Leaderboard feedback is an information channel (detail withheld).** Public
+  per-instance scoring feedback is, in principle, invertible with enough
+  submissions. The derivation and the per-entrant submission counts were
+  recorded here on 2026-08-10 and removed on 2026-08-17: publishing a working
+  method for recovering evaluation labels is not defensible during an active
+  competition, and it was never load-bearing for any conclusion in this file.
+  Reported privately if it matters.
 
 - **Per-layer profiles: 4 of the top 5 collapse discontinuously at layer 31.**
   Using `analysis/leaderboard-per-layer-mse/` (snapshot 2026-07-06) against the

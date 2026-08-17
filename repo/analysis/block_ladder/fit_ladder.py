@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Four-point block-scaling fit for a recolored-Hadamard estimator.
 
-Reproduces the measurement that error scales as pure 1/n with no bias floor:
+Fits
 
     MSE(B) = F + c * B^-alpha
 
-fitted across 8/16/32/64 antithetic Hadamard blocks (4,096 to 32,768 samples)
-on 97 MLPs paired across all four runs.
+across 8/16/32/64 antithetic Hadamard blocks (4,096 to 32,768 samples) on 97
+MLPs paired across all four runs.
+
+Error scales approximately as 1/n with a small fitted floor consistent with
+zero: F comes out 6.7e-8 (alpha fixed to 1), 1.32e-7 (quadratic) or 1.47e-7
+(free alpha), all with bootstrap intervals spanning zero. "Consistent with
+zero" is the claim the data supports; "no bias floor" is not.
 
 Usage:  python fit_ladder.py [ladder_per_mlp_mse.csv]
 """
