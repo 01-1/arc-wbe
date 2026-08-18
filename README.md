@@ -23,7 +23,6 @@ together.
 | A bias/variance bug you may share | [`GATE_REAUDIT.md`](GATE_REAUDIT.md), "Mis-attributions and quantity-label errors" |
 | To reproduce the sampling-error exponent | [`analysis/block_ladder/`](analysis/block_ladder/) — `python fit_ladder.py` |
 | Raw evidence for a single gate | [`gates/`](gates/) |
-| The commit history | branch [`full-history/main`](../../tree/full-history/main) |
 
 ## Layout
 
